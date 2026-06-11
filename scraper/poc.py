@@ -14,6 +14,8 @@ import sys
 import subprocess
 import csv
 import json
+import unicodedata
+from collections import defaultdict
 from pathlib import Path
 from datetime import datetime
 import requests
@@ -233,6 +235,66 @@ def _row(boletin_id, fecha_raw, ctx, actora, demandada, tipo_juicio, num_acdos, 
     }
 
 
+# ── Search index ─────────────────────────────────────────────────────────────
+
+STOPWORDS = {"de", "del", "la", "el", "los", "las", "y", "en", "a", "con",
+             "por", "para", "vs", "s", "a", "sa", "c", "v", "de"}
+
+def normalize(text):
+    """Minúsculas, sin acentos, sin puntuación."""
+    text = text.lower()
+    text = unicodedata.normalize("NFD", text)
+    text = "".join(c for c in text if unicodedata.category(c) != "Mn")
+    text = re.sub(r"[^a-z0-9\s]", " ", text)
+    return text
+
+def tokenize(text):
+    if not text:
+        return []
+    tokens = normalize(text).split()
+    return [t for t in tokens if len(t) > 2 and t not in STOPWORDS]
+
+def build_search_index(entries):
+    """
+    Devuelve un dict con:
+    - 'entries': mapa id → entrada sin raw_text (para recuperar resultado)
+    - 'terms':   mapa término → lista de ids (índice invertido)
+    - 'expedientes': mapa expediente → lista de ids
+    """
+    entries_map = {}
+    inverted = defaultdict(list)
+    expedientes = defaultdict(list)
+
+    for i, e in enumerate(entries):
+        entry_id = str(i)
+
+        # Entrada sin raw_text para mantener el índice liviano
+        entries_map[entry_id] = {k: v for k, v in e.items() if k != "raw_text"}
+
+        # Indexar por términos de nombre
+        for field in ("actora", "demandada"):
+            for token in tokenize(e.get(field) or ""):
+                if entry_id not in inverted[token]:
+                    inverted[token].append(entry_id)
+
+        # Indexar por tipo_juicio (término completo normalizado)
+        tipo = normalize(e.get("tipo_juicio") or "")
+        if tipo:
+            if entry_id not in inverted[tipo]:
+                inverted[tipo].append(entry_id)
+
+        # Indexar por expediente
+        exp = e.get("expediente", "").strip()
+        if exp:
+            expedientes[exp].append(entry_id)
+
+    return {
+        "entries": entries_map,
+        "terms": dict(inverted),
+        "expedientes": dict(expedientes),
+    }
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -282,6 +344,10 @@ def main():
         log("  Extrayendo texto con pdftotext...")
         text = pdf_to_text(pdf_path)
 
+        txt_path = pdf_dir / f"boletin_{b['id']}.txt"
+        txt_path.write_text(text, encoding="utf-8")
+        log(f"  Texto guardado en {txt_path}")
+
         log("  Parseando entradas...")
         entries = parse_pdf(text, b["id"], b["fecha_raw"])
         log(f"  {len(entries)} entradas encontradas")
@@ -291,6 +357,13 @@ def main():
 
     if all_entries:
         fields = list(all_entries[0].keys())
+
+        # Índice de búsqueda
+        search_index = build_search_index(all_entries)
+        index_search_path = out_dir / "search_index.json"
+        with open(index_search_path, "w") as f:
+            json.dump(search_index, f, ensure_ascii=False)
+        log(f"Índice de búsqueda guardado en {index_search_path} ({len(search_index['terms'])} términos)")
 
         # CSV completo
         csv_path = out_dir / "entradas.csv"
