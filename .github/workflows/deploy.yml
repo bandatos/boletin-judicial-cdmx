@@ -25,7 +25,7 @@ concurrency:
 
 jobs:
   scrape-and-deploy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
@@ -40,7 +40,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y --fix-missing poppler-utils
+        run: sudo apt-get update && sudo apt-get install -y poppler-utils
 
       - name: Install Python dependencies
         run: pip install requests beautifulsoup4
