@@ -4,8 +4,8 @@
 
 const DB_URL = './boletin.sqlite.gz';
 const DB_CACHE_KEY = 'boletin-sqlite-v1';
-const SQLS_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/sql-wasm.js';
-const SQLS_WASM = 'https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/sql-wasm.wasm';
+const SQLS_CDN = 'https://cdn.jsdelivr.net/npm/sql.js@1.10.2/dist/sql-wasm.js';
+const SQLS_WASM = 'https://cdn.jsdelivr.net/npm/sql.js@1.10.2/dist/sql-wasm.wasm';
 const MAX_RESULTS = 100;
 
 let db = null;
