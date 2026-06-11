@@ -283,10 +283,12 @@ def build_search_index(entries):
             if entry_id not in inverted[tipo]:
                 inverted[tipo].append(entry_id)
 
-        # Indexar por expediente
-        exp = e.get("expediente", "").strip()
-        if exp:
-            expedientes[exp].append(entry_id)
+        # Indexar por (juzgado, expediente) como clave compuesta
+        exp = (e.get("expediente") or "").strip()
+        juz = (e.get("juzgado") or "").strip()
+        if exp and juz:
+            key = f"{juz}|{exp}"
+            expedientes[key].append(entry_id)
 
     return {
         "entries": entries_map,
