@@ -172,8 +172,9 @@ Las dos fuentes no comparten una clave directa. La correlación es estadística:
 - DB publicada en GitHub Releases, descargada y cacheada en el browser (IndexedDB)
 - Búsquedas 100% en cliente con SQLite WASM
 - Clave de expediente: `(juzgado, expediente)` — el número solo no es único en el corpus
+- Alcance del histórico: desde 2017 hasta la fecha
+- Demo: solo boletines de enero 2026 en adelante
 
 ## Decisiones pendientes
 
-- [ ] Alcance del histórico (¿desde 2017 o desde 2020?)
 - [ ] Estrategia de actualización (frecuencia, quién corre el pipeline, cómo se publica el nuevo release)
