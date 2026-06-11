@@ -208,13 +208,26 @@ def _parse_entry(text, boletin_id, fecha_raw, ctx):
 
     resto = partes[1].strip()
 
-    m_tipo = RE_TIPO_ACDOS.search(resto)
+    # Entries with amparo sub-notices use // as separator; tipo_juicio is
+    # always in the last segment and demandada is before the first //.
+    if '//' in resto:
+        segments = resto.split('//')
+        demandada_raw = segments[0].strip().rstrip('.')
+        last_seg = segments[-1].strip()
+    else:
+        demandada_raw = None
+        last_seg = resto
+
+    m_tipo = RE_TIPO_ACDOS.search(last_seg)
     if m_tipo:
-        demandada = resto[: m_tipo.start() + 1].strip()
+        if demandada_raw is None:
+            demandada = last_seg[: m_tipo.start() + 1].strip()
+        else:
+            demandada = demandada_raw
         tipo_juicio = m_tipo.group(1).strip()
         num_acdos = int(m_tipo.group(2))
     else:
-        demandada = resto
+        demandada = demandada_raw if demandada_raw is not None else resto
         tipo_juicio = None
         num_acdos = None
 
