@@ -16,7 +16,6 @@ on:
     - cron: '0 15 * * 1-5'
 
 permissions:
-  contents: write
   pages: write
   id-token: write
 
@@ -87,7 +86,7 @@ jobs:
 
       - name: Upload DB to GitHub Releases
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
           gh release create data \
             --title "Datos — ${{ steps.dates.outputs.fin }}" \
