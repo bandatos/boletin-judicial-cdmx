@@ -13,7 +13,9 @@ import re
 import sys
 import subprocess
 import csv
+import json
 from pathlib import Path
+from datetime import datetime
 import requests
 from bs4 import BeautifulSoup
 import urllib3
@@ -240,10 +242,25 @@ def main():
 
     log = lambda msg: print(msg, file=sys.stderr)
 
+    # Directorio de salida: data/YYYY-MM-DD/
+    run_date = datetime.now().strftime("%Y-%m-%d")
+    out_dir = Path("data") / run_date
+    out_dir.mkdir(parents=True, exist_ok=True)
+    pdf_dir = out_dir / "pdfs"
+    pdf_dir.mkdir(exist_ok=True)
+
+    log(f"Directorio de salida: {out_dir}")
     log(f"Obteniendo índice {fecha_inicio} → {fecha_fin}...")
+
     session, token = get_session()
     boletines = fetch_index(session, token, fecha_inicio, fecha_fin)
     log(f"  {len(boletines)} boletín(es) encontrado(s)")
+
+    # Guardar índice en JSON
+    index_path = out_dir / "index.json"
+    with open(index_path, "w") as f:
+        json.dump(boletines, f, ensure_ascii=False, indent=2)
+    log(f"  Índice guardado en {index_path}")
 
     all_entries = []
 
@@ -254,7 +271,7 @@ def main():
             log("  Sin URL de PDF, saltando.")
             continue
 
-        pdf_path = Path(f"/tmp/boletin_{b['id']}.pdf")
+        pdf_path = pdf_dir / f"boletin_{b['id']}.pdf"
         if not pdf_path.exists():
             log("  Descargando PDF...")
             download_pdf(b["pdf_url"], pdf_path)
@@ -274,9 +291,42 @@ def main():
 
     if all_entries:
         fields = list(all_entries[0].keys())
-        writer = csv.DictWriter(sys.stdout, fieldnames=fields, extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(all_entries)
+
+        # CSV completo
+        csv_path = out_dir / "entradas.csv"
+        with open(csv_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows(all_entries)
+        log(f"CSV guardado en {csv_path}")
+
+        # Resumen de cobertura
+        total = len(all_entries)
+        completas = sum(1 for r in all_entries if r["actora"] and r["demandada"] and r["tipo_juicio"])
+        sin_vs = sum(1 for r in all_entries if not r["demandada"])
+        sin_tipo = sum(1 for r in all_entries if not r["tipo_juicio"])
+
+        summary = {
+            "fecha_inicio": fecha_inicio,
+            "fecha_fin": fecha_fin,
+            "boletines_procesados": len([b for b in boletines[:max_boletines] if b["pdf_url"]]),
+            "entradas_totales": total,
+            "entradas_completas": completas,
+            "pct_completas": round(completas / total * 100, 1) if total else 0,
+            "sin_demandada": sin_vs,
+            "sin_tipo_juicio": sin_tipo,
+        }
+        summary_path = out_dir / "resumen.json"
+        with open(summary_path, "w") as f:
+            json.dump(summary, f, ensure_ascii=False, indent=2)
+        log(f"Resumen guardado en {summary_path}")
+
+        # También imprime el resumen en pantalla
+        log(f"\n{'─'*40}")
+        log(f"Entradas totales   : {total}")
+        log(f"Completas          : {completas} ({summary['pct_completas']}%)")
+        log(f"Sin demandada      : {sin_vs} ({sin_vs/total*100:.1f}%) — casos unilaterales")
+        log(f"Sin tipo_juicio    : {sin_tipo} ({sin_tipo/total*100:.1f}%)")
 
 
 if __name__ == "__main__":
