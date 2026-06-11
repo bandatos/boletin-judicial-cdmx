@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Boletín Judicial CDMX</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --fg: #1a1a1a;
+      --fg-muted: #666;
+      --border: #ddd;
+      --bg: #fff;
+      --bg-card: #f9f9f9;
+      --accent: #1a5276;
+      --accent-hover: #154360;
+      --radius: 6px;
+      --max: 860px;
+    }
+
+    body {
+      font-family: system-ui, sans-serif;
+      font-size: 16px;
+      line-height: 1.5;
+      color: var(--fg);
+      background: var(--bg);
+    }
+
+    header {
+      background: var(--accent);
+      color: #fff;
+      padding: 2rem 1.5rem 1.5rem;
+    }
+
+    header h1 { font-size: 1.4rem; font-weight: 700; margin-bottom: .25rem; }
+    header p  { font-size: .9rem; opacity: .85; }
+
+    .container { max-width: var(--max); margin: 0 auto; padding: 0 1.5rem; }
+
+    #search-box {
+      background: #fff;
+      border-bottom: 1px solid var(--border);
+      padding: 1.25rem 1.5rem;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    .search-row {
+      max-width: var(--max);
+      margin: 0 auto;
+      display: flex;
+      gap: .75rem;
+      flex-wrap: wrap;
+    }
+
+    #q {
+      flex: 1;
+      min-width: 200px;
+      padding: .6rem .9rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 1rem;
+    }
+
+    #tipo {
+      padding: .6rem .9rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: .9rem;
+      background: #fff;
+      max-width: 240px;
+    }
+
+    #search-btn {
+      padding: .6rem 1.4rem;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 1rem;
+      cursor: pointer;
+    }
+    #search-btn:hover { background: var(--accent-hover); }
+    #search-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+    #status {
+      max-width: var(--max);
+      margin: 1.5rem auto;
+      padding: 0 1.5rem;
+      color: var(--fg-muted);
+      font-size: .9rem;
+    }
+
+    #progress-bar-wrap {
+      height: 4px;
+      background: var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+      margin-top: .5rem;
+    }
+
+    #progress-bar {
+      height: 100%;
+      background: var(--accent);
+      width: 0%;
+      transition: width .3s;
+    }
+
+    #results {
+      max-width: var(--max);
+      margin: 0 auto 3rem;
+      padding: 0 1.5rem;
+    }
+
+    #result-count {
+      font-size: .85rem;
+      color: var(--fg-muted);
+      margin-bottom: 1rem;
+    }
+
+    .card {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem 1.25rem;
+      margin-bottom: .75rem;
+      background: var(--bg-card);
+    }
+
+    .card-partes {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: .35rem;
+      line-height: 1.4;
+    }
+
+    .card-vs {
+      font-weight: 400;
+      color: var(--fg-muted);
+      font-size: .85rem;
+    }
+
+    .card-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: .5rem .75rem;
+      font-size: .82rem;
+      color: var(--fg-muted);
+      margin-top: .4rem;
+    }
+
+    .tag {
+      background: #e8f0fe;
+      color: #1a5276;
+      padding: .15rem .55rem;
+      border-radius: 999px;
+      font-size: .78rem;
+      white-space: nowrap;
+    }
+
+    .card-pdf {
+      margin-top: .5rem;
+      font-size: .82rem;
+    }
+
+    .card-pdf a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+    .card-pdf a:hover { text-decoration: underline; }
+
+    @media (max-width: 600px) {
+      #tipo { max-width: 100%; width: 100%; }
+      #search-btn { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Boletín Judicial CDMX</h1>
+  <p>Busca en el historial del Boletín Judicial del Poder Judicial de la Ciudad de México.</p>
+</header>
+
+<div id="search-box">
+  <div class="search-row">
+    <input id="q" type="search" placeholder="Nombre de persona o empresa..." autocomplete="off" disabled>
+    <select id="tipo" disabled>
+      <option value="">Todos los tipos de juicio</option>
+    </select>
+    <button id="search-btn" disabled>Buscar</button>
+  </div>
+</div>
+
+<div id="status">
+  <span id="status-text">Cargando base de datos...</span>
+  <div id="progress-bar-wrap"><div id="progress-bar"></div></div>
+</div>
+
+<div id="results">
+  <div id="result-count"></div>
+  <div id="result-list"></div>
+</div>
+
+<script src="search.js"></script>
+</body>
+</html>

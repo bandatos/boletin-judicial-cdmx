@@ -1,0 +1,110 @@
+name: Scrape, build DB and deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      fecha_inicio:
+        description: 'Fecha inicial (YYYY-MM-DD)'
+        required: false
+        default: '2026-01-01'
+      fecha_fin:
+        description: 'Fecha final (YYYY-MM-DD, default: hoy)'
+        required: false
+        default: ''
+  schedule:
+    # Lunes a viernes a las 15:00 UTC (9am CDMX)
+    - cron: '0 15 * * 1-5'
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  scrape-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install system dependencies
+        run: sudo apt-get install -y poppler-utils
+
+      - name: Install Python dependencies
+        run: pip install requests beautifulsoup4
+
+      - name: Set fecha_fin
+        id: dates
+        run: |
+          INICIO="${{ github.event.inputs.fecha_inicio || '2026-01-01' }}"
+          FIN="${{ github.event.inputs.fecha_fin }}"
+          if [ -z "$FIN" ]; then
+            FIN=$(date -u +%Y-%m-%d)
+          fi
+          echo "inicio=$INICIO" >> $GITHUB_OUTPUT
+          echo "fin=$FIN" >> $GITHUB_OUTPUT
+          echo "Rango: $INICIO → $FIN"
+
+      - name: Restore PDF cache
+        uses: actions/cache@v4
+        with:
+          path: scraper/data
+          key: pdfs-${{ steps.dates.outputs.fin }}
+          restore-keys: |
+            pdfs-
+
+      - name: Run scraper
+        working-directory: scraper
+        run: |
+          python poc.py \
+            ${{ steps.dates.outputs.inicio }} \
+            ${{ steps.dates.outputs.fin }} \
+            9999
+
+      - name: Build SQLite DB
+        working-directory: scraper
+        run: |
+          python build_db.py \
+            --dir data/ \
+            --output ../boletin.sqlite \
+            --since ${{ steps.dates.outputs.inicio }}
+
+      - name: Compress DB
+        run: gzip -k boletin.sqlite
+
+      - name: Upload DB to GitHub Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create data \
+            --title "Datos — ${{ steps.dates.outputs.fin }}" \
+            --notes "Base de datos actualizada al ${{ steps.dates.outputs.fin }}." \
+            2>/dev/null || true
+          gh release upload data boletin.sqlite.gz --clobber
+
+      - name: Prepare Pages artifact
+        run: |
+          cp boletin.sqlite.gz web/
+          cp -r web pages-artifact
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: pages-artifact/
+
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
