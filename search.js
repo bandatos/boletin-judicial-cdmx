@@ -19,6 +19,26 @@ let db = null;
 
 const $ = id => document.getElementById(id);
 
+// ── Onboarding ────────────────────────────────────────────────────────────────
+// Se abre de una, antes de tocar la DB (descarga/descompresión/carga en
+// sql.js), para que la persona vea qué es esto sin tener que esperar.
+
+const ABOUT_SEEN_KEY = 'boletin-about-seen';
+
+function openAbout() { $('about-overlay').classList.add('open'); }
+function closeAbout() {
+  $('about-overlay').classList.remove('open');
+  localStorage.setItem(ABOUT_SEEN_KEY, '1');
+}
+
+if (!localStorage.getItem(ABOUT_SEEN_KEY)) openAbout();
+
+$('about-btn').addEventListener('click', openAbout);
+$('about-close-btn').addEventListener('click', closeAbout);
+$('about-overlay').addEventListener('click', e => {
+  if (e.target.id === 'about-overlay') closeAbout();
+});
+
 function setStatus(msg, progress = null) {
   $('status-text').textContent = msg;
   if (progress !== null) {
@@ -153,6 +173,15 @@ async function setCached(idb, data) {
 
 // ── DB loading ────────────────────────────────────────────────────────────────
 
+async function fetchMeta(url) {
+  const res = await fetch(url, { method: 'HEAD', cache: 'no-cache' });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  // ETag/Last-Modified cambian cuando el archivo cambia; con esto detectamos
+  // que hay una base nueva y no seguimos usando la vieja cacheada para
+  // siempre (le pasó justo eso: quedó pegada a una base sin la columna anio).
+  return res.headers.get('etag') || res.headers.get('last-modified') || '';
+}
+
 async function fetchWithProgress(url, onProgress) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -197,17 +226,21 @@ async function loadSqlJs() {
 async function loadDb() {
   const idb = await openCache();
 
-  // Intentar caché local
-  let bytes = await getCached(idb);
+  const cached = await getCached(idb);
 
-  if (!bytes) {
+  let meta = null;
+  try { meta = await fetchMeta(DB_URL); } catch (e) { /* sin red: seguimos con lo cacheado si hay */ }
+
+  let bytes;
+  if (cached && (meta === null || cached.meta === meta)) {
+    bytes = cached.bytes;
+    setStatus('Cargando desde caché local...', 90);
+  } else {
     setStatus('Descargando base de datos...', 0);
     const compressed = await fetchWithProgress(DB_URL, pct => setStatus(`Descargando... ${pct}%`, pct));
     setStatus('Descomprimiendo...', 99);
     bytes = await decompress(compressed);
-    await setCached(idb, bytes);
-  } else {
-    setStatus('Cargando desde caché local...', 90);
+    await setCached(idb, { bytes, meta });
   }
 
   setStatus('Abriendo base de datos...', 99);
@@ -391,24 +424,6 @@ function search() {
     $('result-list').innerHTML = '';
   }
 }
-
-// ── Onboarding ────────────────────────────────────────────────────────────────
-
-const ABOUT_SEEN_KEY = 'boletin-about-seen';
-
-function openAbout() { $('about-overlay').classList.add('open'); }
-function closeAbout() {
-  $('about-overlay').classList.remove('open');
-  localStorage.setItem(ABOUT_SEEN_KEY, '1');
-}
-
-if (!localStorage.getItem(ABOUT_SEEN_KEY)) openAbout();
-
-$('about-btn').addEventListener('click', openAbout);
-$('about-close-btn').addEventListener('click', closeAbout);
-$('about-overlay').addEventListener('click', e => {
-  if (e.target.id === 'about-overlay') closeAbout();
-});
 
 // ── Eventos ───────────────────────────────────────────────────────────────────
 
