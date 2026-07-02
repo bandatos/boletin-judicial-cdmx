@@ -36,6 +36,83 @@
     header h1 { font-size: 1.4rem; font-weight: 700; margin-bottom: .25rem; }
     header p  { font-size: .9rem; opacity: .85; }
 
+    #about-btn {
+      background: none;
+      border: 1px solid rgba(255,255,255,.6);
+      color: #fff;
+      border-radius: 999px;
+      padding: .1rem .7rem;
+      font-size: .78rem;
+      cursor: pointer;
+      margin-left: .5rem;
+      opacity: 1;
+    }
+    #about-btn:hover { background: rgba(255,255,255,.15); }
+
+    #about-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.5);
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+      z-index: 100;
+    }
+    #about-overlay.open { display: flex; }
+
+    #about-modal {
+      background: #fff;
+      border-radius: var(--radius);
+      max-width: 480px;
+      padding: 1.75rem;
+      box-shadow: 0 10px 40px rgba(0,0,0,.2);
+    }
+
+    #about-modal h2 {
+      font-size: 1.2rem;
+      margin-bottom: .9rem;
+      color: var(--accent);
+    }
+
+    #about-modal p {
+      font-size: .92rem;
+      line-height: 1.55;
+      margin-bottom: .9rem;
+      color: var(--fg);
+    }
+
+    .about-actions {
+      display: flex;
+      gap: .6rem;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+    }
+
+    #about-close-btn {
+      padding: .55rem 1.3rem;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius);
+      font-size: .92rem;
+      cursor: pointer;
+    }
+    #about-close-btn:hover { background: var(--accent-hover); }
+
+    #about-bandatos-link {
+      padding: .55rem 1.3rem;
+      background: none;
+      color: var(--accent);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: .92rem;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-block;
+    }
+    #about-bandatos-link:hover { background: var(--bg-card); }
+
     .container { max-width: var(--max); margin: 0 auto; padding: 0 1.5rem; }
 
     #search-box {
@@ -73,6 +150,15 @@
       max-width: 240px;
     }
 
+    #anio {
+      padding: .6rem .9rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: .9rem;
+      background: #fff;
+      max-width: 140px;
+    }
+
     #search-btn {
       padding: .6rem 1.4rem;
       background: var(--accent);
@@ -106,6 +192,79 @@
       background: var(--accent);
       width: 0%;
       transition: width .3s;
+    }
+
+    #chart-box {
+      max-width: var(--max);
+      margin: 1.5rem auto;
+      padding: 0 1.5rem;
+    }
+
+    #chart-title {
+      font-size: .85rem;
+      font-weight: 600;
+      color: var(--fg-muted);
+      text-transform: uppercase;
+      letter-spacing: .03em;
+      margin-bottom: .75rem;
+    }
+
+    #chart {
+      display: flex;
+      align-items: flex-end;
+      gap: .35rem;
+      height: 160px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 2px;
+    }
+
+    .chart-col {
+      flex: 1;
+      display: flex;
+      flex-direction: column-reverse;
+      min-width: 6px;
+      cursor: default;
+    }
+
+    .chart-col-segment {
+      width: 100%;
+    }
+    .chart-col-segment:last-child { border-radius: 2px 2px 0 0; }
+
+    .chart-labels {
+      display: flex;
+      gap: .35rem;
+      margin-top: .3rem;
+    }
+
+    .chart-col-label {
+      flex: 1;
+      min-width: 6px;
+      text-align: center;
+      font-size: .65rem;
+      color: var(--fg-muted);
+    }
+
+    #chart-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: .4rem 1rem;
+      margin-top: .6rem;
+      font-size: .78rem;
+      color: var(--fg-muted);
+    }
+
+    .chart-legend-item {
+      display: flex;
+      align-items: center;
+      gap: .35rem;
+    }
+
+    .chart-legend-swatch {
+      width: .7rem;
+      height: .7rem;
+      border-radius: 2px;
+      flex-shrink: 0;
     }
 
     #results {
@@ -170,6 +329,30 @@
     }
     .card-pdf a:hover { text-decoration: underline; }
 
+    .card-avisos {
+      margin-top: .5rem;
+      font-size: .82rem;
+    }
+
+    .card-avisos summary {
+      cursor: pointer;
+      color: var(--accent);
+    }
+
+    .card-avisos ul {
+      list-style: none;
+      margin-top: .4rem;
+      padding-left: .75rem;
+      border-left: 2px solid var(--border);
+    }
+
+    .card-avisos li {
+      color: var(--fg-muted);
+      margin-bottom: .3rem;
+    }
+
+    .card-avisos a { color: var(--accent); }
+
     @media (max-width: 600px) {
       #tipo { max-width: 100%; width: 100%; }
       #search-btn { width: 100%; }
@@ -179,8 +362,10 @@
 <body>
 
 <header>
-  <h1>Boletín Judicial CDMX</h1>
-  <p>Busca en el historial del Boletín Judicial del Poder Judicial de la Ciudad de México.</p>
+  <h1>Buscador del Boletín Judicial CDMX</h1>
+  <p>Busca en el historial del Boletín Judicial del Poder Judicial de la Ciudad de México.
+    <button id="about-btn" type="button">¿Qué es esto?</button>
+  </p>
 </header>
 
 <div id="search-box">
@@ -188,6 +373,9 @@
     <input id="q" type="search" placeholder="Nombre de persona o empresa..." autocomplete="off" disabled>
     <select id="tipo" disabled>
       <option value="">Todos los tipos de juicio</option>
+    </select>
+    <select id="anio" disabled>
+      <option value="">Todos los años</option>
     </select>
     <button id="search-btn" disabled>Buscar</button>
   </div>
@@ -198,9 +386,37 @@
   <div id="progress-bar-wrap"><div id="progress-bar"></div></div>
 </div>
 
+<div id="chart-box">
+  <h2 id="chart-title">Avisos por año</h2>
+  <div id="chart"></div>
+  <div class="chart-labels" id="chart-labels"></div>
+  <div id="chart-legend"></div>
+</div>
+
 <div id="results">
   <div id="result-count"></div>
   <div id="result-list"></div>
+</div>
+
+<div id="about-overlay">
+  <div id="about-modal">
+    <h2>¿Qué es este buscador?</h2>
+    <p>
+      Este buscador indexa el Boletín Judicial del Poder Judicial de la Ciudad
+      de México para que cualquier persona pueda buscar avisos y acuerdos por
+      nombre, sin tener que revisar boletín por boletín en PDF.
+    </p>
+    <p>
+      Es un proyecto de <strong>Todo Derecho Vecino</strong>, que construye
+      herramientas legales y de datos para temas vecinales, dentro de
+      <strong>Bandatos</strong>, una comunidad mexicana de personas que
+      trabajan con datos en proyectos de impacto social.
+    </p>
+    <div class="about-actions">
+      <a id="about-bandatos-link" href="https://bandatos.org" target="_blank" rel="noopener">Conocer Bandatos</a>
+      <button id="about-close-btn" type="button">Entendido</button>
+    </div>
+  </div>
 </div>
 
 <script src="search.js"></script>

@@ -124,6 +124,28 @@ RE_TIPO_ACDOS = re.compile(
 
 Se captura tanto `Acdos?` como `Audiencias?` porque algunas entradas son de audiencias programadas, no acuerdos publicados.
 
+#### Entradas con sub-notas de amparo (`//`)
+
+Algunas entradas intercalan notas de amparo separadas por `//`, por ejemplo:
+
+```
+Pérez Palma Guadalupe vs. Franco López. //Amparo Indirecto N°. 1307/2025- I,
+Interpuesto por María de la Luz Méndez Sánchez... // Manuel. Ord. Civil
+Difiere Aud. Incidental. 1 Acdo. en Cuaderno_Amparo_Dem. Núm. Exp. 380/2025.
+```
+
+Sin tratamiento especial, el regex de tipo de juicio capturaba la nota de amparo completa (`//Amparo Indirecto N°...`) como `tipo_juicio`, lo cual era incorrecto. La regla:
+
+- La **demandada** real está en el segmento anterior al primer `//`.
+- El **tipo de juicio** real está en el último segmento (después del último `//`).
+
+```python
+if '//' in resto:
+    segments = resto.split('//')
+    demandada_raw = segments[0].strip().rstrip('.')
+    last_seg = segments[-1].strip()      # aquí se busca RE_TIPO_ACDOS
+```
+
 #### Casos sin demandada
 
 El 21.4% de las entradas no tiene `vs.`. Son casos legítimamente unilaterales:
@@ -166,9 +188,19 @@ El 21.4% sin demandada corresponde a casos unilaterales (ver arriba), no son fal
 
 ---
 
+## Re-parseo sin descargar (`reparse.py`)
+
+Tras cambiar la lógica de parseo no hace falta volver a bajar los PDFs. `reparse.py` lee los `.txt` ya generados en `scraper/data/<fecha>/pdfs/`, aplica `parse_pdf` y reescribe `entradas.csv`:
+
+```bash
+python scraper/reparse.py scraper/data/2026-06-10
+```
+
+---
+
 ## Casos pendientes de mejorar
 
-- **Ruido en tipo_juicio**: algunas entradas incluyen fragmentos de nombre de empresa al inicio (`de C.V. Ord. Civil`). Ocurre cuando el nombre de la demandada termina en abreviatura sin punto claro.
+- **Ruido en tipo_juicio**: algunas entradas incluyen fragmentos de nombre de empresa al inicio (`de C.V. Ord. Civil`). Ocurre cuando el nombre de la demandada termina en abreviatura sin punto claro. (Las sub-notas de amparo con `//` ya se manejan, ver arriba.)
 - **`Ord. Civil Acuerdo.`**: el "Acuerdo." al final del tipo de juicio es parte de la descripción del acuerdo, no del tipo. Se puede limpiar con una lista de sufijos conocidos.
 - **Entradas con `Acdo. en Expedientillo`**: notación especial donde el acuerdo está en un cuaderno separado. El regex no captura el conteo en estos casos.
 - **Variantes de encabezado de sección**: el regex de juzgado cubre ordinales hasta Quincuagésimo; si existen juzgados con numeración mayor habrá que ampliarlos.

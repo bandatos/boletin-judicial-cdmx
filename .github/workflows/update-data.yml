@@ -1,4 +1,10 @@
-name: Scrape, build DB and deploy
+name: Actualizar datos del boletín
+
+# Este workflow SOLO actualiza los datos (scraper + build_db + commit).
+# No hace ningún "deploy": el sitio estático (index.html, search.js,
+# boletin.sqlite.gz) se sirve con GitHub Pages configurado como "Deploy
+# from a branch" → rama main, carpeta / (root). Pages redespliega solo en
+# cada push a main, sin necesidad de ningún job ni artifact acá.
 
 on:
   workflow_dispatch:
@@ -15,20 +21,13 @@ on:
     # Lunes a viernes a las 15:00 UTC (9am CDMX)
     - cron: '0 15 * * 1-5'
 
-permissions:
-  pages: write
-  id-token: write
-
 concurrency:
-  group: deploy
+  group: actualizar-datos
   cancel-in-progress: false
 
 jobs:
-  scrape-and-deploy:
+  scrape-and-commit:
     runs-on: ubuntu-22.04
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
 
     steps:
       - name: Checkout
@@ -82,28 +81,15 @@ jobs:
             --since ${{ steps.dates.outputs.inicio }}
 
       - name: Compress DB
-        run: gzip -k boletin.sqlite
+        run: gzip -k -f boletin.sqlite
 
-      - name: Upload DB to GitHub Releases
+      - name: Commit DB to main
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
-          gh release create data \
-            --title "Datos — ${{ steps.dates.outputs.fin }}" \
-            --notes "Base de datos actualizada al ${{ steps.dates.outputs.fin }}." \
-            2>/dev/null || true
-          gh release upload data boletin.sqlite.gz --clobber
-
-      - name: Prepare Pages artifact
-        run: |
-          cp boletin.sqlite.gz web/
-          cp -r web pages-artifact
-
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: pages-artifact/
-
-      - name: Deploy to GitHub Pages
-        id: deploy
-        uses: actions/deploy-pages@v4
+          git config user.name "Bandatos Bot"
+          git config user.email "bot@bandatos.org"
+          git remote set-url origin https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git
+          git add -f boletin.sqlite.gz
+          git commit -m "Actualizar DB — ${{ steps.dates.outputs.fin }}" || echo "Sin cambios"
+          git push origin HEAD:main

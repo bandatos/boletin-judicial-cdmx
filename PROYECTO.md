@@ -35,7 +35,7 @@ El proyecto tiene tres partes:
 Scraper que recorre el índice del portal TSJ (filtro por fechas vía POST) para obtener la lista de boletines y sus URLs de PDF. Descarga todos los PDFs y los parsea con `pdftotext`. Un parser basado en expresiones regulares extrae de cada boletín las entradas estructuradas: partes actora y demandada, tipo de juicio, juzgado, sala, número de expediente y número de acuerdos. Las entradas se escriben a un archivo SQLite con FTS5. Paralelo a esto, un loader descarga los CSVs anuales de carpetas FGJ y los incorpora a la misma base de datos. El pipeline corre offline y produce un único archivo `boletin.sqlite`.
 
 **2. Frontend sin servidor**
-Sitio estático en GitHub Pages. La base de datos SQLite se publica como release en GitHub (soporta hasta 2 GB por archivo). El browser descarga la DB una sola vez, la cachea en IndexedDB, y todas las búsquedas corren localmente usando SQLite WASM con FTS5. Sin API, sin backend, sin infraestructura.
+Sitio estático en GitHub Pages, servido desde la raíz de la rama `main`. La base de datos SQLite comprimida (`boletin.sqlite.gz`) se commitea al repo y Pages la sirve desde el mismo origen que la página. El browser la descarga una sola vez, la cachea en IndexedDB, y todas las búsquedas corren localmente usando SQLite WASM con FTS5 (build de jsDelivr, que sí incluye FTS5). Sin API, sin backend, sin infraestructura.
 
 **3. Interfaz de búsqueda**
 Caja de texto libre + filtro por tipo de juicio. Resultados con expediente, partes, juzgado, fecha y liga al PDF original. Panel secundario con contexto FGJ para la alcaldía y período del caso.
@@ -56,14 +56,24 @@ El corpus inicial es de aproximadamente 2000 boletines (2017-2026), con un prome
 ## Necesidades materiales
 
 - Máquina local con almacenamiento para correr el pipeline (~15 GB de PDFs + textos para el histórico completo)
-- Repositorio en GitHub (Pages para el sitio, Releases para la DB SQLite)
+- Repositorio en GitHub (Pages sirve el sitio y la DB SQLite desde la raíz de `main`)
 - Acceso al portal del TSJ durante el scraping inicial
 
 ---
 
 ## Actualizaciones semanales
 
-### 10 de junio de 2026
+### 10 de junio de 2026 — tarde: demo desplegada
+
+Se corrió el scraper local para todo enero–junio 2026: **64 boletines, ~680,000 entradas**. Se construyó la DB SQLite con FTS5 (352 MB, 84 MB comprimida) y se desplegó la demo funcional en GitHub Pages.
+
+Decisiones de deploy resueltas en el camino:
+- **DB servida desde Pages, no Releases**: Releases redirige con 302 sin cabeceras CORS y el `fetch` desde el browser falla. Se commitea `boletin.sqlite.gz` a la raíz de `main` y Pages lo sirve desde el mismo origen. URL relativa (`./boletin.sqlite.gz`) para evitar el redirect 301 de `bandatos.github.io` → `bandatos.org`.
+- **sql.js desde jsDelivr**: el build de cdnjs no incluye FTS5 (`no such module: fts5`). jsDelivr sí.
+- **Sitio en la raíz de `main`**, sin rama `gh-pages`. Pages configurado como *Deploy from a branch* → `main` / root.
+- **Fix de parseo**: las sub-notas de amparo separadas por `//` ensuciaban `tipo_juicio`. Se corrigió tomando la demandada del primer segmento y el tipo de juicio del último. Se añadió `reparse.py` para re-parsear los `.txt` sin volver a descargar.
+
+### 10 de junio de 2026 — mañana: diseño
 
 Sesión inicial de diseño. Se exploró el portal del TSJ: el índice es accesible vía POST con rango de fechas, los PDFs están en un CDN externo sin autenticación. `pdftotext` extrae el texto a pesar del cifrado AES-256 del PDF. La estructura de las entradas es consistente y parseable con regex. Se identificó el dataset FGJ como fuente para correlación estadística por alcaldía y tipo de delito. Se definió arquitectura C (parsing estructurado + full-text fallback, sin OpenSearch).
 

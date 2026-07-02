@@ -10,9 +10,12 @@ Uso:
 import argparse
 import csv
 import json
+import re
 import sqlite3
 import sys
 from pathlib import Path
+
+RE_ANIO = re.compile(r"/(\d{4})\b")
 
 
 def create_schema(conn):
@@ -24,10 +27,13 @@ def create_schema(conn):
             pages    INTEGER
         );
 
+        -- La fecha de publicación no se guarda acá: es 1:1 con boletin_id y
+        -- ya está en boletines.fecha. Repetirla por fila (una por aviso)
+        -- inflaba el archivo ~40MB sin aportar nada (se llega a ella con
+        -- JOIN boletines).
         CREATE TABLE IF NOT EXISTS entradas (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             boletin_id  INTEGER REFERENCES boletines(id),
-            fecha       TEXT,
             juzgado     TEXT,
             sala        TEXT,
             secretaria  TEXT,
@@ -35,14 +41,15 @@ def create_schema(conn):
             demandada   TEXT,
             tipo_juicio TEXT,
             expediente  TEXT,
-            num_acdos   INTEGER
+            num_acdos   INTEGER,
+            anio        INTEGER
         );
 
         CREATE INDEX IF NOT EXISTS idx_expediente
             ON entradas (juzgado, expediente);
 
-        CREATE INDEX IF NOT EXISTS idx_fecha
-            ON entradas (fecha);
+        CREATE INDEX IF NOT EXISTS idx_anio
+            ON entradas (anio);
 
         CREATE TABLE IF NOT EXISTS carpetas_fgj (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -63,13 +70,18 @@ def create_schema(conn):
 
 
 def create_fts(conn):
+    # detail=none: no guardamos posición ni columna de cada término (solo
+    # qué documentos matchean). No usamos snippet()/highlight() ni consultas
+    # de columna o de frase, así que el costo es nulo y el índice pesa
+    # ~1/4 de lo que pesaba con el detail (posicional) por default.
     conn.executescript("""
         CREATE VIRTUAL TABLE IF NOT EXISTS entradas_fts USING fts5(
             actora,
             demandada,
             tipo_juicio,
             content='entradas',
-            content_rowid='id'
+            content_rowid='id',
+            detail=none
         );
     """)
 
@@ -94,7 +106,7 @@ def load_entradas(conn, csv_path, log):
     inserted = 0
     skipped = 0
     fields = [
-        "boletin_id", "fecha", "juzgado", "sala", "secretaria",
+        "boletin_id", "juzgado", "sala", "secretaria",
         "actora", "demandada", "tipo_juicio", "expediente", "num_acdos",
     ]
     with open(csv_path, newline="") as f:
@@ -102,9 +114,13 @@ def load_entradas(conn, csv_path, log):
         rows = []
         for row in reader:
             # Saltar si el boletin_id ya está cargado
-            rows.append(tuple(row.get(k) or None for k in fields))
+            expediente = row.get("expediente") or ""
+            m_anio = RE_ANIO.search(expediente)
+            anio = int(m_anio.group(1)) if m_anio else None
+            rows.append(tuple(row.get(k) or None for k in fields) + (anio,))
         conn.executemany(
-            f"INSERT INTO entradas ({', '.join(fields)}) VALUES ({', '.join(['?']*len(fields))})",
+            f"INSERT INTO entradas ({', '.join(fields)}, anio) "
+            f"VALUES ({', '.join(['?']*len(fields))}, ?)",
             rows,
         )
         inserted = len(rows)

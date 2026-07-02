@@ -111,16 +111,13 @@ RE_JUZGADO = re.compile(
 RE_SECRETARIA = re.compile(r"^SECRETAR[IÍ]A\b")
 RE_ACUERDOS = re.compile(r"^ACUERDOS DEL\s+(.+)$")
 
-# Terminator: Núm. Exp. NNNN/YYYY [optional suffix].
-# Suffixes observed: Tomo II/III/VI, Segundo/Tercer/Séptimo Tomo, Legajo, Amparo, Expedientillo
+# Terminator: Núm. Exp. NNNN/YYYY [sufijo libre].
+# El sufijo real es muy variable (nombre de juzgado, "Bis. N", "Tomo II",
+# fecha, etc.) así que en vez de enumerar los casos observados se toma todo
+# el texto hasta el primer punto, salvo que ese punto sea parte de una
+# abreviatura común ("vs.", "Bis.") que aparece dentro del propio sufijo.
 RE_ENTRY_END = re.compile(
-    r"Núm\.\s+Exp\.\s+"
-    r"(\d+/\d+"
-    r"(?:\s+(?:Segundo|Tercer|Cuarto|Quinto|Sexto|Séptimo|Octavo|Noveno)\s+Tomo"
-    r"|\s+Tomo\s+[IVXLC]+"
-    r"|\s+(?:Legajo|Amparo|Expedientillo)"
-    r")?)"
-    r"\s*\.",
+    r"Núm\.\s+Exp\.\s+(\d+/\d+.*?)(?<!\bvs)(?<!\bBis)\.",
     re.IGNORECASE,
 )
 
@@ -132,6 +129,64 @@ RE_TIPO_ACDOS = re.compile(
     r"\.\s+(.+?)\s+(\d+)\s+(?:Acdos?|Audiencias?)\.\s*$",
     re.IGNORECASE | re.DOTALL,
 )
+
+# La heurística de arriba corta en el primer punto, lo cual falla cuando la
+# demandada tiene abreviaturas con punto ("De la O.", "S.A. de C.V."): el
+# nombre se corta ahí y el resto (incluido el tipo de juicio real) termina
+# adentro de "demandada", o al revés. Como alternativa más robusta: el tipo
+# de juicio siempre empieza con una de estas palabras/abreviaturas conocidas
+# y siempre termina en Civil/Mercantil/Familiar/Laboral (+ calificador). Se
+# busca la ÚLTIMA ocurrencia de alguna de estas palabras — la demandada rara
+# vez empieza justo con una de ellas — y se usa esa posición como el corte
+# real entre demandada y tipo de juicio, ignorando los puntos intermedios.
+TIPO_START_WORDS = [
+    "Ord", "Especial", "Esp", "Ejecutivo", "Ejec", "Oral", "Juris", "Proced",
+    "Aud", "Div", "Cont", "Vía", "Via", "Providencias", "Medios", "Actos",
+    "Sucesorio", "Controversias", "Otros", "Juic", "Tercerías", "Tercerias",
+    "Extinción", "Extincion", "Cump", "Resc", "Reivindicatorio",
+    "Reivindicatoria", "Interdicto", "Nulidad", "Usucapión", "Usucapion",
+    "Divorcio", "Rectificación", "Rectificacion", "Consignación",
+    "Consignacion", "Otorgamiento", "Cancelación", "Cancelacion",
+    "Ordinario", "Juicio", "Remate", "Arbitraje", "Arbitral", "Exhortos",
+]
+RE_TIPO_START = re.compile(r"\b(?:" + "|".join(TIPO_START_WORDS) + r")\.?\s", re.IGNORECASE)
+RE_TIPO_TAIL = re.compile(
+    r"\s+(\d+)\s+(?:Acdos?|Audiencias?)\.(?:\s*en\s+.+)?\s*$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _split_tipo_juicio(last_seg):
+    """Encuentra el corte demandada/tipo_juicio anclado en vocabulario conocido.
+
+    Devuelve (demandada, tipo_juicio, num_acdos) o None si no hay match.
+    """
+    starts = list(RE_TIPO_START.finditer(last_seg))
+    if not starts:
+        return None
+    tail = RE_TIPO_TAIL.search(last_seg)
+    if not tail or tail.start() < starts[-1].start():
+        return None
+    start = starts[-1].start()
+    demandada = last_seg[:start].strip().rstrip('.')
+    tipo_juicio = last_seg[start:tail.start()].strip()
+    return demandada, tipo_juicio, int(tail.group(1))
+
+
+# Después de cortar en un posible terminador, lo que sigue debería ser el
+# inicio de un aviso nuevo (una actora seguida de "vs." no muy lejos) o
+# quedar vacío. Si no, el punto usado como corte era en realidad parte de
+# una abreviatura no contemplada (como "Expdllo.") y hay que seguir buscando
+# el próximo punto en vez de cortar ahí.
+RE_LOOKS_LIKE_NEW_ENTRY = re.compile(r"^[A-ZÁÉÍÓÚÑ]")
+
+
+def _looks_like_new_entry_start(resto):
+    if not resto:
+        return True
+    if not RE_LOOKS_LIKE_NEW_ENTRY.match(resto):
+        return False
+    return bool(RE_VS.search(resto[:300]))
 
 
 def pdf_to_text(pdf_path):
@@ -183,11 +238,36 @@ def parse_pdf(text, boletin_id, fecha_raw):
         block.append(line)
         joined = " ".join(block)
 
-        if RE_ENTRY_END.search(joined) and joined.rstrip().endswith("."):
-            entry = _parse_entry(joined, boletin_id, fecha_raw, ctx)
+        # Un bloque puede traer más de un aviso encadenado (p. ej. un aviso
+        # principal seguido de un sub-aviso de amparo). Se corta en cada
+        # ocurrencia del terminador en vez de esperar a que la línea en curso
+        # termine en punto, si no las entradas siguientes quedan pegadas.
+        # Antes de aceptar un corte se valida que lo que sigue parezca una
+        # entrada nueva; si no, el punto usado era parte de una abreviatura
+        # (p. ej. "Expdllo.") y hay que seguir buscando el próximo terminador
+        # sin cortar ahí.
+        search_from = 0
+        while True:
+            m_end = RE_ENTRY_END.search(joined, search_from)
+            if not m_end:
+                break
+
+            resto = joined[m_end.end():].strip()
+            if not _looks_like_new_entry_start(resto):
+                search_from = m_end.end()
+                continue
+
+            entry = _parse_entry(joined[: m_end.end()], boletin_id, fecha_raw, ctx)
             if entry:
                 entries.append(entry)
-            block = []
+
+            if not resto:
+                block = []
+                break
+
+            block = [resto]
+            joined = resto
+            search_from = 0
 
     return entries
 
@@ -218,18 +298,22 @@ def _parse_entry(text, boletin_id, fecha_raw, ctx):
         demandada_raw = None
         last_seg = resto
 
-    m_tipo = RE_TIPO_ACDOS.search(last_seg)
-    if m_tipo:
-        if demandada_raw is None:
-            demandada = last_seg[: m_tipo.start() + 1].strip()
-        else:
-            demandada = demandada_raw
-        tipo_juicio = m_tipo.group(1).strip()
-        num_acdos = int(m_tipo.group(2))
+    split = _split_tipo_juicio(last_seg) if demandada_raw is None else None
+    if split:
+        demandada, tipo_juicio, num_acdos = split
     else:
-        demandada = demandada_raw if demandada_raw is not None else resto
-        tipo_juicio = None
-        num_acdos = None
+        m_tipo = RE_TIPO_ACDOS.search(last_seg)
+        if m_tipo:
+            if demandada_raw is None:
+                demandada = last_seg[: m_tipo.start() + 1].strip()
+            else:
+                demandada = demandada_raw
+            tipo_juicio = m_tipo.group(1).strip()
+            num_acdos = int(m_tipo.group(2))
+        else:
+            demandada = demandada_raw if demandada_raw is not None else resto
+            tipo_juicio = None
+            num_acdos = None
 
     return _row(boletin_id, fecha_raw, ctx, actora, demandada, tipo_juicio, num_acdos, expediente, text)
 
