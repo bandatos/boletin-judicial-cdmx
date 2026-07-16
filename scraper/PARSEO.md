@@ -198,9 +198,36 @@ python scraper/reparse.py scraper/data/2026-06-10
 
 ---
 
+## Normalización de tipo_juicio (resuelto)
+
+El boletín pega directo, sin ningún marcador, el verbo de la descripción del
+acuerdo detrás del tipo de juicio real (`Oral Mercantil Girar oficio...`,
+`Ordinario Civil Ratificar...`, `Ord. Civil Acuerdo.`) — antes esto generaba
+76,652 valores distintos de `tipo_juicio` sobre ~830k entradas, para
+apenas ~40 tipos de juicio reales.
+
+La solución: `normalize_tipo.py` define `CANONICAL_TIPOS`, una lista cerrada
+de los tipos de juicio reales (verificada contra el "Catálogo de Juicios y
+Procedimientos del TSJDF", Consejo de la Judicatura, marzo 2013, y contra el
+Código de Procedimientos Civiles CDMX), ordenada del más largo al más corto.
+`poc.py` (`_match_canonical_tipo`, usado en `_split_tipo_juicio` y en el
+fallback de `RE_TIPO_ACDOS`) expande abreviaciones (`Ord.` → `Ordinario`) y
+matchea el prefijo más largo de esa lista contra el texto capturado — si
+matchea, corta ahí sin importar qué verbo o código de actuario venga después.
+Esto se aplica en el momento del parseo, no como limpieza posterior: el
+`tipo_juicio` crudo pasó de 76,652 a 2,842 valores distintos.
+
+`build_db.py` además calcula `tipo_juicio_norm` (columna aparte, usada por
+el filtro/dropdown/gráfico del frontend) aplicando `normalize_tipo.normalize()`
+sobre el `tipo_juicio` crudo, como red de seguridad para lo que el extractor
+no cubre — deja 1,656 valores distintos, de los cuales el top 60 cubre 98.6%
+de las entradas. El resto es ruido residual sin agrupar (código de
+actuario/secretaría no catalogado, texto realmente incompleto en el boletín
+original) — se deja tal cual en vez de forzarlo a una categoría inventada.
+
 ## Casos pendientes de mejorar
 
-- **Ruido en tipo_juicio**: algunas entradas incluyen fragmentos de nombre de empresa al inicio (`de C.V. Ord. Civil`). Ocurre cuando el nombre de la demandada termina en abreviatura sin punto claro. (Las sub-notas de amparo con `//` ya se manejan, ver arriba.)
-- **`Ord. Civil Acuerdo.`**: el "Acuerdo." al final del tipo de juicio es parte de la descripción del acuerdo, no del tipo. Se puede limpiar con una lista de sufijos conocidos.
+- **Ruido en tipo_juicio**: algunas entradas todavía incluyen fragmentos de nombre de empresa al inicio (`de C.V. Ord. Civil`) cuando el nombre de la demandada termina en abreviatura sin punto claro. (Las sub-notas de amparo con `//` ya se manejan, ver arriba.)
 - **Entradas con `Acdo. en Expedientillo`**: notación especial donde el acuerdo está en un cuaderno separado. El regex no captura el conteo en estos casos.
 - **Variantes de encabezado de sección**: el regex de juzgado cubre ordinales hasta Quincuagésimo; si existen juzgados con numeración mayor habrá que ampliarlos.
+- **CANONICAL_TIPOS incompleta**: cubre los ~90 tipos más frecuentes: si aparecen tipos de juicio legítimos pero poco frecuentes que no están en la lista, quedan sin normalizar (visibles tal cual, no se pierden, solo no se agrupan).

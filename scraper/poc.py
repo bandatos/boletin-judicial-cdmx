@@ -14,12 +14,12 @@ import sys
 import subprocess
 import csv
 import json
-import unicodedata
-from collections import defaultdict
 from pathlib import Path
 from datetime import datetime
 import requests
 from bs4 import BeautifulSoup
+
+from normalize_tipo import expand_abbr, match_canonical_prefix, CANONICAL_TIPOS
 import urllib3
 
 urllib3.disable_warnings()
@@ -60,7 +60,12 @@ def fetch_index(session, token, fecha_inicio, fecha_fin):
         pdf_url = None
         if embed:
             src = embed.get("src", "")
-            pm = re.search(r"(https://gestordocumental[^#]+\.pdf)", src)
+            # Los boletines desde ~sept. 2022 se sirven desde el CDN
+            # "gestordocumental...". Los anteriores usan una URL directa en
+            # el propio dominio del portal (.../pdf/boletines/NNN.pdf). Antes
+            # solo se reconocía el primer patrón, así que todo boletín viejo
+            # quedaba marcado (incorrectamente) como "sin PDF, saltando".
+            pm = re.search(r'(https://[^"#]+\.pdf)', src)
             if pm:
                 pdf_url = pm.group(1)
 
@@ -140,20 +145,68 @@ RE_TIPO_ACDOS = re.compile(
 # vez empieza justo con una de ellas — y se usa esa posición como el corte
 # real entre demandada y tipo de juicio, ignorando los puntos intermedios.
 TIPO_START_WORDS = [
-    "Ord", "Especial", "Esp", "Ejecutivo", "Ejec", "Oral", "Juris", "Proced",
-    "Aud", "Div", "Cont", "Vía", "Via", "Providencias", "Medios", "Actos",
-    "Sucesorio", "Controversias", "Otros", "Juic", "Tercerías", "Tercerias",
-    "Extinción", "Extincion", "Cump", "Resc", "Reivindicatorio",
+    "Ord", "Especial", "Esp", "Ejecutivo", "Ejec", "Ejecc", "Oral", "Juris",
+    "Proced", "Aud", "Div", "Cont", "Vía", "Via", "Providencias", "Medios",
+    "Actos", "Sucesorio", "Controversias", "Otros", "Juic", "Tercerías",
+    "Tercerias", "Extinción", "Extincion", "Cump", "Resc", "Reivindicatorio",
     "Reivindicatoria", "Interdicto", "Nulidad", "Usucapión", "Usucapion",
     "Divorcio", "Rectificación", "Rectificacion", "Consignación",
     "Consignacion", "Otorgamiento", "Cancelación", "Cancelacion",
     "Ordinario", "Juicio", "Remate", "Arbitraje", "Arbitral", "Exhortos",
+    "Pago", "Inmat", "Quieb", "Convencional", "Proforma", "Rescisión",
+    "Rescision", "Ejecución", "Ejecucion", "Reconocimiento", "Reconoc",
+    "Diligencias", "Prescripción", "Prescripcion", "Prescrip", "Nul", "Reiv",
 ]
+# Además, la primera palabra de cada tipo canónico conocido (Especial de
+# Fianzas Mercantil -> "Especial" ya está, pero esto suma automáticamente
+# la primera palabra de cualquier tipo que se agregue a CANONICAL_TIPOS a
+# futuro, sin tener que repetirla acá a mano).
+TIPO_START_WORDS = sorted(set(TIPO_START_WORDS) | {
+    c.split()[0] for c in CANONICAL_TIPOS if c.split()[0].isalpha()
+})
 RE_TIPO_START = re.compile(r"\b(?:" + "|".join(TIPO_START_WORDS) + r")\.?\s", re.IGNORECASE)
 RE_TIPO_TAIL = re.compile(
     r"\s+(\d+)\s+(?:Acdos?|Audiencias?)\.(?:\s*en\s+.+)?\s*$",
     re.IGNORECASE | re.DOTALL,
 )
+
+
+def _match_canonical_tipo(text):
+    """Si `text` empieza (una vez expandidas sus abreviaciones) con uno de
+    los tipos de juicio reales conocidos, devuelve ese tipo canónico. Si
+    no, None.
+
+    Esto reemplaza cortar en el conteo de acuerdos: el boletín a veces pega
+    directo, sin ningún marcador, el verbo de la descripción del acuerdo
+    ("Oral Mercantil Girar oficio...", "Ordinario Civil Ratificar..."), y
+    cortar recién en "N Acdo." se traga ese verbo como si fuera parte del
+    tipo de juicio (ver PARSEO.md).
+    """
+    return match_canonical_prefix(expand_abbr(text))
+
+
+# Cuando la demandada es una razón social ("Seguros Azteca S.A. de C.V.") o
+# hay varias demandadas encadenadas con "y", el punto de "S.A." se confunde
+# con el corte demandada/tipo_juicio y el resto ("de C.V. y Fulano...")
+# queda pegado al inicio del tipo de juicio en vez de a la demandada.
+def _relocate_tipo_juicio(demandada, tipo_juicio):
+    """Si tipo_juicio no matchea un tipo canónico desde el principio, pero
+    lo hace más adelante (porque lo de antes es en realidad cola de la
+    demandada: sufijo de razón social, más partes demandadas...), mueve ese
+    prefijo colado a demandada y usa el tipo canónico encontrado."""
+    if not tipo_juicio or _match_canonical_tipo(tipo_juicio):
+        return demandada, tipo_juicio
+
+    for m in RE_TIPO_START.finditer(tipo_juicio):
+        if m.start() == 0:
+            continue
+        canon = _match_canonical_tipo(tipo_juicio[m.start():])
+        if canon:
+            leaked = tipo_juicio[: m.start()].strip().strip(',').strip()
+            demandada = f"{demandada} {leaked}".strip() if demandada else leaked
+            return demandada, canon
+
+    return demandada, tipo_juicio
 
 
 def _split_tipo_juicio(last_seg):
@@ -165,8 +218,27 @@ def _split_tipo_juicio(last_seg):
     if not starts:
         return None
     tail = RE_TIPO_TAIL.search(last_seg)
-    if not tail or tail.start() < starts[-1].start():
+    if not tail:
         return None
+    starts = [m for m in starts if m.start() < tail.start()]
+    if not starts:
+        return None
+
+    # Preferimos la ÚLTIMA palabra de arranque (la demandada rara vez
+    # empieza justo con una) — pero la descripción del acuerdo a veces
+    # menciona de paso otro término reconocido ("Solic. Div[orcio]...",
+    # "Aud[iencia]. 272-B Cpc." como referencia a un artículo, no un tipo
+    # de juicio) que queda MÁS a la derecha que el tipo de juicio real. Se
+    # prueba de derecha a izquierda y se usa la primera que efectivamente
+    # matchea un tipo canónico completo; si ninguna matchea, se cae al
+    # comportamiento anterior (la última) para no perder cobertura en
+    # tipos legítimos que aún no están en CANONICAL_TIPOS.
+    for m in reversed(starts):
+        start = m.start()
+        canon = _match_canonical_tipo(last_seg[start:tail.start()])
+        if canon:
+            return last_seg[:start].strip().rstrip('.'), canon, int(tail.group(1))
+
     start = starts[-1].start()
     demandada = last_seg[:start].strip().rstrip('.')
     tipo_juicio = last_seg[start:tail.start()].strip()
@@ -308,12 +380,15 @@ def _parse_entry(text, boletin_id, fecha_raw, ctx):
                 demandada = last_seg[: m_tipo.start() + 1].strip()
             else:
                 demandada = demandada_raw
-            tipo_juicio = m_tipo.group(1).strip()
+            tipo_raw = m_tipo.group(1).strip()
+            tipo_juicio = _match_canonical_tipo(tipo_raw) or tipo_raw
             num_acdos = int(m_tipo.group(2))
         else:
             demandada = demandada_raw if demandada_raw is not None else resto
             tipo_juicio = None
             num_acdos = None
+
+    demandada, tipo_juicio = _relocate_tipo_juicio(demandada, tipo_juicio)
 
     return _row(boletin_id, fecha_raw, ctx, actora, demandada, tipo_juicio, num_acdos, expediente, text)
 
@@ -332,66 +407,6 @@ def _row(boletin_id, fecha_raw, ctx, actora, demandada, tipo_juicio, num_acdos, 
     }
 
 
-# ── Search index ─────────────────────────────────────────────────────────────
-
-STOPWORDS = {"de", "del", "la", "el", "los", "las", "y", "en", "a", "con",
-             "por", "para", "vs", "s", "a", "sa", "c", "v", "de"}
-
-def normalize(text):
-    """Minúsculas, sin acentos, sin puntuación."""
-    text = text.lower()
-    text = unicodedata.normalize("NFD", text)
-    text = "".join(c for c in text if unicodedata.category(c) != "Mn")
-    text = re.sub(r"[^a-z0-9\s]", " ", text)
-    return text
-
-def tokenize(text):
-    if not text:
-        return []
-    tokens = normalize(text).split()
-    return [t for t in tokens if len(t) > 2 and t not in STOPWORDS]
-
-def build_search_index(entries):
-    """
-    Devuelve un dict con:
-    - 'entries': mapa id → entrada sin raw_text (para recuperar resultado)
-    - 'terms':   mapa término → lista de ids (índice invertido)
-    - 'expedientes': mapa expediente → lista de ids
-    """
-    entries_map = {}
-    inverted = defaultdict(list)
-    expedientes = defaultdict(list)
-
-    for i, e in enumerate(entries):
-        entry_id = str(i)
-
-        # Entrada sin raw_text para mantener el índice liviano
-        entries_map[entry_id] = {k: v for k, v in e.items() if k != "raw_text"}
-
-        # Indexar por términos de nombre
-        for field in ("actora", "demandada"):
-            for token in tokenize(e.get(field) or ""):
-                if entry_id not in inverted[token]:
-                    inverted[token].append(entry_id)
-
-        # Indexar por tipo_juicio (término completo normalizado)
-        tipo = normalize(e.get("tipo_juicio") or "")
-        if tipo:
-            if entry_id not in inverted[tipo]:
-                inverted[tipo].append(entry_id)
-
-        # Indexar por (juzgado, expediente) como clave compuesta
-        exp = (e.get("expediente") or "").strip()
-        juz = (e.get("juzgado") or "").strip()
-        if exp and juz:
-            key = f"{juz}|{exp}"
-            expedientes[key].append(entry_id)
-
-    return {
-        "entries": entries_map,
-        "terms": dict(inverted),
-        "expedientes": dict(expedientes),
-    }
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -457,12 +472,13 @@ def main():
     if all_entries:
         fields = list(all_entries[0].keys())
 
-        # Índice de búsqueda
-        search_index = build_search_index(all_entries)
-        index_search_path = out_dir / "search_index.json"
-        with open(index_search_path, "w") as f:
-            json.dump(search_index, f, ensure_ascii=False)
-        log(f"Índice de búsqueda guardado en {index_search_path} ({len(search_index['terms'])} términos)")
+        # Nota: acá antes se armaba también un search_index.json (índice
+        # invertido en JSON) para búsqueda del lado del cliente. Se sacó:
+        # nadie lo consume (ni build_db.py ni el server lo leen — la
+        # búsqueda real es FTS5 sobre SQLite) y con datasets grandes
+        # (millones de entradas) tenía una complejidad cuadrática en
+        # build_search_index() que llegó a comerse >13GB de RAM y colgar
+        # el proceso sin terminar.
 
         # CSV completo
         csv_path = out_dir / "entradas.csv"
