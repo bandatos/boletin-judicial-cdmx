@@ -225,9 +225,84 @@ de las entradas. El resto es ruido residual sin agrupar (código de
 actuario/secretaría no catalogado, texto realmente incompleto en el boletín
 original) — se deja tal cual en vez de forzarlo a una categoría inventada.
 
+## Formato "Toca" (Salas y Sentencias) (resuelto)
+
+El boletín usa un **segundo formato de terminador de entrada**, sin `Núm.
+Exp.` en absoluto, en dos contextos:
+
+1. **Toda la sección "SALAS"** (segunda instancia/apelación) — tanto sus
+   acuerdos normales como sus sentencias.
+2. La subsección **"SENTENCIAS"** dentro de cada Juzgado (sentencias
+   definitivas).
+
+Formato real:
+
+```
+[Actora] Vs. [Demandada]. [Tipo] T. [código] NNN/AAAA/NNN[, Cuad. Amp. ...][ Sent. Pon N,] N Acdo(s)./Audiencia(s)./Sent.
+```
+
+Ejemplos:
+```
+Controv. de Arrendamiento T. Ap 849/2024/002, 1 Acdo.
+Esp. Hip. T. Qu 191/2026/007 Sent. Pon 2, 1 Sent.
+Ord. Civ. T. 319/2022/003 Cuad. Amp. Iv. del Exp. 387/2021 del Juzg,
+  69° de Lo Civil de Proceso Escrito de la Cdmx, 2 Acdos.
+```
+
+Antes de este fix, **toda la sección Salas se perdía en silencio** (nunca
+contiene `Núm. Exp.`, así que `RE_ENTRY_END` nunca matchea) — no había
+error ni log, simplemente no se generaban entradas. Impacto medido sobre
+el corpus local: +49,631 entradas solo con el terminador Toca, sobre un
+total previo de 833,536 (+5.9%).
+
+`RE_TOCA_END` (en `poc.py`) es el segundo terminador, independiente del de
+`Núm. Exp.` (cero riesgo de regresión en ese camino). El código de 1-4
+letras tras "T." (`Ap`, `In`, `Qu`, `Cc`, `Rc`...) se deja genérico, sin
+enumerar, mismo criterio que `RE_ENTRY_END`. La "T." va sin
+`IGNORECASE` — permitir minúscula generaba falsos positivos con
+abreviaturas ajenas que también terminan en "t." (`Amparo Directo Dt.
+245/2025.`).
+
+**Por qué no hay un límite ciego de caracteres entre el número de toca y
+su cola**: el `Cuad. Amp.` que sigue al número puede ser tan corto como
+`1,` o tan largo como una cláusula completa (`del Exp. NNN/AAAA del Juzg.
+NN° de Lo Civil de Proceso Escrito de la Cdmx,`, +90 caracteres). Un
+límite de caracteres no distingue "cláusula legítima larga" de "salto de
+página que separa a un registro de su propia cola" (en ese caso el regex
+se "come" el siguiente registro completo buscando la primera cola válida
+que encuentra, fusionando dos avisos en uno). En cambio, se prohíbe que
+el hueco contenga frases que solo aparecen en encabezados/pies de página
+o separadores de sección (`SOLO CONSULTA`, `BOLETÍN JUDICIAL`, `ACUERDOS
+DEL`, `SALA(S)`, `SECRETARIO/A DE ACUERDOS`, `MAL/NO PUBLICADOS`,
+`AUDIENCIA`) — eso sí distingue ambos casos sin sacrificar cobertura.
+
+`_split_demandada_tipo` (extraída de la lógica de `_split_tipo_juicio`,
+ahora reusada por ambos formatos) recibe el límite derecho explícito en
+vez de calcularlo internamente, para poder aplicarse tanto al caso
+`Núm. Exp.` (el límite es la posición de "N Acdo.") como al caso Toca (el
+límite es el final del segmento, no hay "N Acdo." dentro de él).
+
+`RE_TIPO_START` ahora acepta que la palabra de arranque sea la ÚLTIMA de
+la cadena (`(?:\s|$)` en vez de `\s` a secas) — sin esto, un tipo como
+"Alimentos" al final de un segmento (sin nada después) nunca se detectaba
+como palabra de arranque.
+
+### Variante con conteo después de "Núm. Exp." (resuelto)
+
+Descubierto durante la verificación del fix de arriba: en variantes más
+nuevas del boletín (`Cnpcyf - Alimentos Núm. Exp. 4803/2026, S/T. 1
+Acdo.`) el conteo de acuerdos va DESPUÉS de "Núm. Exp." en vez de antes
+(lo usual es `[Tipo] N Acdo. Núm. Exp. NNNN/AAAA.`). Sin consumir ese "N
+Acdo." al determinar el fin de la entrada, quedaba pegado al principio de
+la SIGUIENTE entrada (se colaba en su actora). `RE_ENTRY_END` ahora tiene
+un segundo grupo opcional que lo consume cuando está presente;
+`_parse_entry` lo usa como `num_acdos` cuando no encontró uno antes de
+"Núm. Exp.".
+
 ## Casos pendientes de mejorar
 
 - **Ruido en tipo_juicio**: algunas entradas todavía incluyen fragmentos de nombre de empresa al inicio (`de C.V. Ord. Civil`) cuando el nombre de la demandada termina en abreviatura sin punto claro. (Las sub-notas de amparo con `//` ya se manejan, ver arriba.)
 - **Entradas con `Acdo. en Expedientillo`**: notación especial donde el acuerdo está en un cuaderno separado. El regex no captura el conteo en estos casos.
 - **Variantes de encabezado de sección**: el regex de juzgado cubre ordinales hasta Quincuagésimo; si existen juzgados con numeración mayor habrá que ampliarlos.
 - **CANONICAL_TIPOS incompleta**: cubre los ~90 tipos más frecuentes: si aparecen tipos de juicio legítimos pero poco frecuentes que no están en la lista, quedan sin normalizar (visibles tal cual, no se pierden, solo no se agrupan).
+- **Tercer formato de terminador, sin cubrir**: incidentes de "cuaderno de amparo" listados sin "Vs." usan un formato compacto propio, sin `Acdo.`/`Sent.`/`Audiencia.` como palabra clave (`Div. Sin Causa Inc. de Las Consecuencias de Div. No Convenidas 23152024- 00 Aut del 4`). Como ninguno de los dos terminadores actuales matchea, estas notas se acumulan sin cortarse hasta la próxima entrada válida — hoy terminan fusionadas dentro de la entrada previa o siguiente (`actora` anormalmente larga, con varias repeticiones del mismo caso). Bajo volumen, no se abordó en esta ronda.

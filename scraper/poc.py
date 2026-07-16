@@ -104,8 +104,21 @@ SECTION_HEADERS = {
 SKIP_LINES = {
     "SOLO CONSULTA", "SIN ACUERDOS", "BOLETÍN JUDICIAL",
     "DEL PODER JUDICIAL DE LA CIUDAD DE MÉXICO",
-    "NO PUBLICADOS", "AUDIENCIA",
+    "NO PUBLICADOS", "AUDIENCIA", "MAL PUBLICADOS",
+    # "SENTENCIAS": subsección de sentencias definitivas (formato Toca, ver
+    # RE_TOCA_END) — no es contenido de una entrada.
+    "SENTENCIAS",
+    # "Salas" (con minúscula, Título): artefacto de encabezado de página
+    # repetido en cada salto de página dentro de la sección de Salas — no
+    # confundir con "SALAS" (mayúsculas), que es el header real de sección
+    # y está en SECTION_HEADERS.
+    "Salas",
 }
+
+# Encabezado de página que se repite en cada salto de página, con el
+# número de boletín variable ("BOLETÍN JUDICIAL No. 40") — SKIP_LINES solo
+# cubre la línea "BOLETÍN JUDICIAL" sin sufijo, que también aparece sola.
+RE_SKIP_PREFIX = re.compile(r"^BOLETÍN JUDICIAL\b|^SENTENCIAS DEFINITIVAS DEL\b")
 
 RE_JUZGADO = re.compile(
     r"^((?:PRIMERO?|SEGUNDO|TERCERO|CUARTO|QUINTO|SEXTO|SÉPTIMO|OCTAVO|NOVENO|"
@@ -121,9 +134,54 @@ RE_ACUERDOS = re.compile(r"^ACUERDOS DEL\s+(.+)$")
 # fecha, etc.) así que en vez de enumerar los casos observados se toma todo
 # el texto hasta el primer punto, salvo que ese punto sea parte de una
 # abreviatura común ("vs.", "Bis.") que aparece dentro del propio sufijo.
+#
+# Grupo 2 (opcional): en variantes más nuevas del boletín ("Cnpcyf -
+# Alimentos Núm. Exp. 4803/2026, S/T. 1 Acdo.") el conteo de acuerdos va
+# DESPUÉS de "Núm. Exp." en vez de antes (lo usual es "[Tipo] N Acdo. Núm.
+# Exp. NNNN/YYYY."). Sin consumirlo acá, ese "N Acdo." queda pegado al
+# principio de la SIGUIENTE entrada (se cuela en su actora). _parse_entry
+# usa este grupo como num_acdos cuando no encuentra uno antes de Núm. Exp.
 RE_ENTRY_END = re.compile(
-    r"Núm\.\s+Exp\.\s+(\d+/\d+.*?)(?<!\bvs)(?<!\bBis)\.",
+    r"Núm\.\s+Exp\.\s+(\d+/\d+.*?)(?<!\bvs)(?<!\bBis)\."
+    r"(?:\s*(\d+)\s+(?:Acdos?|Audiencias?)\.)?",
     re.IGNORECASE,
+)
+
+# Segundo formato de terminador, sin "Núm. Exp.": el que usan las Salas
+# (segunda instancia) para TODAS sus entradas, y los Juzgados para su
+# subsección "SENTENCIAS". Ejemplos reales:
+#   "Controv. de Arrendamiento T. Ap 849/2024/002, 1 Acdo."
+#   "Esp. Hip. T. Qu 191/2026/007 Sent. Pon 2, 1 Sent."
+#   "Ord. Civ. T. 308/2024/001 Cuad. Amp. 1, 1 Acdo."
+#   "Ord. Civ. T. 319/2022/003 Cuad. Amp. Iv. del Exp. 387/2021 del
+#    Juzg, 69° de Lo Civil de Proceso Escrito de la Cdmx, 2 Acdos."
+# El código de 1-4 letras tras "T." (Ap, In, Qu, Cc, Rc...) se deja
+# genérico en vez de enumerado, mismo criterio que RE_ENTRY_END arriba.
+# "T." (el literal, no el resto) va SIN IGNORECASE: la única forma en que
+# aparece de verdad es mayúscula — permitir minúscula generaba falsos
+# positivos con abreviaturas ajenas que también terminan en "t." ("Amparo
+# Directo Dt. 245/2025.").
+#
+# Entre el número de toca y su cola ("N Acdo(s)./Sent.") puede haber un
+# "Cuad. Amp." con calificador variable — desde "1," hasta cláusulas largas
+# ("del Exp. NNN/AAAA del Juzg. NN° de Lo Civil de Proceso Escrito de la
+# Cdmx,"). Un límite ciego de caracteres no distingue "cláusula legítima
+# larga" de "salto de página que separa a un registro de su propia cola,
+# fusionando dos avisos" (el regex se "come" hasta la próxima cola válida
+# que encuentra). En vez de acotar por longitud, se prohíbe que el hueco
+# contenga alguna de las frases que solo aparecen en encabezados/pies de
+# página o separadores de sección — eso sí distingue ambos casos.
+_RE_TOCA_POISON = (
+    r"SOLO CONSULTA|BOLET[IÍ]N JUDICIAL|ACUERDOS DEL|SALAS?\b|"
+    r"SECRETARI[OA] DE ACUERDOS|MAL PUBLICADOS|NO PUBLICADOS|AUDIENCIA\b"
+)
+RE_TOCA_END = re.compile(
+    r"T\."
+    r"(?i:\s*(?:[A-ZÁÉÍÓÚÑ]{1,4}\.?\s*)?)"
+    r"(\d+/\d+(?:/\d+)?)"
+    r"(?:(?!(?i:" + _RE_TOCA_POISON + r")).){0,200}?"
+    r"(?i:(\d+)\s+(?:Acdos?|Audiencias?|Sent\.?)\.)",
+    re.DOTALL,
 )
 
 RE_VS = re.compile(r"\s+vs\.\s+", re.IGNORECASE)
@@ -167,7 +225,11 @@ TIPO_START_WORDS = [
 TIPO_START_WORDS = sorted(set(TIPO_START_WORDS) | {
     c.split()[0] for c in CANONICAL_TIPOS if c.split()[0].isalpha()
 })
-RE_TIPO_START = re.compile(r"\b(?:" + "|".join(TIPO_START_WORDS) + r")\.?\s", re.IGNORECASE)
+# (?:\s|$): la palabra de arranque puede ir seguida de espacio (caso normal)
+# o ser la última palabra de la cadena (formatos sin "N Acdo." al final,
+# como el toca o "Cnpcyf - Alimentos" al final de last_seg, donde no hay
+# nada después de la palabra que ancle el corte).
+RE_TIPO_START = re.compile(r"\b(?:" + "|".join(TIPO_START_WORDS) + r")\.?(?:\s|$)", re.IGNORECASE)
 RE_TIPO_TAIL = re.compile(
     r"\s+(\d+)\s+(?:Acdos?|Audiencias?)\.(?:\s*en\s+.+)?\s*$",
     re.IGNORECASE | re.DOTALL,
@@ -212,20 +274,14 @@ def _relocate_tipo_juicio(demandada, tipo_juicio):
     return demandada, tipo_juicio
 
 
-def _split_tipo_juicio(last_seg):
-    """Encuentra el corte demandada/tipo_juicio anclado en vocabulario conocido.
-
-    Devuelve (demandada, tipo_juicio, num_acdos) o None si no hay match.
+def _split_demandada_tipo(segment, end):
+    """Encuentra el corte demandada/tipo_juicio anclado en vocabulario
+    conocido, dentro de segment[:end]. Devuelve (demandada, tipo_juicio) —
+    tipo_juicio es None si no hay ninguna palabra de arranque reconocida.
     """
-    starts = list(RE_TIPO_START.finditer(last_seg))
+    starts = [m for m in RE_TIPO_START.finditer(segment) if m.start() < end]
     if not starts:
-        return None
-    tail = RE_TIPO_TAIL.search(last_seg)
-    if not tail:
-        return None
-    starts = [m for m in starts if m.start() < tail.start()]
-    if not starts:
-        return None
+        return segment[:end].strip().rstrip('.'), None
 
     # Preferimos la ÚLTIMA palabra de arranque (la demandada rara vez
     # empieza justo con una) — pero la descripción del acuerdo a veces
@@ -238,13 +294,26 @@ def _split_tipo_juicio(last_seg):
     # tipos legítimos que aún no están en CANONICAL_TIPOS.
     for m in reversed(starts):
         start = m.start()
-        canon = _match_canonical_tipo(last_seg[start:tail.start()])
+        canon = _match_canonical_tipo(segment[start:end])
         if canon:
-            return last_seg[:start].strip().rstrip('.'), canon, int(tail.group(1))
+            return segment[:start].strip().rstrip('.'), canon
 
     start = starts[-1].start()
-    demandada = last_seg[:start].strip().rstrip('.')
-    tipo_juicio = last_seg[start:tail.start()].strip()
+    return segment[:start].strip().rstrip('.'), segment[start:end].strip()
+
+
+def _split_tipo_juicio(last_seg):
+    """Encuentra el corte demandada/tipo_juicio anclado en vocabulario
+    conocido, cuando el tipo termina en "N Acdo(s)./Audiencia(s)." (formato
+    Núm. Exp. de juzgados). Devuelve (demandada, tipo_juicio, num_acdos) o
+    None si no hay match.
+    """
+    tail = RE_TIPO_TAIL.search(last_seg)
+    if not tail:
+        return None
+    demandada, tipo_juicio = _split_demandada_tipo(last_seg, tail.start())
+    if tipo_juicio is None:
+        return None
     return demandada, tipo_juicio, int(tail.group(1))
 
 
@@ -282,8 +351,11 @@ def parse_pdf(text, boletin_id, fecha_raw):
 
         if not line or len(line) < 3:
             # Línea vacía: descartar bloque si no contiene expediente
-            if block and not RE_ENTRY_END.search(" ".join(block)):
-                block = []
+            # (de ninguno de los dos formatos de terminador)
+            if block:
+                joined_block = " ".join(block)
+                if not RE_ENTRY_END.search(joined_block) and not RE_TOCA_END.search(joined_block):
+                    block = []
             continue
 
         if line in SECTION_HEADERS:
@@ -291,7 +363,7 @@ def parse_pdf(text, boletin_id, fecha_raw):
             block = []
             continue
 
-        if line in SKIP_LINES:
+        if line in SKIP_LINES or RE_SKIP_PREFIX.match(line):
             continue
 
         if RE_JUZGADO.match(line):
@@ -323,8 +395,15 @@ def parse_pdf(text, boletin_id, fecha_raw):
         # sin cortar ahí.
         search_from = 0
         while True:
-            m_end = RE_ENTRY_END.search(joined, search_from)
-            if not m_end:
+            m_exp = RE_ENTRY_END.search(joined, search_from)
+            m_toca = RE_TOCA_END.search(joined, search_from)
+            if m_exp and m_toca:
+                m_end, is_toca = (m_exp, False) if m_exp.start() < m_toca.start() else (m_toca, True)
+            elif m_exp:
+                m_end, is_toca = m_exp, False
+            elif m_toca:
+                m_end, is_toca = m_toca, True
+            else:
                 break
 
             resto = joined[m_end.end():].strip()
@@ -332,7 +411,8 @@ def parse_pdf(text, boletin_id, fecha_raw):
                 search_from = m_end.end()
                 continue
 
-            entry = _parse_entry(joined[: m_end.end()], boletin_id, fecha_raw, ctx)
+            parse_fn = _parse_toca_entry if is_toca else _parse_entry
+            entry = parse_fn(joined[: m_end.end()], boletin_id, fecha_raw, ctx)
             if entry:
                 entries.append(entry)
 
@@ -386,11 +466,49 @@ def _parse_entry(text, boletin_id, fecha_raw, ctx):
             tipo_raw = m_tipo.group(1).strip()
             tipo_juicio = _match_canonical_tipo(tipo_raw) or tipo_raw
             num_acdos = int(m_tipo.group(2))
+        elif m_exp.group(2):
+            # Variante donde "N Acdo." va después de "Núm. Exp." (ver
+            # comentario en RE_ENTRY_END): no hay conteo antes del punto,
+            # así que no hay un límite derecho obvio para anclar el corte
+            # demandada/tipo — se usa todo last_seg, igual que en el
+            # formato Toca.
+            if demandada_raw is None:
+                demandada, tipo_juicio = _split_demandada_tipo(last_seg, len(last_seg))
+            else:
+                demandada = demandada_raw
+                tipo_juicio = _match_canonical_tipo(last_seg)
+            num_acdos = int(m_exp.group(2))
         else:
             demandada = demandada_raw if demandada_raw is not None else resto
             tipo_juicio = None
             num_acdos = None
 
+    demandada, tipo_juicio = _relocate_tipo_juicio(demandada, tipo_juicio)
+
+    return _row(boletin_id, fecha_raw, ctx, actora, demandada, tipo_juicio, num_acdos, expediente, text)
+
+
+def _parse_toca_entry(text, boletin_id, fecha_raw, ctx):
+    """Análogo a _parse_entry, pero para el formato Toca (Salas y
+    subsección Sentencias de Juzgados): no hay "Núm. Exp.", el número de
+    expediente es el toca mismo y va ANTES del conteo de acuerdos/sentencias
+    en vez de después (ver RE_TOCA_END)."""
+    m_toca = RE_TOCA_END.search(text)
+    if not m_toca:
+        return None
+
+    expediente = m_toca.group(1).strip()
+    num_acdos = int(m_toca.group(2))
+    pre = text[:m_toca.start()].strip()
+
+    partes = RE_VS.split(pre, maxsplit=1)
+    actora = partes[0].strip()
+
+    if len(partes) < 2:
+        return _row(boletin_id, fecha_raw, ctx, actora, None, None, num_acdos, expediente, text)
+
+    resto = partes[1].strip()
+    demandada, tipo_juicio = _split_demandada_tipo(resto, len(resto))
     demandada, tipo_juicio = _relocate_tipo_juicio(demandada, tipo_juicio)
 
     return _row(boletin_id, fecha_raw, ctx, actora, demandada, tipo_juicio, num_acdos, expediente, text)
