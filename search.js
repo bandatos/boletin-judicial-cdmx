@@ -439,9 +439,32 @@ function search() {
 
   let sql;
 
-  if (q) {
-    // FTS5: escapar comillas dobles en la query
-    const ftsQ = q.replace(/"/g, '""');
+  // Número de expediente ("387/2025"): no está indexado en FTS y la "/"
+  // rompe la sintaxis de MATCH, así que se busca directo en la columna.
+  const expedienteQ = q.match(/^\s*(\d+)\s*\/\s*(\d+)\s*$/);
+
+  if (expedienteQ) {
+    filtros.push('e.expediente LIKE ?');
+    params.unshift(`${expedienteQ[1]}/${expedienteQ[2]}%`);
+    sql = `
+      SELECT e.boletin_id, e.actora, e.demandada, e.tipo_juicio, e.expediente,
+             e.juzgado, e.sala, b.fecha, b.pdf_url
+      FROM entradas e
+      LEFT JOIN boletines b ON e.boletin_id = b.id
+      WHERE ${filtros.join(' AND ')}
+      LIMIT ${MAX_ROWS}
+    `;
+  } else if (q) {
+    // FTS5 (detail=none) no soporta phrase queries ni caracteres especiales
+    // ("/", "-", "(", ":"...) fuera de un bareword: se sanean a espacios
+    // para evitar errores de sintaxis y buscar cada palabra por separado
+    // (AND implícito).
+    const ftsQ = q.replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+    if (!ftsQ) {
+      $('result-count').textContent = 'Sin resultados.';
+      $('result-list').innerHTML = '';
+      return;
+    }
     sql = `
       SELECT e.boletin_id, e.actora, e.demandada, e.tipo_juicio, e.expediente,
              e.juzgado, e.sala, b.fecha, b.pdf_url
