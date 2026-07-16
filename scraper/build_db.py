@@ -15,6 +15,8 @@ import sqlite3
 import sys
 from pathlib import Path
 
+from normalize_tipo import normalize as normalize_tipo
+
 RE_ANIO = re.compile(r"/(\d{4})\b")
 
 
@@ -40,6 +42,7 @@ def create_schema(conn):
             actora      TEXT,
             demandada   TEXT,
             tipo_juicio TEXT,
+            tipo_juicio_norm TEXT,
             expediente  TEXT,
             num_acdos   INTEGER,
             anio        INTEGER
@@ -50,6 +53,9 @@ def create_schema(conn):
 
         CREATE INDEX IF NOT EXISTS idx_anio
             ON entradas (anio);
+
+        CREATE INDEX IF NOT EXISTS idx_tipo_juicio_norm
+            ON entradas (tipo_juicio_norm);
 
         CREATE TABLE IF NOT EXISTS carpetas_fgj (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -117,10 +123,14 @@ def load_entradas(conn, csv_path, log):
             expediente = row.get("expediente") or ""
             m_anio = RE_ANIO.search(expediente)
             anio = int(m_anio.group(1)) if m_anio else None
-            rows.append(tuple(row.get(k) or None for k in fields) + (anio,))
+            tipo_juicio_norm = normalize_tipo(row.get("tipo_juicio") or None)
+            rows.append(
+                tuple(row.get(k) or None for k in fields)
+                + (tipo_juicio_norm, anio)
+            )
         conn.executemany(
-            f"INSERT INTO entradas ({', '.join(fields)}, anio) "
-            f"VALUES ({', '.join(['?']*len(fields))}, ?)",
+            f"INSERT INTO entradas ({', '.join(fields)}, tipo_juicio_norm, anio) "
+            f"VALUES ({', '.join(['?']*len(fields))}, ?, ?)",
             rows,
         )
         inserted = len(rows)

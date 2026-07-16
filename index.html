@@ -113,6 +113,45 @@
     }
     #about-bandatos-link:hover { background: var(--bg-card); }
 
+    #about-detail-btn {
+      padding: .55rem 1.3rem;
+      background: none;
+      color: var(--accent);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: .92rem;
+      cursor: pointer;
+    }
+    #about-detail-btn:hover { background: var(--bg-card); }
+
+    #about-detail {
+      display: none;
+      margin-top: 1rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--border);
+      max-height: 55vh;
+      overflow-y: auto;
+    }
+    #about-detail.open { display: block; }
+
+    #about-detail h3 {
+      font-size: .95rem;
+      color: var(--accent);
+      margin: .9rem 0 .4rem;
+    }
+
+    #about-detail h3:first-child { margin-top: 0; }
+
+    #about-detail p, #about-detail ul {
+      font-size: .88rem;
+      line-height: 1.55;
+      margin-bottom: .7rem;
+      color: var(--fg);
+    }
+
+    #about-detail ul { padding-left: 1.1rem; }
+    #about-detail li { margin-bottom: .35rem; }
+
     .container { max-width: var(--max); margin: 0 auto; padding: 0 1.5rem; }
 
     #search-box {
@@ -413,8 +452,40 @@
       trabajan con datos en proyectos de impacto social.
     </p>
     <div class="about-actions">
+      <button id="about-detail-btn" type="button" aria-expanded="false" aria-controls="about-detail">Más detalle</button>
       <a id="about-bandatos-link" href="https://bandatos.org" target="_blank" rel="noopener">Conocer Bandatos</a>
       <button id="about-close-btn" type="button">Entendido</button>
+    </div>
+
+    <div id="about-detail">
+      <h3>Boletín Judicial del PJCDMX</h3>
+      <p>
+        Notificaciones y acuerdos diarios de juzgados civiles, familiares,
+        laborales y de derechos humanos de la Ciudad de México, parseados
+        desde los PDFs oficiales: expediente, partes actora/demandada, tipo
+        de juicio, juzgado/sala, fecha y liga al PDF original. Cobertura
+        actual de la demo: enero-junio 2026, ~680,000 entradas (64 boletines).
+      </p>
+      <p>
+        Son las resoluciones que un juzgado dicta sobre un expediente en
+        trámite, y su publicación oficial para que las partes se enteren.
+      </p>
+      <ul>
+        <li><strong>Acuerdo:</strong> la decisión o proveído que dicta el juez sobre algo del expediente (admite una prueba, fija fecha de audiencia, resuelve un incidente, etc). No es la sentencia final, es cualquier resolución intermedia del proceso.</li>
+        <li><strong>Notificación:</strong> el mecanismo por el cual esa decisión se hace pública. En México, mucho trámite civil/familiar/laboral se notifica "por boletín" en vez de notificación personal, es decir, el juzgado no avisa directo, publica el acuerdo en el Boletín Judicial y se considera que las partes ya están notificadas a partir de esa publicación (empiezan a correr plazos legales desde ahí).</li>
+      </ul>
+      <p>
+        Por eso el boletín es crítico: si tienes un juicio y no lo revisas,
+        te enteras tarde de que hubo movimiento y puedes perder plazos.
+      </p>
+      <h3>Por qué se divide por materia</h3>
+      <p>Cada materia tiene juzgados distintos dentro del TSJ-CDMX:</p>
+      <ul>
+        <li><strong>Civiles:</strong> contratos, propiedad, cobros, arrendamiento.</li>
+        <li><strong>Familiares:</strong> divorcios, pensión alimenticia, custodia, sucesiones.</li>
+        <li><strong>Laborales:</strong> conflictos trabajador-patrón (juntas/tribunales laborales).</li>
+        <li><strong>Derechos humanos:</strong> juicios relacionados con violaciones de derechos humanos (amparo y afines), rama más reciente.</li>
+      </ul>
     </div>
   </div>
 </div>

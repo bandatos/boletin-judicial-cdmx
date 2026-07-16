@@ -39,6 +39,13 @@ $('about-overlay').addEventListener('click', e => {
   if (e.target.id === 'about-overlay') closeAbout();
 });
 
+$('about-detail-btn').addEventListener('click', () => {
+  const detail = $('about-detail');
+  const open = detail.classList.toggle('open');
+  $('about-detail-btn').setAttribute('aria-expanded', open ? 'true' : 'false');
+  $('about-detail-btn').textContent = open ? 'Menos detalle' : 'Más detalle';
+});
+
 function setStatus(msg, progress = null) {
   $('status-text').textContent = msg;
   if (progress !== null) {
@@ -257,8 +264,8 @@ async function loadDb() {
 
 function populateTipoFilter() {
   const rows = db.exec(
-    "SELECT tipo_juicio FROM entradas WHERE tipo_juicio IS NOT NULL " +
-    "GROUP BY tipo_juicio ORDER BY COUNT(*) DESC LIMIT 200"
+    "SELECT tipo_juicio_norm FROM entradas WHERE tipo_juicio_norm IS NOT NULL " +
+    "GROUP BY tipo_juicio_norm ORDER BY COUNT(*) DESC LIMIT 200"
   );
   if (!rows.length) return;
   const sel = $('tipo');
@@ -292,8 +299,8 @@ const CHART_YEARS = 15;
 
 function renderYearChart() {
   const topRows = db.exec(
-    "SELECT tipo_juicio FROM entradas WHERE tipo_juicio IS NOT NULL " +
-    "GROUP BY tipo_juicio ORDER BY COUNT(*) DESC LIMIT 5"
+    "SELECT tipo_juicio_norm FROM entradas WHERE tipo_juicio_norm IS NOT NULL " +
+    "GROUP BY tipo_juicio_norm ORDER BY COUNT(*) DESC LIMIT 5"
   );
   const top5 = topRows.length ? topRows[0].values.map(v => v[0]) : [];
   const buckets = [...top5, 'Otro'];
@@ -301,7 +308,7 @@ function renderYearChart() {
 
   const sql = `
     SELECT anio,
-      ${top5.length ? `CASE WHEN tipo_juicio IN (${placeholders}) THEN tipo_juicio ELSE 'Otro' END` : `'Otro'`} AS bucket,
+      ${top5.length ? `CASE WHEN tipo_juicio_norm IN (${placeholders}) THEN tipo_juicio_norm ELSE 'Otro' END` : `'Otro'`} AS bucket,
       COUNT(*) AS n
     FROM entradas
     WHERE anio IS NOT NULL
@@ -380,7 +387,7 @@ function search() {
 
   const filtros = [];
   const params = [];
-  if (tipo) { filtros.push('e.tipo_juicio = ?'); params.push(tipo); }
+  if (tipo) { filtros.push('e.tipo_juicio_norm = ?'); params.push(tipo); }
   if (anio) { filtros.push('e.anio = ?'); params.push(Number(anio)); }
 
   let sql;
