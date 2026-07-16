@@ -12,7 +12,9 @@ import csv
 import json
 import re
 import sqlite3
+import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from normalize_tipo import normalize as normalize_tipo
@@ -57,6 +59,11 @@ def create_schema(conn):
         CREATE INDEX IF NOT EXISTS idx_tipo_juicio_norm
             ON entradas (tipo_juicio_norm);
 
+        CREATE TABLE IF NOT EXISTS meta (
+            key   TEXT PRIMARY KEY,
+            value TEXT
+        );
+
         CREATE TABLE IF NOT EXISTS carpetas_fgj (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
             fecha_inicio     TEXT,
@@ -90,6 +97,26 @@ def create_fts(conn):
             detail=none
         );
     """)
+
+
+def populate_meta(conn):
+    """Guarda el commit de git y la fecha de build para que el frontend
+    pueda mostrar qué versión de la DB está corriendo (facilita detectar
+    si ya se hizo el deploy más reciente)."""
+    try:
+        commit = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, check=True, cwd=Path(__file__).parent,
+        ).stdout.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        commit = "sin-git"
+
+    built_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+    conn.executemany(
+        "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+        [("commit", commit), ("built_at", built_at)],
+    )
 
 
 def populate_fts(conn):
@@ -184,6 +211,7 @@ def main():
         total += n
         log(f"    {n} entradas")
 
+    populate_meta(conn)
     conn.commit()
 
     log(f"\nTotal: {total} entradas. Construyendo índice FTS5...")

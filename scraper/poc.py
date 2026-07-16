@@ -156,6 +156,9 @@ TIPO_START_WORDS = [
     "Pago", "Inmat", "Quieb", "Convencional", "Proforma", "Rescisión",
     "Rescision", "Ejecución", "Ejecucion", "Reconocimiento", "Reconoc",
     "Diligencias", "Prescripción", "Prescripcion", "Prescrip", "Nul", "Reiv",
+    "Alim", "Guarda", "Rect", "Terc", "Susp", "Pérd", "Perd", "Venta",
+    "Plenaria", "Protección", "Proteccion", "Suspensión", "Suspension",
+    "Concurso", "Reg", "Tutela",
 ]
 # Además, la primera palabra de cada tipo canónico conocido (Especial de
 # Fianzas Mercantil -> "Especial" ya está, pero esto suma automáticamente

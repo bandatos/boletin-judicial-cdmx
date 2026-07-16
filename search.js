@@ -257,21 +257,51 @@ async function loadDb() {
   populateTipoFilter();
   populateAnioFilter();
   renderYearChart();
+  renderDbVersion();
   setReady();
+}
+
+function renderDbVersion() {
+  let rows;
+  try {
+    rows = db.exec("SELECT key, value FROM meta");
+  } catch (e) {
+    return; // DB vieja sin tabla meta todavía
+  }
+  if (!rows.length) return;
+  const meta = Object.fromEntries(rows[0].values.map(([k, v]) => [k, v]));
+  if (!meta.commit && !meta.built_at) return;
+  $('db-version').textContent =
+    `DB: ${meta.commit || '?'} · generada ${meta.built_at || '?'}`;
 }
 
 // ── Filtros ───────────────────────────────────────────────────────────────────
 
+const TIPO_OTROS = '__otros__';
+
 function populateTipoFilter() {
+  const sel = $('tipo');
+
   const rows = db.exec(
     "SELECT tipo_juicio_norm FROM entradas WHERE tipo_juicio_norm IS NOT NULL " +
     "GROUP BY tipo_juicio_norm ORDER BY COUNT(*) DESC LIMIT 200"
   );
   if (!rows.length) return;
-  const sel = $('tipo');
   for (const [tipo] of rows[0].values) {
     const opt = document.createElement('option');
     opt.value = opt.textContent = tipo;
+    sel.appendChild(opt);
+  }
+
+  // Avisos sin tipo reconocido: sin "vs." (casos unilaterales legítimos) o
+  // con tipo_juicio que no matcheó ningún tipo canónico conocido.
+  const otrosCount = db.exec(
+    "SELECT COUNT(*) FROM entradas WHERE tipo_juicio_norm IS NULL"
+  )[0]?.values?.[0]?.[0] || 0;
+  if (otrosCount > 0) {
+    const opt = document.createElement('option');
+    opt.value = TIPO_OTROS;
+    opt.textContent = `Otros / sin tipo reconocido (${otrosCount.toLocaleString('es-MX')})`;
     sel.appendChild(opt);
   }
 }
@@ -294,27 +324,39 @@ function populateAnioFilter() {
 
 // ── Gráfico: avisos por año ──────────────────────────────────────────────────
 
-const CHART_COLORS = ['#1a5276', '#2e86c1', '#5dade2', '#85c1e9', '#aed6f1', '#ccc'];
+const CHART_COLORS = [
+  '#1a5276', '#1f618d', '#2874a6', '#2e86c1', '#3498db', '#5dade2', '#85c1e9', '#aed6f1',
+  '#ccc', '#eee',
+];
+const CHART_TOP_N = 8;
 const CHART_YEARS = 15;
 
 function renderYearChart() {
   const topRows = db.exec(
     "SELECT tipo_juicio_norm FROM entradas WHERE tipo_juicio_norm IS NOT NULL " +
-    "GROUP BY tipo_juicio_norm ORDER BY COUNT(*) DESC LIMIT 5"
+    `GROUP BY tipo_juicio_norm ORDER BY COUNT(*) DESC LIMIT ${CHART_TOP_N}`
   );
-  const top5 = topRows.length ? topRows[0].values.map(v => v[0]) : [];
-  const buckets = [...top5, 'Otro'];
-  const placeholders = top5.map(() => '?').join(',');
+  const top = topRows.length ? topRows[0].values.map(v => v[0]) : [];
+  // "Otro": tipo_juicio_norm reconocido pero fuera del top. "Sin tipo": no
+  // se pudo clasificar (sin "vs." o texto no reconocido) — se muestran
+  // separados para no mezclar avisos reales sin clasificar con la cola de
+  // tipos canónicos menores.
+  const buckets = [...top, 'Otro', 'Sin tipo'];
+  const placeholders = top.map(() => '?').join(',');
 
   const sql = `
     SELECT anio,
-      ${top5.length ? `CASE WHEN tipo_juicio_norm IN (${placeholders}) THEN tipo_juicio_norm ELSE 'Otro' END` : `'Otro'`} AS bucket,
+      CASE
+        ${top.length ? `WHEN tipo_juicio_norm IN (${placeholders}) THEN tipo_juicio_norm` : ''}
+        WHEN tipo_juicio_norm IS NULL THEN 'Sin tipo'
+        ELSE 'Otro'
+      END AS bucket,
       COUNT(*) AS n
     FROM entradas
     WHERE anio IS NOT NULL
     GROUP BY anio, bucket
   `;
-  const result = db.exec(sql, top5);
+  const result = db.exec(sql, top);
   if (!result.length) { $('chart-box').style.display = 'none'; return; }
 
   // anio -> { bucket -> n }
@@ -387,7 +429,12 @@ function search() {
 
   const filtros = [];
   const params = [];
-  if (tipo) { filtros.push('e.tipo_juicio_norm = ?'); params.push(tipo); }
+  if (tipo === TIPO_OTROS) {
+    filtros.push('e.tipo_juicio_norm IS NULL');
+  } else if (tipo) {
+    filtros.push('e.tipo_juicio_norm = ?');
+    params.push(tipo);
+  }
   if (anio) { filtros.push('e.anio = ?'); params.push(Number(anio)); }
 
   let sql;

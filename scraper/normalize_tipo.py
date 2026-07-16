@@ -43,7 +43,7 @@ ABBR = {
 # importar qué venga después.
 CANONICAL_TIPOS = [
     'Ordinario (Individual) Laboral Individual',
-    'Otros (Paraprocesales O. Voluntarios) Laboral Individual',
+    'Otros (Paraprocesales o Voluntarios) Laboral Individual',
     'Especial de Pérdida de la Patria Potestad Familiar',
     'Especial de Fianzas Mercantil',
     'Especial de Matriculación',
@@ -131,6 +131,30 @@ CANONICAL_TIPOS = [
     'Oral Civil',
     'Inmatriculación Judicial Civil',
     'Pago de Seguro Oralidad Civil',
+    'Guarda y Custodia',
+    'Quiebra Mercantil',
+    'Protección Efectiva de Derechos Tutela Efectiva de Derechos Humanos',
+    'Venta de Prenda Mercantil',
+    'Pago de Daños Culposos Causados por Motivos del Transito de Vehículo Civil',
+    'Pago de Daños Culposos Causados por Motivos del Transito de Vehículo Cuantía Menor Civil',
+    'Pago de Daños Culposos Causados por Motivos del Transito de Vehículo Paz Civil',
+    'Ejecución de Sentencias Dictadas en el Extranjero Mercantil',
+    'Ejecución de Sentencias Dictadas en el Extranjero Paz Mercantil',
+    'Suspensión de Pagos Mercantil',
+    'Concurso Voluntario y Necesario Civil',
+    'Plenaria de Posesión Oralidad Civil',
+    'Rectificación de Acta',
+    'Reconocimiento de Maternidad',
+    'Registro de Convivencias',
+    'Tercerías Mercantil',
+    'Especial Cuantía Menor Civil',
+    'Especial de Fianzas Paz Mercantil',
+    'Convencional o Preferente Cuantía Menor Mercantil',
+    'Arbitraje Comercial Cuantía Menor Mercantil',
+    'Especial de Cancelación y Reposición de Títulos de Crédito Cuantía Menor Mercantil',
+    'Especial de Pérdida de la Patria Potestad',
+    'Especial de Levantamiento de Acta Familiar',
+    'No Definido',
 ]
 # Prefijos más largos primero, para que "Especial Hipotecario Civil" gane
 # sobre "Especial Hipotecario" o "Especial".
@@ -179,9 +203,15 @@ WHITELIST_LAST = {
     'pos', 'posesion', 'posesión', 'mediante', 'otorgadas', 'otorgada',
 }
 
-# Código de actuario/secretaría al final (2-8 letras que no son una palabra
+# Código de actuario/secretaría al final (2-20 letras que no son una palabra
 # real de tipo de juicio): "Controversias del Orden Familiar Tesc" -> corta "Tesc".
-RE_TRAILING_CODE = re.compile(r'^[a-záéíóúñ]{2,8}$')
+# WHITELIST_LAST protege las palabras reales que sí pueden terminar un tipo.
+RE_TRAILING_CODE = re.compile(r'^[a-záéíóúñ]{2,20}$')
+
+# Palabras conectoras que no tiene sentido dejar como última palabra
+# sobreviviente ("Guarda y", "Cumplimiento de", "Nulidad de"): si el corte
+# por stopword/código deja una de estas al final, se descarta también.
+CONNECTOR_WORDS = {'y', 'de', 'del', 'la', 'el', 'los', 'las', 'en', 'a', 'o'}
 
 
 # Variantes de escritura del mismo tipo (typo real del boletín, singular
@@ -191,6 +221,13 @@ RE_TRAILING_CODE = re.compile(r'^[a-záéíóúñ]{2,8}$')
 SPELLING_FIXES = [
     (re.compile(r'\bGatantía\b', re.IGNORECASE), 'Garantía'),
     (re.compile(r'\bGarantía Otorgada\b', re.IGNORECASE), 'Garantías Otorgadas'),
+    (re.compile(r'\bNo Definido No Definido\b', re.IGNORECASE), 'No Definido'),
+    # Boilerplate truncado de forma variable en el boletín: siempre es el
+    # mismo tipo, se completa a la forma larga antes de matchear.
+    (re.compile(r'\bTutela de Derechos(?! Humanos)\b', re.IGNORECASE), 'Tutela Efectiva de Derechos Humanos'),
+    (re.compile(r'\bTutela de Derechos Humanos\b', re.IGNORECASE), 'Tutela Efectiva de Derechos Humanos'),
+    # Palabras pegadas sin espacio por error de OCR/parseo ("LeyOrd.", "LeyControversias").
+    (re.compile(r'(?<=[a-záéíóúñ])(?=[A-ZÁÉÍÓÚÑ])'), ' '),
 ]
 
 
@@ -227,13 +264,15 @@ def match_canonical_prefix(text):
 
 
 def normalize(tipo_juicio):
-    """Devuelve una forma canónica de tipo_juicio, o el valor original si
-    queda vacío tras normalizar (nunca devuelve None si la entrada no lo es)."""
+    """Devuelve una forma canónica de tipo_juicio, o None si no se puede
+    reconocer un tipo real (fail-closed: mejor no clasificar que mostrar
+    basura en el filtro/dropdown — el tipo_juicio crudo sigue intacto y
+    visible en los resultados, solo tipo_juicio_norm queda sin valor)."""
     if not tipo_juicio:
-        return tipo_juicio
+        return None
     t = tipo_juicio.strip().rstrip('.').strip()
     if not t:
-        return tipo_juicio
+        return None
 
     t = expand_abbr(t)
 
@@ -257,8 +296,23 @@ def normalize(tipo_juicio):
             continue
         out.append(w)
 
+    # Palabra conectora colgante al final ("Guarda y", "Cumplimiento de"):
+    # la palabra real que la seguía era ruido y ya se cortó arriba.
+    while out and out[-1].rstrip('.').lower() in CONNECTOR_WORDS:
+        out.pop()
+
     result = ' '.join(out).strip().rstrip('.').strip()
-    # Si no sobrevivió ninguna palabra (todo era ruido: "Acuerdo.", "Auto.",
-    # etc.), devolver el texto ya expandido y sin punto final en vez del
-    # original crudo, para no dejar basura con puntuación inconsistente.
-    return result if result else t
+    if not result:
+        return None
+
+    # Reintentar el match canónico sobre el resultado recortado: cubre
+    # casos como "Rescisión de Contrato Oralidad Mercantil Señala Nuevo
+    # Domicilio..." donde el corte por stopword ("Señala" no es stopword,
+    # pero si lo fuera más adelante) deja un prefijo que sí es un tipo real.
+    canon = match_canonical_prefix(result)
+    if canon:
+        return canon
+
+    # No matcheó ningún tipo canónico ni siquiera tras recortar: es texto
+    # no reconocido (nombre de persona, código, fragmento). Fail-closed.
+    return None
