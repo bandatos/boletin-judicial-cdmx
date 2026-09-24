@@ -411,7 +411,11 @@ def _es_continuacion_organo(line):
 
 def parse_pdf(text, boletin_id, fecha_raw):
     entries = []
-    ctx = {"seccion": None, "juzgado": None, "sala": None, "secretaria": None, "fecha_acuerdo": None}
+    # pagina: página del PDF (1 = primera) donde se cerró la entrada, para
+    # abrir el PDF justo ahí (visor con #page=N). pdftotext separa las
+    # páginas con un form feed (\f).
+    ctx = {"seccion": None, "juzgado": None, "sala": None, "secretaria": None,
+           "fecha_acuerdo": None, "pagina": 1}
     block = []
 
     def flush_bare():
@@ -429,7 +433,14 @@ def parse_pdf(text, boletin_id, fecha_raw):
 
     organo = None  # líneas del nombre de un órgano multilínea, en curso
 
-    for raw_line in text.splitlines():
+    lineas = (
+        (n, raw_line)
+        for n, pagina in enumerate(text.split("\f"), start=1)
+        for raw_line in pagina.splitlines()
+    )
+
+    for pagina, raw_line in lineas:
+        ctx["pagina"] = pagina
         line = raw_line.strip()
 
         if organo is not None:

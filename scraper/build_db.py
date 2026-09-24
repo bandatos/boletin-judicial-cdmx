@@ -60,7 +60,8 @@ def create_schema(conn):
             tipo_juicio_norm TEXT,
             expediente  TEXT,
             num_acdos   INTEGER,
-            anio        INTEGER
+            anio        INTEGER,
+            pagina      INTEGER  -- página del PDF del boletín (1 = primera)
         );
 
         CREATE INDEX IF NOT EXISTS idx_expediente
@@ -190,7 +191,7 @@ def load_entradas(conn, csv_path, loaded, log, en_rango=None):
     esos boletines (filtro --desde-fecha)."""
     fields = [
         "boletin_id", "juzgado", "sala", "secretaria",
-        "actora", "demandada", "tipo_juicio", "expediente", "num_acdos",
+        "actora", "demandada", "tipo_juicio", "expediente", "num_acdos", "pagina",
     ]
     counts = {"inserted": 0, "skipped": 0}
     new_ids = set()
