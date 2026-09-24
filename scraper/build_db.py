@@ -12,11 +12,16 @@ Uso:
 import argparse
 import csv
 import functools
+import itertools
+import os
+from collections import deque
+from multiprocessing import Pool
 import json
 import re
 import sqlite3
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -197,19 +202,80 @@ def populate_boletin_ranges(conn, log):
     conn.execute("DROP TABLE agg")
 
 
-def load_entradas(conn, csv_path, loaded, log, en_rango=None):
+FIELDS = [
+    "boletin_id", "juzgado", "sala", "secretaria",
+    "actora", "demandada", "tipo_juicio", "expediente", "num_acdos", "pagina",
+]
+COLS_CARGA = FIELDS + ["tipo_juicio_norm", "anio"]
+BLOQUE = 64 * 1024 * 1024  # bytes de CSV por tarea
+
+# Estado de cada proceso de la carga paralela (lo fija _init_worker).
+_W = {}
+
+
+def _init_worker(csv_path, col, loaded, en_rango, tmp_dir):
+    _W.update(path=csv_path, col=col, loaded=loaded, en_rango=en_rango, tmp_dir=tmp_dir)
+
+
+def _parse_bloque(bounds):
+    """Lee y transforma las filas que EMPIEZAN dentro de [start, end) del CSV.
+    Cada fila ocupa exactamente una línea (ningún campo lleva saltos de
+    línea), así que se puede cortar el archivo en cualquier "\n"."""
+    start, end = bounds
+    col, loaded, en_rango = _W["col"], _W["loaded"], _W["en_rango"]
+    idx = [col.get(k) for k in FIELDS]
+    i_bol, i_tipo, i_exp = col["boletin_id"], col["tipo_juicio"], col["expediente"]
+
+    lineas = []
+    with open(_W["path"], "rb") as f:
+        f.seek(start - 1)
+        f.readline()  # termina la línea que empezó antes de `start`
+        while f.tell() < end:
+            linea = f.readline()
+            if not linea:
+                break
+            lineas.append(linea.decode("utf-8"))
+
+    filas, ids, salteadas = [], set(), 0
+    for row in csv.reader(lineas):
+        boletin_id = int(row[i_bol])
+        if en_rango is not None and boletin_id not in en_rango:
+            continue
+        if boletin_id in loaded:
+            salteadas += 1
+            continue
+        ids.add(boletin_id)
+        m_anio = RE_ANIO.search(row[i_exp])
+        filas.append(
+            tuple((row[i] or None) if i is not None else None for i in idx)
+            + (normalize_tipo(row[i_tipo] or None), int(m_anio.group(1)) if m_anio else None)
+        )
+
+    # El bloque se escribe en un SQLite propio en vez de devolver las filas:
+    # pasarlas serializadas al proceso principal costaba casi tanto como
+    # leerlas. El principal las copia con INSERT ... SELECT (en C).
+    shard = os.path.join(_W["tmp_dir"], f"bloque_{start}.sqlite")
+    c = sqlite3.connect(shard)
+    c.execute("PRAGMA journal_mode=OFF")
+    c.execute("PRAGMA synchronous=OFF")
+    c.execute(f"CREATE TABLE filas ({', '.join(COLS_CARGA)})")
+    c.executemany(f"INSERT INTO filas VALUES ({', '.join(['?'] * len(COLS_CARGA))})", filas)
+    c.commit()
+    c.close()
+    return shard, len(filas), ids, salteadas
+
+
+def load_entradas(conn, csv_path, loaded, log, en_rango=None, workers=None, tmp_dir=None):
     """Carga las entradas de un run salteando los boletines que ya cargó un
     run anterior (`loaded`, se actualiza). Los runs se pisan entre sí (el
     histórico repite boletines de los runs de 2026) y sin esto cada boletín
     repetido aparecía dos veces. `en_rango`: si se pasa, solo se cargan
-    esos boletines (filtro --desde-fecha)."""
-    fields = [
-        "boletin_id", "juzgado", "sala", "secretaria",
-        "actora", "demandada", "tipo_juicio", "expediente", "num_acdos", "pagina",
-    ]
-    counts = {"inserted": 0, "skipped": 0}
-    new_ids = set()
+    esos boletines (filtro --desde-fecha).
 
+    Leer el CSV, transformar e insertar las filas se reparte en procesos
+    por bloques del archivo, cada uno a su propio SQLite temporal. Acá solo
+    se copian los bloques en el orden del CSV: así las entradas de cada
+    boletín quedan contiguas (ver populate_boletin_ranges)."""
     # Si el run no aporta ningún boletín nuevo (todos ya cargados de un run
     # más nuevo, o fuera del rango de fechas) ni se lee: el CSV del histórico
     # pesa ~8 GB. Los boletines del run son los .txt que tiene en pdfs/.
@@ -222,34 +288,41 @@ def load_entradas(conn, csv_path, loaded, log, en_rango=None):
             log("    sin boletines nuevos, se saltea")
             return 0
 
-    def rows():
-        with open(csv_path, newline="") as f:
-            reader = csv.reader(f)
-            col = {name: i for i, name in enumerate(next(reader))}
-            idx = [col.get(k) for k in fields]
-            i_bol, i_tipo, i_exp = col["boletin_id"], col["tipo_juicio"], col["expediente"]
-            for row in reader:
-                boletin_id = int(row[i_bol])
-                if en_rango is not None and boletin_id not in en_rango:
-                    continue
-                if boletin_id in loaded:
-                    counts["skipped"] += 1
-                    continue
-                new_ids.add(boletin_id)
-                m_anio = RE_ANIO.search(row[i_exp])
-                anio = int(m_anio.group(1)) if m_anio else None
-                counts["inserted"] += 1
-                yield (
-                    tuple((row[i] or None) if i is not None else None for i in idx)
-                    + (normalize_tipo(row[i_tipo] or None), anio)
-                )
+    with open(csv_path, newline="") as f:
+        col = {name: i for i, name in enumerate(next(csv.reader(f)))}
+    with open(csv_path, "rb") as f:
+        inicio_datos = len(f.readline())
+    total_bytes = csv_path.stat().st_size
+    bloques = [(s, min(s + BLOQUE, total_bytes)) for s in range(inicio_datos, total_bytes, BLOQUE)]
 
-    # Generador en vez de lista: el run histórico tiene ~13M filas.
-    conn.executemany(
-        f"INSERT INTO entradas ({', '.join(fields)}, tipo_juicio_norm, anio) "
-        f"VALUES ({', '.join(['?']*len(fields))}, ?, ?)",
-        rows(),
-    )
+    workers = workers or max(1, (os.cpu_count() or 2) - 1)
+    counts = {"inserted": 0, "skipped": 0}
+    new_ids = set()
+    cols = ", ".join(COLS_CARGA)
+
+    with tempfile.TemporaryDirectory(prefix="build_db_", dir=tmp_dir) as tmp, \
+            Pool(workers, initializer=_init_worker,
+                 initargs=(str(csv_path), col, frozenset(loaded), en_rango, tmp)) as pool:
+        # Como mucho 2 bloques pendientes por proceso, para no llenar el
+        # disco temporal si los procesos van más rápido que la copia.
+        it = iter(bloques)
+        pendientes = deque(pool.apply_async(_parse_bloque, (b,))
+                           for b in itertools.islice(it, 2 * workers))
+        while pendientes:
+            shard, n, ids, salteadas = pendientes.popleft().get()
+            siguiente = next(it, None)
+            if siguiente:
+                pendientes.append(pool.apply_async(_parse_bloque, (siguiente,)))
+            if n:
+                conn.execute("ATTACH DATABASE ? AS bloque", (shard,))
+                conn.execute(f"INSERT INTO entradas ({cols}) SELECT {cols} FROM bloque.filas ORDER BY rowid")
+                conn.commit()
+                conn.execute("DETACH DATABASE bloque")
+            os.remove(shard)
+            new_ids.update(ids)
+            counts["inserted"] += n
+            counts["skipped"] += salteadas
+
     loaded |= new_ids
     if counts["skipped"]:
         log(f"    {counts['skipped']} entradas salteadas (boletines ya cargados de un run más nuevo)")
@@ -271,6 +344,9 @@ def main():
     parser.add_argument("--since", help="Solo incluir runs desde esta fecha YYYY-MM-DD")
     parser.add_argument("--exclude", action="append", default=[],
                         help="Run a omitir (nombre del directorio). Repetible")
+    parser.add_argument("--sin-vacuum", action="store_true",
+                        help="No compactar al final (más rápido; para la base del "
+                             "server, donde el tamaño del archivo no importa)")
     parser.add_argument("--desde-fecha",
                         help="Solo boletines publicados desde esta fecha YYYY-MM-DD, "
                              "de cualquier run (a diferencia de --since, que filtra "
@@ -321,7 +397,7 @@ def main():
         run_dir = csv_path.parent
         log(f"  {run_dir.name}...")
 
-        n = load_entradas(conn, csv_path, loaded, log, en_rango)
+        n = load_entradas(conn, csv_path, loaded, log, en_rango, tmp_dir=str(output.parent))
         total += n
         log(f"    {n} entradas")
 
@@ -339,7 +415,9 @@ def main():
     log("Optimizando...")
     conn.execute("INSERT INTO entradas_fts(entradas_fts) VALUES('optimize')")
     conn.commit()
-    conn.execute("VACUUM")
+    if not args.sin_vacuum:
+        log("Compactando...")
+        conn.execute("VACUUM")
     conn.close()
 
     size_mb = output.stat().st_size / 1e6
