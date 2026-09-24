@@ -1,8 +1,9 @@
 {
-  "version": "9e6bf332ee54f622",
-  "size": 148499801,
+  "version": "456be800db80cae0",
+  "size": 196545205,
   "parts": [
     "db/boletin.sqlite.gz.000",
-    "db/boletin.sqlite.gz.001"
+    "db/boletin.sqlite.gz.001",
+    "db/boletin.sqlite.gz.002"
   ]
 }
