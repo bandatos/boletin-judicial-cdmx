@@ -130,8 +130,33 @@ SKIP_LINES = {
 # fecha o de "NO PUBLICADAS"/"MAL PUBLICADAS" ("SENTENCIA DEFINITIVA DEL 9
 # DE FEBRERO DEL 2022", "SENTENCIAS INTERLOCUTORIAS NO PUBLICADAS"). Se
 # exige la línea entera en mayúsculas para no comerse texto de una entrada.
+# Mismo criterio para las subsecciones de audiencias ("AUDIENCIAS DEL 22 DE
+# ABRIL DEL 2021", "AUDIENCIAS MAL PUBLICADAS") y de acuerdos no/mal
+# publicados. "ACUERDOS DEL ..." no va acá: lo toma RE_ACUERDOS (fecha).
 RE_SKIP_PREFIX = re.compile(
-    r"^BOLETÍN JUDICIAL\b|^SENTENCIAS? (?:DEFINITIVAS?|INTERLOCUTORIAS?)\b[^a-záéíóúñ]*$"
+    r"^BOLETÍN JUDICIAL\b"
+    r"|^(?:SENTENCIAS? (?:DEFINITIVAS?|INTERLOCUTORIAS?)|AUDIENCIAS?|ACUERDOS? (?:NO|MAL) PUBLICADOS?)"
+    r"\b[^a-záéíóúñ]*$"
+    # También en Título ("Sentencia Interlocutoria" sola en su línea).
+    r"|^Sentencias? (?:Definitivas?|Interlocutorias?)$"
+)
+
+# Sufijo de "Núm. Exp. NNN/AAAA <sufijo>." que en realidad es la entrada
+# siguiente: falta el punto después del número y RE_ENTRY_END se come el
+# aviso que sigue hasta su propio "N Acdo." ("Núm. Exp. 652/2015 Secreto
+# Ejecutivo Mercantil 1 Acdo. Núm. Exp. 653/2015."). Los sufijos legítimos
+# ("Bis. 3 Amparo Directo (Amparo)", "(Expedientillo)") no traen "vs." ni
+# terminan en un conteo de acuerdos.
+# Otro caso de fusión: la entrada siguiente arranca con una razón social y
+# el "." de "S.A." se tomó como fin del sufijo ("Núm. Exp. 1134/2016
+# Diseños y Clásicos de México, S" + "A. de C.V. vs. ..."). Se detecta
+# porque el sufijo termina en una mayúscula suelta y lo que sigue continúa
+# la razón social.
+RE_SUFIJO_LETRA_SUELTA = re.compile(r"\s[A-Z]$")
+RE_CONTINUA_RAZON_SOCIAL = re.compile(r"^(?:A\.|de\s+R\.|C\.\s*V\.|R\.\s*L\.)")
+
+RE_SUFIJO_FUSIONADO = re.compile(
+    r"\s+vs\.\s+|\s\d+\s+(?:Acdos?|Audiencias?|Aud|Sent)\s*$", re.IGNORECASE
 )
 
 # Entrada que termina en "Núm. Exp. NNN/AAAA" SIN punto final. Así cierran
@@ -195,7 +220,7 @@ RE_ACUERDOS = re.compile(r"^ACUERDOS DEL\s+(.+)$")
 # principio de la SIGUIENTE entrada (se cuela en su actora). _parse_entry
 # usa este grupo como num_acdos cuando no encuentra uno antes de Núm. Exp.
 RE_ENTRY_END = re.compile(
-    r"Núm\.\s+Exp\.\s+(\d+/\d+.*?)(?<!\bvs)(?<!\bBis)\."
+    r"Núm\.\s+Exp\.\s+(\d+/\d+.*?)(?<!\bvs)(?<!\bBis)(?<!\bPubl)\."
     r"(?:\s*(\d+)\s+(?:Acdos?|Audiencias?)\.)?",
     re.IGNORECASE,
 )
@@ -258,7 +283,7 @@ RE_TIPO_ACDOS = re.compile(
 TIPO_START_WORDS = [
     "Ord", "Especial", "Esp", "Ejecutivo", "Ejec", "Ejecc", "Oral", "Juris",
     "Proced", "Aud", "Div", "Cont", "Vía", "Via", "Providencias", "Medios",
-    "Actos", "Sucesorio", "Controversias", "Otros", "Juic", "Tercerías",
+    "Actos", "Sucesorio", "Controversias", "Controversia", "Otros", "Juic", "Tercerías",
     "Tercerias", "Extinción", "Extincion", "Cump", "Resc", "Reivindicatorio",
     "Reivindicatoria", "Interdicto", "Nulidad", "Usucapión", "Usucapion",
     "Divorcio", "Rectificación", "Rectificacion", "Consignación",
@@ -270,6 +295,7 @@ TIPO_START_WORDS = [
     "Alim", "Guarda", "Rect", "Terc", "Susp", "Pérd", "Perd", "Venta",
     "Plenaria", "Protección", "Proteccion", "Suspensión", "Suspension",
     "Concurso", "Reg", "Tutela",
+    "Int", "Interd", "Test", "Testament", "Exh",
 ]
 # Además, la primera palabra de cada tipo canónico conocido (Especial de
 # Fianzas Mercantil -> "Especial" ya está, pero esto suma automáticamente
@@ -283,8 +309,12 @@ TIPO_START_WORDS = sorted(set(TIPO_START_WORDS) | {
 # como el toca o "Cnpcyf - Alimentos" al final de last_seg, donde no hay
 # nada después de la palabra que ancle el corte).
 RE_TIPO_START = re.compile(r"\b(?:" + "|".join(TIPO_START_WORDS) + r")\.?(?:\s|$)", re.IGNORECASE)
+# Cola "N Acdo(s)." y variantes de audiencias y sentencias: "1 Aud. en
+# Tercería.", "1 Sent. Interlocutoria.", "2 Sent. Def.".
 RE_TIPO_TAIL = re.compile(
-    r"\s+(\d+)\s+(?:Acdos?|Audiencias?)\.(?:\s*en\s+.+)?\s*$",
+    r"\s+(\d+)\s+(?:Acdos?|Audiencias?|Aud|Sent|Sentencias?)\.?"
+    r"(?:\s+(?:Def|Definitivas?|Interl|Inter|Interlocutorias?)\.?)?"
+    r"(?:\s*en\s+.+)?\s*$",
     re.IGNORECASE | re.DOTALL,
 )
 
@@ -355,6 +385,21 @@ def _split_demandada_tipo(segment, end):
     return segment[:start].strip().rstrip('.'), segment[start:end].strip()
 
 
+def _split_tipo_canonico(segment):
+    """Último recurso cuando no hay cola "N Acdo." ni conteo después de Núm.
+    Exp. ("... Ord. Mercantil Sent. Def."): corta solo si encuentra un tipo
+    de juicio canónico, de derecha a izquierda. Devuelve (resto, tipo) o
+    None. Sin ancla a la derecha, cortar en una palabra de arranque que no
+    forma un tipo real sería adivinar."""
+    for m in reversed(list(RE_TIPO_START.finditer(segment))):
+        if m.start() == 0:
+            continue
+        canon = _match_canonical_tipo(segment[m.start():])
+        if canon:
+            return segment[:m.start()].strip().rstrip('.'), canon
+    return None
+
+
 def _split_tipo_juicio(last_seg):
     """Encuentra el corte demandada/tipo_juicio anclado en vocabulario
     conocido, cuando el tipo termina en "N Acdo(s)./Audiencia(s)." (formato
@@ -419,17 +464,24 @@ def parse_pdf(text, boletin_id, fecha_raw):
     block = []
 
     def flush_bare():
-        """Si el bloque termina en "Núm. Exp. NNN/AAAA" sin punto (ver
-        RE_ENTRY_END_BARE), lo cierra como entrada y vacía el bloque."""
+        """Si el bloque termina en una entrada completa que quedó pendiente
+        (sin punto final, ver RE_ENTRY_END_BARE, o esperando la línea
+        siguiente por una razón social, ver RE_SUFIJO_LETRA_SUELTA), la
+        cierra y vacía el bloque."""
         nonlocal block
         if not block:
             return
         joined_block = " ".join(block)
         if RE_ENTRY_END_BARE.search(joined_block):
             entry = _parse_entry(joined_block.rstrip() + ".", boletin_id, fecha_raw, ctx)
-            if entry:
-                entries.append(entry)
-            block = []
+        else:
+            m = RE_ENTRY_END.search(joined_block)
+            if not m or joined_block[m.end():].strip():
+                return
+            entry = _parse_entry(joined_block, boletin_id, fecha_raw, ctx)
+        if entry:
+            entries.append(entry)
+        block = []
 
     organo = None  # líneas del nombre de un órgano multilínea, en curso
 
@@ -533,8 +585,31 @@ def parse_pdf(text, boletin_id, fecha_raw):
             else:
                 break
 
+            letra_suelta = razon_social = None
+            if not is_toca:
+                num = re.match(r"\d+/\d+", m_end.group(1))
+                sufijo = m_end.group(1)[num.end():]
+                siguiente = joined[m_end.end():].strip()
+                letra_suelta = RE_SUFIJO_LETRA_SUELTA.search(sufijo)
+                if letra_suelta and not siguiente:
+                    break  # decidir cuando llegue la línea siguiente
+                razon_social = letra_suelta and RE_CONTINUA_RAZON_SOCIAL.match(siguiente)
+                if RE_SUFIJO_FUSIONADO.search(sufijo) or razon_social:
+                    corte = m_end.start(1) + num.end()
+                    entry = _parse_entry(joined[:corte] + ".", boletin_id, fecha_raw, ctx)
+                    if entry:
+                        entries.append(entry)
+                    joined = joined[corte:].strip()
+                    block = [joined]
+                    search_from = 0
+                    continue
+
             resto = joined[m_end.end():].strip()
-            if not _looks_like_new_entry_start(resto):
+            # Sufijo de una letra ("Núm. Exp. 1483/2024 A.") que no sigue en
+            # razón social: el punto sí cierra la entrada, aunque la próxima
+            # sea de una sola parte (sin "vs." que la delate).
+            corte_seguro = not is_toca and letra_suelta and not razon_social
+            if not corte_seguro and not _looks_like_new_entry_start(resto):
                 search_from = m_end.end()
                 continue
 
@@ -561,12 +636,33 @@ def _parse_entry(text, boletin_id, fecha_raw, ctx):
 
     expediente = m_exp.group(1).strip()
     pre = text[:m_exp.start()].strip()
+    # El boletín a veces omite la actora y la entrada arranca con "vs.":
+    # sin el espacio previo RE_VS no corta y "vs. Fulano" quedaba de actora.
+    if re.match(r"vs\.\s", pre, re.IGNORECASE):
+        pre = " " + pre
 
     partes = RE_VS.split(pre, maxsplit=1)
     actora = partes[0].strip()
 
     if len(partes) < 2:
-        return _row(boletin_id, fecha_raw, ctx, actora, None, None, None, expediente, text)
+        # Caso de una sola parte (sin "vs."): sucesiones, jurisdicciones
+        # voluntarias, "Secreto"... El tipo de juicio y el conteo de acuerdos
+        # vienen pegados al nombre ("Islas Retana Julieta Juris. Voluntaria
+        # Civil 1 Acdo."); se cortan con el mismo criterio que la demandada
+        # en los casos con "vs.".
+        tipo_juicio = num_acdos = None
+        split = _split_tipo_juicio(actora)
+        if split:
+            actora, tipo_juicio, num_acdos = split
+        elif m_exp.group(2):
+            actora, tipo_juicio = _split_demandada_tipo(actora, len(actora))
+            num_acdos = int(m_exp.group(2))
+        else:
+            split = _split_tipo_canonico(actora)
+            if split:
+                actora, tipo_juicio = split
+        actora, tipo_juicio = _relocate_tipo_juicio(actora, tipo_juicio)
+        return _row(boletin_id, fecha_raw, ctx, actora or None, None, tipo_juicio, num_acdos, expediente, text)
 
     resto = partes[1].strip()
 
@@ -609,6 +705,10 @@ def _parse_entry(text, boletin_id, fecha_raw, ctx):
             demandada = demandada_raw if demandada_raw is not None else resto
             tipo_juicio = None
             num_acdos = None
+            if demandada_raw is None:
+                split = _split_tipo_canonico(last_seg)
+                if split:
+                    demandada, tipo_juicio = split
 
     demandada, tipo_juicio = _relocate_tipo_juicio(demandada, tipo_juicio)
 
@@ -641,7 +741,21 @@ def _parse_toca_entry(text, boletin_id, fecha_raw, ctx):
     return _row(boletin_id, fecha_raw, ctx, actora, demandada, tipo_juicio, num_acdos, expediente, text)
 
 
+# Restos de la entrada anterior que quedan al principio de la actora: la
+# marca "(Expedientillo)." o "(Amparo)", "no Publ." / "mal Publ." y su fecha
+# ("del 2017- 05- 18."), o un año suelto.
+RE_ARRASTRE_ACTORA = re.compile(
+    r"^(?:\((?:Expedientillo|Amparo|Cuadernillo)\)\.?\s*"
+    r"|(?:no|mal)\s+Publ\.?\s*"
+    r"|del\s+\d{4}-\s*\d{1,2}-\s*\d{1,2}\.\s*"
+    r"|\d{4}\s+(?=[A-ZÁÉÍÓÚÑ]))+"
+)
+
+
 def _row(boletin_id, fecha_raw, ctx, actora, demandada, tipo_juicio, num_acdos, expediente, raw_text):
+    if actora:
+        actora = RE_ARRASTRE_ACTORA.sub("", actora) or actora
+    actora = actora or None
     return {
         "boletin_id": boletin_id,
         "fecha": fecha_raw,

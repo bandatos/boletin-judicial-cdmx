@@ -32,6 +32,10 @@ ABBR = {
     'sent': 'Sentencia', 'def': 'Definitiva', 'gral': 'General',
     'concurs': 'Concurso', 'convivencias': 'Convivencias', 'reg': 'Registro',
     'convenc': 'Convencional', 'pref': 'Preferente', 'o': 'o',
+    # Familiares abreviados en boletines viejos ("Soto Hernández Isidro Test.
+    # 1 Acdo.", "Amaro Rodríguez Román Int. Principal 1 Acdo.").
+    'int': 'Intestamentario', 'test': 'Testamentario', 'testament': 'Testamentario',
+    'interd': 'Interdicción',
 }
 
 # Tipos de juicio reales, tal como se ven una vez limpios. El regex de
@@ -78,6 +82,9 @@ CANONICAL_TIPOS = [
     'Vía Correo Electrónico',
     'Vía Electrónica',
     'Sucesorio Familiar',
+    'Intestamentario',
+    'Testamentario',
+    'Interdicción',
     'Divorcio Necesario',
     'Divorcio Incausado',
     'Divorcio',
@@ -222,6 +229,8 @@ SPELLING_FIXES = [
     (re.compile(r'\bGatantía\b', re.IGNORECASE), 'Garantía'),
     (re.compile(r'\bGarantía Otorgada\b', re.IGNORECASE), 'Garantías Otorgadas'),
     (re.compile(r'\bNo Definido No Definido\b', re.IGNORECASE), 'No Definido'),
+    # Singular en boletines viejos ("Controversia de Arrendamiento Inmobiliario").
+    (re.compile(r'\bControversia de\b', re.IGNORECASE), 'Controversias de'),
     # Boilerplate truncado de forma variable en el boletín: siempre es el
     # mismo tipo, se completa a la forma larga antes de matchear.
     (re.compile(r'\bTutela de Derechos(?! Humanos)\b', re.IGNORECASE), 'Tutela Efectiva de Derechos Humanos'),
