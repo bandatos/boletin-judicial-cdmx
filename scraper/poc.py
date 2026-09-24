@@ -91,6 +91,24 @@ def download_pdf(pdf_url, dest):
     tmp.rename(dest)
 
 
+MESES_ABBR = {"ene": 1, "feb": 2, "mar": 3, "abr": 4, "may": 5, "jun": 6,
+              "jul": 7, "ago": 8, "sep": 9, "oct": 10, "nov": 11, "dic": 12}
+
+
+def urls_alternativas(pdf_url, fecha_raw):
+    """URLs a probar si el link del portal da 404. En boletines viejos el
+    nombre del archivo es DDMMAAAA + N.pdf y el portal a veces lo tiene mal:
+    año equivocado (marzo-abril 2019 apuntan a "...2009") o el sufijo 1 en
+    vez de 2 (31-ene-2022). Se arma el nombre desde la fecha del índice."""
+    m_url = re.search(r"^(.*/pdf/boletines/)\d{8}\d?\.pdf$", pdf_url or "")
+    m_fecha = re.search(r"(\d{1,2})-([a-z]{3})[a-z]*\.?-(\d{4})", fecha_raw or "")
+    if not m_url or not m_fecha or m_fecha.group(2) not in MESES_ABBR:
+        return []
+    base = f"{int(m_fecha.group(1)):02d}{MESES_ABBR[m_fecha.group(2)]:02d}{m_fecha.group(3)}"
+    candidatas = [f"{m_url.group(1)}{base}{suf}.pdf" for suf in ("1", "2", "")]
+    return [u for u in candidatas if u != pdf_url]
+
+
 # ── Parser ────────────────────────────────────────────────────────────────────
 
 SECTION_HEADERS = {
@@ -808,6 +826,7 @@ def main():
     csv_file = None
     writer = None
     total = completas = sin_vs = sin_tipo = 0
+    corregidas = 0  # boletines bajados de una URL distinta a la del portal
 
     for b in boletines[:max_boletines]:
         log(f"\nBoletín {b['id']} — {b['fecha_raw']}")
@@ -819,12 +838,23 @@ def main():
         pdf_path = pdf_dir / f"boletin_{b['id']}.pdf"
         if not pdf_path.exists():
             log("  Descargando PDF...")
-            try:
-                download_pdf(b["pdf_url"], pdf_path)
-            except requests.RequestException as e:
+            error = None
+            for url in [b["pdf_url"], *urls_alternativas(b["pdf_url"], b["fecha_raw"])]:
+                try:
+                    download_pdf(url, pdf_path)
+                except requests.RequestException as e:
+                    error = error or e
+                    continue
+                if url != b["pdf_url"]:
+                    log(f"  Link del portal roto, bajado de {url}")
+                    b["pdf_url_portal"], b["pdf_url"] = b["pdf_url"], url
+                    corregidas += 1
+                error = None
+                break
+            if error:
                 # Un boletín que falla (p. ej. el del día, que todavía no se
                 # subió y da 404) no debe tirar abajo una corrida de cientos.
-                log(f"  ERROR descargando, saltando: {e}")
+                log(f"  ERROR descargando, saltando: {error}")
                 continue
             log(f"  {pdf_path.stat().st_size / 1e6:.1f} MB descargados")
         else:
@@ -854,6 +884,13 @@ def main():
 
     if csv_file:
         csv_file.close()
+
+    if corregidas:
+        # El índice se guardó antes de bajar: se reescribe con las URLs que
+        # sí funcionaron (la del portal queda en pdf_url_portal).
+        with open(index_path, "w") as f:
+            json.dump(boletines, f, ensure_ascii=False, indent=2)
+        log(f"  {corregidas} URL(s) corregida(s) en {index_path}")
 
     log(f"\nTotal: {total} entradas")
 
