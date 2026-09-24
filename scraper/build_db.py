@@ -6,6 +6,7 @@ Uso:
     python build_db.py --dir data/ --output boletin.sqlite
     python build_db.py --dir data/ --output boletin.sqlite --since 2026-01-01
     python build_db.py --dir data/ --output boletin.sqlite --exclude 2026-07-02
+    python build_db.py --dir data/ --output boletin.sqlite --desde-fecha 2026-01-01
 """
 
 import argparse
@@ -25,12 +26,23 @@ RE_ANIO = re.compile(r"/(\d{4})\b")
 
 def create_schema(conn):
     conn.executescript("""
+        -- fecha_iso, n_entradas y entrada_desde/hasta: para navegar por
+        -- fecha en el frontend. Las entradas de un boletín quedan contiguas
+        -- (se insertan boletín por boletín), así que traer "todo lo del día"
+        -- es un rango de rowid, sin tener que indexar entradas.boletin_id.
         CREATE TABLE IF NOT EXISTS boletines (
-            id       INTEGER PRIMARY KEY,
-            fecha    TEXT NOT NULL,
-            pdf_url  TEXT,
-            pages    INTEGER
+            id            INTEGER PRIMARY KEY,
+            fecha         TEXT NOT NULL,
+            fecha_iso     TEXT,
+            pdf_url       TEXT,
+            pages         INTEGER,
+            n_entradas    INTEGER NOT NULL DEFAULT 0,
+            entrada_desde INTEGER,
+            entrada_hasta INTEGER
         );
+
+        CREATE INDEX IF NOT EXISTS idx_boletines_fecha
+            ON boletines (fecha_iso);
 
         -- La fecha de publicación no se guarda acá: es 1:1 con boletin_id y
         -- ya está en boletines.fecha. Repetirla por fila (una por aviso)
@@ -127,42 +139,92 @@ def populate_fts(conn):
     """)
 
 
+MESES = {"ene": 1, "feb": 2, "mar": 3, "abr": 4, "may": 5, "jun": 6,
+         "jul": 7, "ago": 8, "sep": 9, "oct": 10, "nov": 11, "dic": 12}
+RE_FECHA_RAW = re.compile(r"(\d{1,2})-([a-z]{3})[a-z]*\.?-(\d{4})")
+
+
+def fecha_iso(fecha_raw):
+    """'Consulta del Boletin Judicial de fecha  22-sep.-2026' -> '2026-09-22'."""
+    m = RE_FECHA_RAW.search(fecha_raw or "")
+    if not m or m.group(2) not in MESES:
+        return None
+    return f"{m.group(3)}-{MESES[m.group(2)]:02d}-{int(m.group(1)):02d}"
+
+
 def load_index(conn, index_path):
     with open(index_path) as f:
         boletines = json.load(f)
     conn.executemany(
-        "INSERT OR IGNORE INTO boletines (id, fecha, pdf_url) VALUES (?, ?, ?)",
-        [(b["id"], b["fecha_raw"], b["pdf_url"]) for b in boletines],
+        "INSERT OR IGNORE INTO boletines (id, fecha, fecha_iso, pdf_url) VALUES (?, ?, ?, ?)",
+        [(b["id"], b["fecha_raw"], fecha_iso(b["fecha_raw"]), b["pdf_url"]) for b in boletines],
     )
 
 
-def load_entradas(conn, csv_path, log):
-    inserted = 0
-    skipped = 0
+def populate_boletin_ranges(conn, log):
+    conn.execute("""
+        CREATE TEMP TABLE agg AS
+        SELECT boletin_id, COUNT(*) AS n, MIN(id) AS desde, MAX(id) AS hasta
+        FROM entradas GROUP BY boletin_id
+    """)
+    no_contiguos = conn.execute(
+        "SELECT COUNT(*) FROM agg WHERE hasta - desde + 1 != n"
+    ).fetchone()[0]
+    if no_contiguos:
+        # El frontend filtra además por boletin_id, así que no mezcla
+        # boletines; solo lee algunas filas de más.
+        log(f"  Aviso: {no_contiguos} boletines con entradas no contiguas")
+    conn.execute("""
+        UPDATE boletines
+        SET n_entradas = agg.n, entrada_desde = agg.desde, entrada_hasta = agg.hasta
+        FROM agg WHERE agg.boletin_id = boletines.id
+    """)
+    conn.execute("DROP TABLE agg")
+
+
+def load_entradas(conn, csv_path, loaded, log, en_rango=None):
+    """Carga las entradas de un run salteando los boletines que ya cargó un
+    run anterior (`loaded`, se actualiza). Los runs se pisan entre sí (el
+    histórico repite boletines de los runs de 2026) y sin esto cada boletín
+    repetido aparecía dos veces. `en_rango`: si se pasa, solo se cargan
+    esos boletines (filtro --desde-fecha)."""
     fields = [
         "boletin_id", "juzgado", "sala", "secretaria",
         "actora", "demandada", "tipo_juicio", "expediente", "num_acdos",
     ]
-    with open(csv_path, newline="") as f:
-        reader = csv.DictReader(f)
-        rows = []
-        for row in reader:
-            # Saltar si el boletin_id ya está cargado
-            expediente = row.get("expediente") or ""
-            m_anio = RE_ANIO.search(expediente)
-            anio = int(m_anio.group(1)) if m_anio else None
-            tipo_juicio_norm = normalize_tipo(row.get("tipo_juicio") or None)
-            rows.append(
-                tuple(row.get(k) or None for k in fields)
-                + (tipo_juicio_norm, anio)
-            )
-        conn.executemany(
-            f"INSERT INTO entradas ({', '.join(fields)}, tipo_juicio_norm, anio) "
-            f"VALUES ({', '.join(['?']*len(fields))}, ?, ?)",
-            rows,
-        )
-        inserted = len(rows)
-    return inserted
+    counts = {"inserted": 0, "skipped": 0}
+    new_ids = set()
+
+    def rows():
+        with open(csv_path, newline="") as f:
+            for row in csv.DictReader(f):
+                boletin_id = int(row["boletin_id"])
+                if en_rango is not None and boletin_id not in en_rango:
+                    continue
+                if boletin_id in loaded:
+                    counts["skipped"] += 1
+                    continue
+                new_ids.add(boletin_id)
+                expediente = row.get("expediente") or ""
+                m_anio = RE_ANIO.search(expediente)
+                anio = int(m_anio.group(1)) if m_anio else None
+                tipo_juicio_norm = normalize_tipo(row.get("tipo_juicio") or None)
+                counts["inserted"] += 1
+                yield (
+                    tuple(row.get(k) or None for k in fields)
+                    + (tipo_juicio_norm, anio)
+                )
+
+    # Generador en vez de lista: el run histórico tiene ~13M filas.
+    conn.executemany(
+        f"INSERT INTO entradas ({', '.join(fields)}, tipo_juicio_norm, anio) "
+        f"VALUES ({', '.join(['?']*len(fields))}, ?, ?)",
+        rows(),
+    )
+    loaded |= new_ids
+    if counts["skipped"]:
+        log(f"    {counts['skipped']} entradas salteadas (boletines ya cargados de un run más nuevo)")
+    return counts["inserted"]
 
 
 def find_runs(data_dir, since=None, exclude=()):
@@ -180,6 +242,10 @@ def main():
     parser.add_argument("--since", help="Solo incluir runs desde esta fecha YYYY-MM-DD")
     parser.add_argument("--exclude", action="append", default=[],
                         help="Run a omitir (nombre del directorio). Repetible")
+    parser.add_argument("--desde-fecha",
+                        help="Solo boletines publicados desde esta fecha YYYY-MM-DD, "
+                             "de cualquier run (a diferencia de --since, que filtra "
+                             "por nombre del run)")
     args = parser.parse_args()
 
     data_dir = Path(args.dir)
@@ -201,19 +267,31 @@ def main():
 
     create_schema(conn)
 
+    # Del run más nuevo al más viejo: si un boletín está en varios, gana el
+    # más reciente (parseado con la versión más nueva del parser).
+    runs = list(reversed(runs))
+    for csv_path in runs:
+        index_path = csv_path.parent / "index.json"
+        if index_path.exists():
+            load_index(conn, index_path)
+
+    en_rango = None
+    if args.desde_fecha:
+        conn.execute("DELETE FROM boletines WHERE fecha_iso IS NULL OR fecha_iso < ?",
+                     (args.desde_fecha,))
+        en_rango = {r[0] for r in conn.execute("SELECT id FROM boletines")}
+
     total = 0
+    loaded = set()
     for csv_path in runs:
         run_dir = csv_path.parent
         log(f"  {run_dir.name}...")
 
-        index_path = run_dir / "index.json"
-        if index_path.exists():
-            load_index(conn, index_path)
-
-        n = load_entradas(conn, csv_path, log)
+        n = load_entradas(conn, csv_path, loaded, log, en_rango)
         total += n
         log(f"    {n} entradas")
 
+    populate_boletin_ranges(conn, log)
     populate_meta(conn)
     conn.commit()
 

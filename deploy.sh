@@ -14,19 +14,20 @@
 # Para publicar: commitea db/ y boletin.sqlite.json y haz git push manualmente.
 #
 # Uso:
-#   ./deploy.sh [since]
+#   ./deploy.sh [desde]
 #   ./deploy.sh 2026-01-01
 #
-# EXCLUDE: runs a omitir, separados por espacio. Por defecto el run
-# histórico 2026-07-02 (ago. 2022 a jul. 2026, ~13M entradas): no entra
-# en la DB del browser y además repite los boletines del run 2026-06-10.
+# [desde]: fecha de publicación del primer boletín que entra en la DB del
+# browser (el histórico completo no entra). Se toman de cualquier run en
+# scraper/data/; si un boletín está en varios runs, gana el más nuevo.
+# EXCLUDE: runs a omitir (nombre del directorio), separados por espacio.
 set -e
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 
-SINCE="${1:-2026-01-01}"
-EXCLUDE="${EXCLUDE-2026-07-02}"
+DESDE="${1:-2026-01-01}"
+EXCLUDE="${EXCLUDE-}"
 DB="boletin.sqlite"
 DB_GZ="boletin.sqlite.gz"
 PARTS_DIR="db"
@@ -45,7 +46,7 @@ for run in $EXCLUDE; do EXCLUDE_ARGS+=(--exclude "$run"); done
 python scraper/build_db.py \
   --dir scraper/data/ \
   --output "$DB" \
-  --since "$SINCE" \
+  --desde-fecha "$DESDE" \
   "${EXCLUDE_ARGS[@]}"
 
 # ── 3. Comprimir y partir ─────────────────────────────────────────────────────
