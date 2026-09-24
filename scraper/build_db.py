@@ -100,7 +100,7 @@ def create_schema(conn):
     """)
 
 
-def create_indexes(conn):
+def create_indexes(conn, indices_server=False):
     # Después de la carga y no en el schema: armar el índice de una vez es
     # mucho más rápido que mantenerlo fila por fila durante 30M inserts.
     conn.executescript("""
@@ -113,6 +113,17 @@ def create_indexes(conn):
         CREATE INDEX IF NOT EXISTS idx_tipo_juicio_norm
             ON entradas (tipo_juicio_norm);
     """)
+    if indices_server:
+        # Solo para la base del server (en la del browser suman MB a la
+        # descarga y con 2M de filas alcanza un recorrido):
+        # - búsqueda por número de expediente sin saber el juzgado (el
+        #   índice de arriba empieza por juzgado);
+        # - gráfico por año y tipo leyendo solo el índice: con idx_anio
+        #   SQLite va a la tabla por cada fila y con 34M tarda minutos.
+        conn.executescript("""
+            CREATE INDEX IF NOT EXISTS idx_expediente_num ON entradas (expediente);
+            CREATE INDEX IF NOT EXISTS idx_anio_tipo ON entradas (anio, tipo_juicio_norm);
+        """)
 
 
 def create_fts(conn):
@@ -178,6 +189,13 @@ def load_index(conn, index_path):
     conn.executemany(
         "INSERT OR IGNORE INTO boletines (id, fecha, fecha_iso, pdf_url) VALUES (?, ?, ?, ?)",
         [(b["id"], b["fecha_raw"], fecha_iso(b["fecha_raw"]), b["pdf_url"]) for b in boletines],
+    )
+    # URLs corregidas por poc.py cuando el link del portal da 404 (ver
+    # docs/boletines-faltantes.md): pisan a la del portal aunque otro run
+    # con el link roto se haya cargado antes.
+    conn.executemany(
+        "UPDATE boletines SET pdf_url = ? WHERE id = ?",
+        [(b["pdf_url"], b["id"]) for b in boletines if b.get("pdf_url_portal")],
     )
 
 
@@ -344,6 +362,9 @@ def main():
     parser.add_argument("--since", help="Solo incluir runs desde esta fecha YYYY-MM-DD")
     parser.add_argument("--exclude", action="append", default=[],
                         help="Run a omitir (nombre del directorio). Repetible")
+    parser.add_argument("--indices-server", action="store_true",
+                        help="Índices extra para la base del server: por número de "
+                             "expediente y por (año, tipo de juicio)")
     parser.add_argument("--sin-vacuum", action="store_true",
                         help="No compactar al final (más rápido; para la base del "
                              "server, donde el tamaño del archivo no importa)")
@@ -402,7 +423,7 @@ def main():
         log(f"    {n} entradas")
 
     log("Índices...")
-    create_indexes(conn)
+    create_indexes(conn, args.indices_server)
     populate_boletin_ranges(conn, log)
     populate_meta(conn)
     conn.commit()
