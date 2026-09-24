@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from normalize_tipo import normalize
+import empresas as emp
 
 # normalize() es una cascada de regex y era ~80% del tiempo de carga, pero
 # hay pocos cientos de tipo_juicio distintos en millones de filas.
@@ -246,8 +247,9 @@ BLOQUE = 64 * 1024 * 1024  # bytes de CSV por tarea
 _W = {}
 
 
-def _init_worker(csv_path, col, loaded, en_rango, tmp_dir):
-    _W.update(path=csv_path, col=col, loaded=loaded, en_rango=en_rango, tmp_dir=tmp_dir)
+def _init_worker(csv_path, col, loaded, en_rango, tmp_dir, con_empresas=False):
+    _W.update(path=csv_path, col=col, loaded=loaded, en_rango=en_rango, tmp_dir=tmp_dir,
+              con_empresas=con_empresas)
 
 
 def _parse_bloque(bounds):
@@ -270,6 +272,12 @@ def _parse_bloque(bounds):
             lineas.append(linea.decode("utf-8"))
 
     filas, ids, salteadas = [], set(), 0
+    # Con --empresas: (fila, rol, núcleo, nombre) por cada empresa detectada,
+    # y (fila, otras_actora, otras_demandada) si el aviso tiene alguna: si
+    # del lado de la actora o la demandada quedan partes que no son empresa
+    # (personas). Solo el indicador: los nombres de personas no se guardan.
+    filas_empresas, filas_partes = [], []
+    i_act, i_dem = col["actora"], col["demandada"]
     for row in csv.reader(lineas):
         boletin_id = int(row[i_bol])
         if en_rango is not None and boletin_id not in en_rango:
@@ -279,6 +287,15 @@ def _parse_bloque(bounds):
             continue
         ids.add(boletin_id)
         m_anio = RE_ANIO.search(row[i_exp])
+        if _W["con_empresas"]:
+            fila = len(filas)
+            emp_a, otras_a = emp.partes(row[i_act])
+            emp_d, otras_d = emp.partes(row[i_dem])
+            for rol, lista in (("actora", emp_a), ("demandada", emp_d)):
+                for nucleo, nombre in lista:
+                    filas_empresas.append((fila, rol, nucleo, nombre))
+            if emp_a or emp_d:
+                filas_partes.append((fila, int(otras_a), int(otras_d)))
         filas.append(
             tuple((row[i] or None) if i is not None else None for i in idx)
             + (normalize_tipo(row[i_tipo] or None), int(m_anio.group(1)) if m_anio else None)
@@ -293,12 +310,18 @@ def _parse_bloque(bounds):
     c.execute("PRAGMA synchronous=OFF")
     c.execute(f"CREATE TABLE filas ({', '.join(COLS_CARGA)})")
     c.executemany(f"INSERT INTO filas VALUES ({', '.join(['?'] * len(COLS_CARGA))})", filas)
+    if _W["con_empresas"]:
+        c.execute("CREATE TABLE filas_empresas (fila, rol, nucleo, nombre)")
+        c.executemany("INSERT INTO filas_empresas VALUES (?, ?, ?, ?)", filas_empresas)
+        c.execute("CREATE TABLE filas_partes (fila, otras_actora, otras_demandada)")
+        c.executemany("INSERT INTO filas_partes VALUES (?, ?, ?)", filas_partes)
     c.commit()
     c.close()
     return shard, len(filas), ids, salteadas
 
 
-def load_entradas(conn, csv_path, loaded, log, en_rango=None, workers=None, tmp_dir=None):
+def load_entradas(conn, csv_path, loaded, log, en_rango=None, workers=None, tmp_dir=None,
+                  con_empresas=False):
     """Carga las entradas de un run salteando los boletines que ya cargó un
     run anterior (`loaded`, se actualiza). Los runs se pisan entre sí (el
     histórico repite boletines de los runs de 2026) y sin esto cada boletín
@@ -335,7 +358,7 @@ def load_entradas(conn, csv_path, loaded, log, en_rango=None, workers=None, tmp_
 
     with tempfile.TemporaryDirectory(prefix="build_db_", dir=tmp_dir) as tmp, \
             Pool(workers, initializer=_init_worker,
-                 initargs=(str(csv_path), col, frozenset(loaded), en_rango, tmp)) as pool:
+                 initargs=(str(csv_path), col, frozenset(loaded), en_rango, tmp, con_empresas)) as pool:
         # Como mucho 2 bloques pendientes por proceso, para no llenar el
         # disco temporal si los procesos van más rápido que la copia.
         it = iter(bloques)
@@ -348,7 +371,14 @@ def load_entradas(conn, csv_path, loaded, log, en_rango=None, workers=None, tmp_
                 pendientes.append(pool.apply_async(_parse_bloque, (siguiente,)))
             if n:
                 conn.execute("ATTACH DATABASE ? AS bloque", (shard,))
+                # ids nuevos: base+1 ... base+n, en el orden de las filas del bloque
+                base = conn.execute("SELECT COALESCE(MAX(id), 0) FROM entradas").fetchone()[0]
                 conn.execute(f"INSERT INTO entradas ({cols}) SELECT {cols} FROM bloque.filas ORDER BY rowid")
+                if con_empresas:
+                    conn.execute("INSERT INTO emp_stage SELECT ? + fila + 1, rol, nucleo, nombre "
+                                 "FROM bloque.filas_empresas", (base,))
+                    conn.execute("INSERT INTO entradas_partes SELECT ? + fila + 1, otras_actora, otras_demandada "
+                                 "FROM bloque.filas_partes", (base,))
                 conn.commit()
                 conn.execute("DETACH DATABASE bloque")
             os.remove(shard)
@@ -360,6 +390,86 @@ def load_entradas(conn, csv_path, loaded, log, en_rango=None, workers=None, tmp_
     if counts["skipped"]:
         log(f"    {counts['skipped']} entradas salteadas (boletines ya cargados de un run más nuevo)")
     return counts["inserted"]
+
+
+MIN_AVISOS_EMPRESA = 2
+
+
+def build_empresas(conn, log):
+    """Arma empresas / entradas_empresas / empresas_fts desde emp_stage.
+
+    Solo entran las empresas con al menos MIN_AVISOS_EMPRESA avisos: los
+    restos de parseo (una persona o un encabezado pegados a una razón
+    social) casi siempre aparecen una sola vez, y estas páginas se indexan
+    y no pueden mostrar personas. El nombre visible es la variante más
+    frecuente tal cual está en el boletín."""
+    log("Empresas...")
+    conn.executescript("""
+        CREATE TABLE empresas (
+            id             INTEGER PRIMARY KEY,
+            nucleo         TEXT UNIQUE NOT NULL,
+            nombre         TEXT NOT NULL,
+            slug           TEXT UNIQUE NOT NULL,
+            avisos         INTEGER NOT NULL,
+            como_actora    INTEGER NOT NULL,
+            como_demandada INTEGER NOT NULL,
+            expedientes    INTEGER,
+            primer_boletin TEXT,
+            ultimo_boletin TEXT
+        );
+        CREATE TEMP TABLE nombres AS
+            SELECT nucleo, nombre, COUNT(*) AS n FROM emp_stage GROUP BY nucleo, nombre;
+    """)
+    totales = {r[0]: r[1:] for r in conn.execute("""
+        SELECT nucleo, COUNT(*), SUM(rol = 'actora'), SUM(rol = 'demandada')
+        FROM emp_stage GROUP BY nucleo HAVING COUNT(*) >= ?
+    """, (MIN_AVISOS_EMPRESA,))}
+    mejor = {}
+    for nucleo, nombre, n in conn.execute("SELECT nucleo, nombre, n FROM nombres ORDER BY nucleo, n DESC, nombre"):
+        if nucleo in totales and nucleo not in mejor:
+            mejor[nucleo] = nombre
+    slugs = set()
+    filas = []
+    for nucleo, (avisos, act, dem) in sorted(totales.items(), key=lambda x: -x[1][0]):
+        base = emp.slugify(nucleo)  # sin forma societaria: /empresas/banco-mercantil-del-norte
+        slug, k = base, 2
+        while slug in slugs:
+            slug, k = f"{base}-{k}", k + 1
+        slugs.add(slug)
+        filas.append((nucleo, mejor[nucleo], slug, avisos, act, dem))
+    conn.executemany("INSERT INTO empresas (nucleo, nombre, slug, avisos, como_actora, como_demandada) "
+                     "VALUES (?, ?, ?, ?, ?, ?)", filas)
+    conn.executescript("""
+        CREATE TABLE entradas_empresas (
+            empresa_id INTEGER NOT NULL,
+            entrada_id INTEGER NOT NULL,
+            rol        TEXT NOT NULL
+        );
+        INSERT INTO entradas_empresas
+            SELECT DISTINCT e.id, s.entrada_id, s.rol
+            FROM emp_stage s JOIN empresas e ON e.nucleo = s.nucleo;
+        DROP TABLE emp_stage;
+        DROP TABLE nombres;
+        CREATE INDEX idx_ee_empresa ON entradas_empresas (empresa_id, entrada_id);
+        CREATE INDEX idx_ee_entrada ON entradas_empresas (entrada_id);
+
+        UPDATE empresas SET
+            (avisos, como_actora, como_demandada, expedientes, primer_boletin, ultimo_boletin) = (
+                SELECT COUNT(*), SUM(ee.rol = 'actora'), SUM(ee.rol = 'demandada'),
+                       COUNT(DISTINCT COALESCE(en.sala, en.juzgado, '') || '|' || COALESCE(en.expediente, en.id)),
+                       MIN(b.fecha_iso), MAX(b.fecha_iso)
+                FROM entradas_empresas ee
+                JOIN entradas en ON en.id = ee.entrada_id
+                JOIN boletines b ON b.id = en.boletin_id
+                WHERE ee.empresa_id = empresas.id
+            );
+
+        CREATE VIRTUAL TABLE empresas_fts USING fts5(
+            nombre, content='empresas', content_rowid='id', detail=none
+        );
+        INSERT INTO empresas_fts(rowid, nombre) SELECT id, nombre FROM empresas;
+    """)
+    log(f"  {len(filas)} empresas con al menos {MIN_AVISOS_EMPRESA} avisos")
 
 
 def find_runs(data_dir, since=None, exclude=()):
@@ -383,6 +493,8 @@ def main():
     parser.add_argument("--sin-vacuum", action="store_true",
                         help="No compactar al final (más rápido; para la base del "
                              "server, donde el tamaño del archivo no importa)")
+    parser.add_argument("--empresas", action="store_true",
+                        help="Tablas de empresas que son parte (sección /empresas del server)")
     parser.add_argument("--web", action="store_true",
                         help="Base para el sitio estático: sin el índice (juzgado, expediente)")
     parser.add_argument("--hasta-fecha",
@@ -416,6 +528,18 @@ def main():
     conn.execute("PRAGMA locking_mode=EXCLUSIVE")
 
     create_schema(conn)
+    if args.empresas:
+        conn.executescript("""
+            CREATE TABLE emp_stage (entrada_id INTEGER, rol TEXT, nucleo TEXT, nombre TEXT);
+            -- Por aviso con alguna empresa: si del lado de la actora o de la
+            -- demandada hay partes que no son empresa. Solo el indicador,
+            -- para mostrar "persona física" sin el nombre.
+            CREATE TABLE entradas_partes (
+                entrada_id      INTEGER PRIMARY KEY,
+                otras_actora    INTEGER NOT NULL,
+                otras_demandada INTEGER NOT NULL
+            );
+        """)
 
     # Del run más nuevo al más viejo: si un boletín está en varios, gana el
     # más reciente (parseado con la versión más nueva del parser).
@@ -437,13 +561,16 @@ def main():
         run_dir = csv_path.parent
         log(f"  {run_dir.name}...")
 
-        n = load_entradas(conn, csv_path, loaded, log, en_rango, tmp_dir=str(output.parent))
+        n = load_entradas(conn, csv_path, loaded, log, en_rango, tmp_dir=str(output.parent),
+                          con_empresas=args.empresas)
         total += n
         log(f"    {n} entradas")
 
     log("Índices...")
     create_indexes(conn, args.indices_server, args.web)
     populate_boletin_ranges(conn, log)
+    if args.empresas:
+        build_empresas(conn, log)
     populate_meta(conn)
     conn.commit()
 

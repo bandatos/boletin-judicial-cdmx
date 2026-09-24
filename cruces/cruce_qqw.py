@@ -23,70 +23,11 @@ import json
 import re
 import sqlite3
 import sys
-import unicodedata
 from collections import defaultdict
+from pathlib import Path
 
-# Formas societarias y colas habituales, ya normalizadas (minúsculas, sin
-# acentos ni puntuación). Se sacan del final del nombre, repetidamente.
-FORMAS = [
-    r"sociedad anonima promotora de inversion de capital variable",
-    r"sociedad anonima bursatil de capital variable",
-    r"sociedad anonima de capital variable",
-    r"sociedad de responsabilidad limitada de capital variable",
-    r"sociedad de responsabilidad limitada",
-    r"sociedad cooperativa de responsabilidad limitada",
-    r"sociedad financiera de objeto multiple entidad no regulada",
-    r"sociedad financiera de objeto multiple entidad regulada",
-    r"sociedad financiera de objeto multiple",
-    r"sociedad nacional de credito",
-    r"sociedad anonima",
-    r"sociedad civil",
-    r"asociacion civil",
-    r"institucion de banca multiple",
-    r"institucion de banca de desarrollo",
-    r"grupo financiero \w+(?: \w+)?",
-    r"s a p i de c v", r"s a b de c v", r"s de r l de c v", r"s de r l mi",
-    r"s de r l", r"s a de c v", r"s c de r l", r"s de s s", r"s en c",
-    r"sapi de cv", r"sab de cv", r"sa de cv", r"s de rl de cv", r"s de rl",
-    r"sofom e n r", r"sofom e r", r"sofom enr", r"sofom er", r"sofom",
-    r"s n c", r"snc", r"s a", r"sa", r"s c", r"sc", r"a c", r"ac",
-    r"de c v", r"de cv", r"c v", r"cv", r"i a p", r"iap",
-]
-RE_FORMA_FINAL = re.compile(r"(?:\s+(?:" + "|".join(FORMAS) + r"))+\s*$")
-
-# Detecta que una parte del boletín es una empresa (y no una persona física).
-RE_ES_EMPRESA = re.compile(
-    r"\bS\.?\s?A\.?(?:\s?P\.?\s?I\.?|\s?B\.?)?(?:\s+de\s+C\.?\s?V\.?)?(?=$|[\s,.;)])"
-    r"|\bS\.?\s?de\s?R\.?\s?L\.?|\bS\.?\s?C\.?(?=$|[\s,.;)])|\bA\.?\s?C\.?(?=$|[\s,.;)])"
-    r"|\bSofom\b|Sociedad\s+An[oó]nima|Sociedad\s+de\s+Responsabilidad|Sociedad\s+Civil"
-    r"|Asociaci[oó]n\s+Civil|Instituci[oó]n\s+de\s+Banca|Sociedad\s+Financiera"
-    r"|Sociedad\s+Nacional\s+de\s+Cr[eé]dito",
-    re.IGNORECASE,
-)
-
-GENERICOS = {"banco", "grupo", "servicios", "inmobiliaria", "constructora", "comercializadora",
-             "secreto", "desarrollos", "promotora", "operadora", "corporativo", "grupo industrial"}
-
-
-def normalizar(nombre):
-    s = unicodedata.normalize("NFD", str(nombre or ""))
-    s = "".join(c for c in s if unicodedata.category(c) != "Mn").lower()
-    s = re.sub(r"[^a-z0-9ñ ]+", " ", s)
-    s = re.sub(r"\s+", " ", s).strip()
-    s = RE_FORMA_FINAL.sub("", s).strip()
-    return s
-
-
-def nucleo_valido(n):
-    return n and len(n) >= 6 and n not in GENERICOS and len(n.split()) >= 1 and not n.isdigit()
-
-
-def partes_empresa(campo):
-    """Devuelve las razones sociales dentro de un campo actora/demandada."""
-    if not campo or not RE_ES_EMPRESA.search(campo):
-        return []
-    trozos = re.split(r"\s+(?:y|e)\s+(?=[A-ZÁÉÍÓÚÑ])|,\s+(?=[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+\s)", campo)
-    return [t for t in trozos if RE_ES_EMPRESA.search(t)]
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scraper"))
+from empresas import normalizar, nucleo_valido, partes_empresa  # noqa: E402
 
 
 def main():
