@@ -100,13 +100,15 @@ def create_schema(conn):
     """)
 
 
-def create_indexes(conn, indices_server=False):
+def create_indexes(conn, indices_server=False, web=False):
     # Después de la carga y no en el schema: armar el índice de una vez es
     # mucho más rápido que mantenerlo fila por fila durante 30M inserts.
+    if not web:
+        # (juzgado, expediente): fichas de expediente y páginas de juzgado
+        # del server. El sitio estático no filtra por juzgado y este índice
+        # es ~14% de la base que baja el navegador.
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_expediente ON entradas (juzgado, expediente)")
     conn.executescript("""
-        CREATE INDEX IF NOT EXISTS idx_expediente
-            ON entradas (juzgado, expediente);
-
         CREATE INDEX IF NOT EXISTS idx_anio
             ON entradas (anio);
 
@@ -381,6 +383,10 @@ def main():
     parser.add_argument("--sin-vacuum", action="store_true",
                         help="No compactar al final (más rápido; para la base del "
                              "server, donde el tamaño del archivo no importa)")
+    parser.add_argument("--web", action="store_true",
+                        help="Base para el sitio estático: sin el índice (juzgado, expediente)")
+    parser.add_argument("--hasta-fecha",
+                        help="Solo boletines publicados hasta esta fecha YYYY-MM-DD (inclusive)")
     parser.add_argument("--desde-fecha",
                         help="Solo boletines publicados desde esta fecha YYYY-MM-DD, "
                              "de cualquier run (a diferencia de --since, que filtra "
@@ -420,9 +426,9 @@ def main():
             load_index(conn, index_path)
 
     en_rango = None
-    if args.desde_fecha:
-        conn.execute("DELETE FROM boletines WHERE fecha_iso IS NULL OR fecha_iso < ?",
-                     (args.desde_fecha,))
+    if args.desde_fecha or args.hasta_fecha:
+        conn.execute("DELETE FROM boletines WHERE fecha_iso IS NULL OR fecha_iso < ? OR fecha_iso > ?",
+                     (args.desde_fecha or "0000-00-00", args.hasta_fecha or "9999-99-99"))
         en_rango = {r[0] for r in conn.execute("SELECT id FROM boletines")}
 
     total = 0
@@ -436,7 +442,7 @@ def main():
         log(f"    {n} entradas")
 
     log("Índices...")
-    create_indexes(conn, args.indices_server)
+    create_indexes(conn, args.indices_server, args.web)
     populate_boletin_ranges(conn, log)
     populate_meta(conn)
     conn.commit()
