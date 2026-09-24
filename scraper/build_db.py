@@ -11,6 +11,7 @@ Uso:
 
 import argparse
 import csv
+import functools
 import json
 import re
 import sqlite3
@@ -19,7 +20,13 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from normalize_tipo import normalize as normalize_tipo
+from normalize_tipo import normalize
+
+# normalize() es una cascada de regex y era ~80% del tiempo de carga, pero
+# hay pocos cientos de tipo_juicio distintos en millones de filas.
+normalize_tipo = functools.lru_cache(maxsize=None)(normalize)
+
+csv.field_size_limit(10**9)
 
 RE_ANIO = re.compile(r"/(\d{4})\b")
 
@@ -64,14 +71,6 @@ def create_schema(conn):
             pagina      INTEGER  -- página del PDF del boletín (1 = primera)
         );
 
-        CREATE INDEX IF NOT EXISTS idx_expediente
-            ON entradas (juzgado, expediente);
-
-        CREATE INDEX IF NOT EXISTS idx_anio
-            ON entradas (anio);
-
-        CREATE INDEX IF NOT EXISTS idx_tipo_juicio_norm
-            ON entradas (tipo_juicio_norm);
 
         CREATE TABLE IF NOT EXISTS meta (
             key   TEXT PRIMARY KEY,
@@ -93,6 +92,21 @@ def create_schema(conn):
 
         CREATE INDEX IF NOT EXISTS idx_fgj_alcaldia
             ON carpetas_fgj (alcaldia, fecha_hecho);
+    """)
+
+
+def create_indexes(conn):
+    # Después de la carga y no en el schema: armar el índice de una vez es
+    # mucho más rápido que mantenerlo fila por fila durante 30M inserts.
+    conn.executescript("""
+        CREATE INDEX IF NOT EXISTS idx_expediente
+            ON entradas (juzgado, expediente);
+
+        CREATE INDEX IF NOT EXISTS idx_anio
+            ON entradas (anio);
+
+        CREATE INDEX IF NOT EXISTS idx_tipo_juicio_norm
+            ON entradas (tipo_juicio_norm);
     """)
 
 
@@ -196,24 +210,38 @@ def load_entradas(conn, csv_path, loaded, log, en_rango=None):
     counts = {"inserted": 0, "skipped": 0}
     new_ids = set()
 
+    # Si el run no aporta ningún boletín nuevo (todos ya cargados de un run
+    # más nuevo, o fuera del rango de fechas) ni se lee: el CSV del histórico
+    # pesa ~8 GB. Los boletines del run son los .txt que tiene en pdfs/.
+    del_run = {int(p.stem[len("boletin_"):]) for p in (csv_path.parent / "pdfs").glob("boletin_*.txt")}
+    if del_run:
+        utiles = del_run - loaded
+        if en_rango is not None:
+            utiles &= en_rango
+        if not utiles:
+            log("    sin boletines nuevos, se saltea")
+            return 0
+
     def rows():
         with open(csv_path, newline="") as f:
-            for row in csv.DictReader(f):
-                boletin_id = int(row["boletin_id"])
+            reader = csv.reader(f)
+            col = {name: i for i, name in enumerate(next(reader))}
+            idx = [col.get(k) for k in fields]
+            i_bol, i_tipo, i_exp = col["boletin_id"], col["tipo_juicio"], col["expediente"]
+            for row in reader:
+                boletin_id = int(row[i_bol])
                 if en_rango is not None and boletin_id not in en_rango:
                     continue
                 if boletin_id in loaded:
                     counts["skipped"] += 1
                     continue
                 new_ids.add(boletin_id)
-                expediente = row.get("expediente") or ""
-                m_anio = RE_ANIO.search(expediente)
+                m_anio = RE_ANIO.search(row[i_exp])
                 anio = int(m_anio.group(1)) if m_anio else None
-                tipo_juicio_norm = normalize_tipo(row.get("tipo_juicio") or None)
                 counts["inserted"] += 1
                 yield (
-                    tuple(row.get(k) or None for k in fields)
-                    + (tipo_juicio_norm, anio)
+                    tuple((row[i] or None) if i is not None else None for i in idx)
+                    + (normalize_tipo(row[i_tipo] or None), anio)
                 )
 
     # Generador en vez de lista: el run histórico tiene ~13M filas.
@@ -263,8 +291,13 @@ def main():
 
     output.unlink(missing_ok=True)
     conn = sqlite3.connect(output)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
+    # Archivo nuevo y descartable (si el build se corta se vuelve a correr):
+    # sin journal ni fsync, con caché grande.
+    conn.execute("PRAGMA journal_mode=OFF")
+    conn.execute("PRAGMA synchronous=OFF")
+    conn.execute("PRAGMA cache_size=-2000000")  # ~2 GB
+    conn.execute("PRAGMA temp_store=MEMORY")
+    conn.execute("PRAGMA locking_mode=EXCLUSIVE")
 
     create_schema(conn)
 
@@ -292,6 +325,8 @@ def main():
         total += n
         log(f"    {n} entradas")
 
+    log("Índices...")
+    create_indexes(conn)
     populate_boletin_ranges(conn, log)
     populate_meta(conn)
     conn.commit()
