@@ -183,12 +183,25 @@ def fecha_iso(fecha_raw):
     return f"{m.group(3)}-{MESES[m.group(2)]:02d}-{int(m.group(1)):02d}"
 
 
+RE_URL_PDF = re.compile(r'https://(?:(?!https://)[^"#])+\.pdf')
+
+
+def url_pdf_directa(url):
+    """Índices guardados antes de jul. 2026 tienen la URL envuelta en el
+    proxy del portal (".../pdf/boletines/https://gestordocumental..."), que
+    da 404: se usa la última URL, la directa al CDN (mismo criterio que
+    fetch_index en poc.py)."""
+    urls = RE_URL_PDF.findall(url or "")
+    return urls[-1] if urls else url
+
+
 def load_index(conn, index_path):
     with open(index_path) as f:
         boletines = json.load(f)
     conn.executemany(
         "INSERT OR IGNORE INTO boletines (id, fecha, fecha_iso, pdf_url) VALUES (?, ?, ?, ?)",
-        [(b["id"], b["fecha_raw"], fecha_iso(b["fecha_raw"]), b["pdf_url"]) for b in boletines],
+        [(b["id"], b["fecha_raw"], fecha_iso(b["fecha_raw"]), url_pdf_directa(b["pdf_url"]))
+         for b in boletines],
     )
     # URLs corregidas por poc.py cuando el link del portal da 404 (ver
     # docs/boletines-faltantes.md): pisan a la del portal aunque otro run
