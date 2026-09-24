@@ -14,7 +14,7 @@
 # Para publicar: commitea db/ y boletin.sqlite.json y haz git push manualmente.
 #
 # Uso:
-#   ./deploy.sh [desde]
+#   ./deploy.sh [desde]      (por defecto, 1° de enero del año en curso)
 #   ./deploy.sh 2026-01-01
 #
 # [desde]: fecha de publicación del primer boletín que entra en la DB del
@@ -26,7 +26,7 @@ set -e
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 
-DESDE="${1:-2026-01-01}"
+DESDE="${1:-$(date +%Y)-01-01}"
 EXCLUDE="${EXCLUDE-}"
 DB="boletin.sqlite"
 DB_GZ="boletin.sqlite.gz"
