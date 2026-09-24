@@ -5,6 +5,7 @@ build_db.py — Genera boletin.sqlite desde los CSVs del scraper.
 Uso:
     python build_db.py --dir data/ --output boletin.sqlite
     python build_db.py --dir data/ --output boletin.sqlite --since 2026-01-01
+    python build_db.py --dir data/ --output boletin.sqlite --exclude 2026-07-02
 """
 
 import argparse
@@ -164,12 +165,12 @@ def load_entradas(conn, csv_path, log):
     return inserted
 
 
-def find_runs(data_dir, since=None):
+def find_runs(data_dir, since=None, exclude=()):
     """Devuelve lista de (run_dir) ordenados por fecha."""
     runs = sorted(data_dir.glob("*/entradas.csv"))
     if since:
         runs = [r for r in runs if r.parent.name >= since]
-    return runs
+    return [r for r in runs if r.parent.name not in exclude]
 
 
 def main():
@@ -177,13 +178,15 @@ def main():
     parser.add_argument("--dir", required=True, help="Directorio raíz de datos (data/)")
     parser.add_argument("--output", default="boletin.sqlite", help="Archivo SQLite de salida")
     parser.add_argument("--since", help="Solo incluir runs desde esta fecha YYYY-MM-DD")
+    parser.add_argument("--exclude", action="append", default=[],
+                        help="Run a omitir (nombre del directorio). Repetible")
     args = parser.parse_args()
 
     data_dir = Path(args.dir)
     output = Path(args.output)
     log = lambda msg: print(msg, file=sys.stderr)
 
-    runs = find_runs(data_dir, args.since)
+    runs = find_runs(data_dir, args.since, args.exclude)
     if not runs:
         log("No se encontraron datos.")
         sys.exit(1)

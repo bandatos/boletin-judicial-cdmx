@@ -1,9 +1,15 @@
 // search.js — Boletín Judicial CDMX
-// Carga boletin.sqlite.gz desde GitHub Releases, lo cachea en IndexedDB,
-// y ejecuta búsquedas FTS5 localmente con sql.js.
+// Carga boletin.sqlite.gz (partido en trozos, ver boletin.sqlite.json) desde
+// el mismo origen, lo cachea en IndexedDB y ejecuta búsquedas FTS5
+// localmente con sql.js.
 
-const DB_URL = './boletin.sqlite.gz';
-const DB_CACHE_KEY = 'boletin-sqlite-v1';
+// GitHub rechaza archivos de más de 100 MB, así que deploy.sh parte el .gz
+// en trozos y deja un manifiesto con la lista y la versión.
+const DB_MANIFEST_URL = './boletin.sqlite.json';
+// v2 guarda el .gz como Blob (no la DB descomprimida): ~4x menos espacio en
+// IndexedDB.
+const DB_CACHE_KEY = 'boletin-sqlite-v2';
+const DB_CACHE_KEY_OLD = 'boletin-sqlite-v1';
 // El build oficial de sql.js no incluye el módulo FTS5. Usamos sql.js-fts5,
 // un build alternativo compilado con FTS5 habilitado.
 const SQLS_CDN = 'https://unpkg.com/sql.js-fts5@1.4.0/dist/sql-wasm.js';
@@ -172,7 +178,9 @@ async function getCached(idb) {
 async function setCached(idb, data) {
   return new Promise((resolve, reject) => {
     const tx = idb.transaction('files', 'readwrite');
-    const req = tx.objectStore('files').put(data, DB_CACHE_KEY);
+    const store = tx.objectStore('files');
+    store.delete(DB_CACHE_KEY_OLD);
+    const req = store.put(data, DB_CACHE_KEY);
     req.onsuccess = () => resolve();
     req.onerror = e => reject(e.target.error);
   });
@@ -180,40 +188,41 @@ async function setCached(idb, data) {
 
 // ── DB loading ────────────────────────────────────────────────────────────────
 
-async function fetchMeta(url) {
-  const res = await fetch(url, { method: 'HEAD', cache: 'no-cache' });
+async function fetchManifest() {
+  const res = await fetch(DB_MANIFEST_URL, { cache: 'no-cache' });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  // ETag/Last-Modified cambian cuando el archivo cambia; con esto detectamos
-  // que hay una base nueva y no seguimos usando la vieja cacheada para
+  // manifest.version (hash del .gz) cambia cuando cambia la base; con esto
+  // detectamos que hay una nueva y no seguimos usando la vieja cacheada para
   // siempre (le pasó justo eso: quedó pegada a una base sin la columna anio).
-  return res.headers.get('etag') || res.headers.get('last-modified') || '';
+  return res.json();
 }
 
-async function fetchWithProgress(url, onProgress) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const total = parseInt(res.headers.get('content-length') || '0');
-  const reader = res.body.getReader();
+async function fetchWithProgress(manifest, onProgress) {
+  const total = manifest.size;
   const chunks = [];
   let received = 0;
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value);
-    received += value.length;
-    if (total) onProgress(Math.round(received / total * 100));
+  for (const part of manifest.parts) {
+    const res = await fetch(`./${part}?v=${manifest.version}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const reader = res.body.getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      received += value.length;
+      if (total) onProgress(Math.round(received / total * 100));
+    }
   }
 
-  const merged = new Uint8Array(received);
-  let offset = 0;
-  for (const chunk of chunks) { merged.set(chunk, offset); offset += chunk.length; }
-  return merged;
+  // Blob y no Uint8Array: Chrome se cuelga (sin error) al guardar en
+  // IndexedDB un Uint8Array de más de ~100 MB. Un Blob lo guarda aparte, en
+  // disco, sin ese límite.
+  return new Blob(chunks);
 }
 
-async function decompress(data) {
+async function decompress(blob) {
   const ds = new DecompressionStream('gzip');
-  const blob = new Blob([data]);
   const stream = blob.stream().pipeThrough(ds);
   const buf = await new Response(stream).arrayBuffer();
   return new Uint8Array(buf);
@@ -235,20 +244,21 @@ async function loadDb() {
 
   const cached = await getCached(idb);
 
-  let meta = null;
-  try { meta = await fetchMeta(DB_URL); } catch (e) { /* sin red: seguimos con lo cacheado si hay */ }
+  let manifest = null;
+  try { manifest = await fetchManifest(); } catch (e) { /* sin red: seguimos con lo cacheado si hay */ }
 
-  let bytes;
-  if (cached && (meta === null || cached.meta === meta)) {
-    bytes = cached.bytes;
+  let compressed;
+  if (cached && (manifest === null || cached.meta === manifest.version)) {
+    compressed = cached.bytes;
     setStatus('Cargando desde caché local...', 90);
   } else {
+    if (!manifest) throw new Error('No se pudo leer boletin.sqlite.json');
     setStatus('Descargando base de datos...', 0);
-    const compressed = await fetchWithProgress(DB_URL, pct => setStatus(`Descargando... ${pct}%`, pct));
-    setStatus('Descomprimiendo...', 99);
-    bytes = await decompress(compressed);
-    await setCached(idb, { bytes, meta });
+    compressed = await fetchWithProgress(manifest, pct => setStatus(`Descargando... ${pct}%`, pct));
+    await setCached(idb, { bytes: compressed, meta: manifest.version });
   }
+  setStatus('Descomprimiendo...', 99);
+  const bytes = await decompress(compressed);
 
   setStatus('Abriendo base de datos...', 99);
   const SQL = await loadSqlJs();

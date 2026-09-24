@@ -134,15 +134,15 @@ CREATE INDEX idx_fgj_alcaldia ON carpetas_fgj (alcaldia, fecha_hecho);
 ### Frontend — sin servidor
 
 **Hosting:**
-- GitHub Pages sirve todo desde la **raíz de la rama `main`**: `index.html`, `search.js` y `boletin.sqlite.gz`. Configuración de Pages: *Deploy from a branch* → `main` / `/ (root)`. Un `.nojekyll` evita el procesado Jekyll.
+- GitHub Pages sirve todo desde la **raíz de la rama `main`**: `index.html`, `search.js`, `boletin.sqlite.json` y `db/`. Configuración de Pages: *Deploy from a branch* → `main` / `/ (root)`. Un `.nojekyll` evita el procesado Jekyll.
 - El binario `sql-wasm.wasm` y el loader `sql-wasm.js` se cargan desde **jsDelivr** (`cdn.jsdelivr.net/npm/sql.js`). Importante: este build incluye FTS5; el de cdnjs **no** lo trae y la búsqueda falla con `no such module: fts5`.
-- `boletin.sqlite.gz` (~84 MB para 64 boletines) se commitea directo a `main`. Está por debajo del límite duro de 100 MB de GitHub (genera un warning a partir de 50 MB, pero se acepta). Si la DB crece más allá de 100 MB habrá que migrar a Git LFS o fragmentarla.
+- `boletin.sqlite.gz` (~142 MB para 120 boletines, sep. 2026) supera el límite duro de 100 MB por archivo de GitHub, así que `deploy.sh` lo parte en trozos de 90 MB (`db/boletin.sqlite.gz.000`, `.001`, ...) y escribe `boletin.sqlite.json` con la lista, el tamaño total y la versión (hash del `.gz`). Git LFS no sirve: Pages no sirve archivos LFS.
 
-**Por qué no GitHub Releases:** Releases redirige con 302 y no expone cabeceras CORS, así que `fetch` desde el browser falla. Servir el `.gz` desde el mismo origen que la página (Pages) evita el problema. Por la misma razón la URL en `search.js` es **relativa** (`./boletin.sqlite.gz`): el dominio del sitio es `bandatos.org` y una URL absoluta a `bandatos.github.io` provocaría un redirect 301 que rompe CORS.
+**Por qué no GitHub Releases:** Releases redirige con 302 y no expone cabeceras CORS, así que `fetch` desde el browser falla. Servir el `.gz` desde el mismo origen que la página (Pages) evita el problema. Por la misma razón las URLs en `search.js` son **relativas** (`./boletin.sqlite.json`, `./db/...`): el dominio del sitio es `bandatos.org` y una URL absoluta a `bandatos.github.io` provocaría un redirect 301 que rompe CORS.
 
 **En el browser:**
-1. Primer acceso: descarga `./boletin.sqlite.gz` (mismo origen), descomprime, guarda en IndexedDB.
-2. Accesos siguientes: carga desde IndexedDB (sin red).
+1. Primer acceso: lee `./boletin.sqlite.json`, descarga los trozos (mismo origen), guarda el `.gz` en IndexedDB como `Blob` y descomprime. Tiene que ser `Blob`: Chrome se cuelga sin error al guardar un `Uint8Array` de más de ~100 MB.
+2. Accesos siguientes: si `version` del manifiesto no cambió, carga desde IndexedDB y descomprime (sin bajar la DB).
 3. Todas las búsquedas corren con SQLite WASM + FTS5 localmente.
 
 **Búsquedas:**
@@ -177,7 +177,7 @@ Las dos fuentes no comparten una clave directa. La correlación es estadística:
 
 - Frontend estático en GitHub Pages, sin backend ni API
 - Base de datos SQLite con FTS5, generada offline
-- DB (`boletin.sqlite.gz`) commiteada a la raíz de `main` y servida por Pages (mismo origen). Se descartó GitHub Releases por CORS
+- DB (`boletin.sqlite.gz`, partida en trozos en `db/`) commiteada a la raíz de `main` y servida por Pages (mismo origen). Se descartó GitHub Releases por CORS
 - sql.js cargado desde jsDelivr (build con FTS5)
 - Búsquedas 100% en cliente con SQLite WASM
 - Clave de expediente: `(juzgado, expediente)` — el número solo no es único en el corpus
