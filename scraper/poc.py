@@ -80,11 +80,15 @@ def fetch_index(session, token, fecha_inicio, fecha_fin):
 # ── Downloader ────────────────────────────────────────────────────────────────
 
 def download_pdf(pdf_url, dest):
-    r = requests.get(pdf_url, stream=True)
+    r = requests.get(pdf_url, stream=True, timeout=120)
     r.raise_for_status()
-    with open(dest, "wb") as f:
+    # Se escribe a un .part y se renombra al final: si la descarga se corta,
+    # no queda un PDF truncado que la próxima corrida tome como "en caché".
+    tmp = dest.with_suffix(".part")
+    with open(tmp, "wb") as f:
         for chunk in r.iter_content(8192):
             f.write(chunk)
+    tmp.rename(dest)
 
 
 # ── Parser ────────────────────────────────────────────────────────────────────
@@ -121,7 +125,22 @@ SKIP_LINES = {
 # Encabezado de página que se repite en cada salto de página, con el
 # número de boletín variable ("BOLETÍN JUDICIAL No. 40") — SKIP_LINES solo
 # cubre la línea "BOLETÍN JUDICIAL" sin sufijo, que también aparece sola.
-RE_SKIP_PREFIX = re.compile(r"^BOLETÍN JUDICIAL\b|^SENTENCIAS DEFINITIVAS DEL\b")
+# Los boletines viejos (≤2022) tienen más variantes de subsección de
+# sentencias: singular o plural, definitiva o interlocutoria, seguidas de
+# fecha o de "NO PUBLICADAS"/"MAL PUBLICADAS" ("SENTENCIA DEFINITIVA DEL 9
+# DE FEBRERO DEL 2022", "SENTENCIAS INTERLOCUTORIAS NO PUBLICADAS"). Se
+# exige la línea entera en mayúsculas para no comerse texto de una entrada.
+RE_SKIP_PREFIX = re.compile(
+    r"^BOLETÍN JUDICIAL\b|^SENTENCIAS? (?:DEFINITIVAS?|INTERLOCUTORIAS?)\b[^a-záéíóúñ]*$"
+)
+
+# Entrada que termina en "Núm. Exp. NNN/AAAA" SIN punto final. Así cierran
+# las entradas de sentencias en boletines viejos ("... 1 Sent. Def. Núm. Exp.
+# 299/2019"). RE_ENTRY_END exige el punto, así que sin esto el bloque seguía
+# juntando líneas (el encabezado de la subsección siguiente y la entrada que
+# venía después) hasta el próximo punto. Solo se usa al llegar a un corte de
+# bloque (línea vacía, encabezado, juzgado...), nunca en medio de un bloque.
+RE_ENTRY_END_BARE = re.compile(r"Núm\.\s+Exp\.\s+\d+/\d+\s*$", re.IGNORECASE)
 
 RE_JUZGADO = re.compile(
     r"^((?:PRIMERO?|SEGUNDO|TERCERO|CUARTO|QUINTO|SEXTO|SÉPTIMO|OCTAVO|NOVENO|"
@@ -129,6 +148,37 @@ RE_JUZGADO = re.compile(
     r"VIGÉSIMO(?:\s+(?:PRIMERO?|SEGUNDO|TERCERO))?|TRIGÉSIMO|CUADRAGÉSIMO|QUINCUAGÉSIMO)"
     r"\s+DE\s+LO\s+\w+(?:\s+\w+)*)$"
 )
+# Encabezado de cada Sala (segunda instancia) dentro de la sección SALAS:
+# "PRIMERA SALA CIVIL", "QUINTA SALA FAMILIAR", "CUARTA SALA DE LO PENAL".
+# Sin esto las entradas de Salas quedaban sin órgano (ni juzgado ni sala).
+RE_SALA = re.compile(
+    r"^((?:PRIMERA|SEGUNDA|TERCERA|CUARTA|QUINTA|SEXTA|SÉPTIMA|OCTAVA|NOVENA|"
+    r"DÉCIMA(?:\s+(?:PRIMERA|SEGUNDA|TERCERA|CUARTA|QUINTA|SEXTA|SÉPTIMA|OCTAVA|NOVENA))?)"
+    r"\s+SALA\s+(?:DE\s+LO\s+)?(?:CIVIL|FAMILIAR|PENAL)(?:\s+[A-ZÁÉÍÓÚÑ]+)*)$"
+)
+# Órganos cuyo nombre no entra en RE_JUZGADO y suele partirse en dos líneas:
+#   "PRIMERO DE PROCESO ORAL EN MATERIA" / "FAMILIAR"
+#   "UNIDAD DE GESTIÓN JUDICIAL TIPO 2 MATERIA" / "CIVIL ETAPA POSTULATORIA NÚMERO 1"
+#   "PRIMER TRIBUNAL LABORAL DE ASUNTOS" / "COLECTIVOS DE LA CIUDAD DE MÉXICO"
+#   "JUZGADO SÉPTIMO DE PROCESO ORAL EN MATERIA" / "FAMILIAR"  (boletines viejos)
+# La primera línea se reconoce con este patrón y las siguientes en mayúsculas
+# se le agregan (ver _es_continuacion_organo). Solo fuera de EDICTOS y
+# AVISOS, donde "JUZGADO ..." en mayúsculas aparece dentro del texto.
+_ORDINAL = (
+    r"(?:PRIMER[OA]?|SEGUND[OA]|TERCER[OA]?|CUART[OA]|QUINT[OA]|SEXT[OA]|SÉPTIM[OA]|"
+    r"OCTAV[OA]|NOVEN[OA]|DÉCIM[OA]|VIGÉSIM[OA]|TRIGÉSIM[OA]|CUADRAGÉSIM[OA]|"
+    r"QUINCUAGÉSIM[OA]|SEXAGÉSIM[OA]|SEPTUAGÉSIM[OA])"
+)
+RE_ORGANO_INICIO = re.compile(
+    r"^(?:JUZGADO\s+)?" + _ORDINAL + r"(?:\s+" + _ORDINAL + r")?\s+"
+    r"(?:DE\s+PROCESO\s+ORAL|TRIBUNAL\s+LABORAL|DE\s+LO\s+)"
+    r"|^UNIDAD\s+DE\s+GESTIÓN\s+JUDICIAL\b"
+)
+SECCIONES_SIN_ORGANO = {"EDICTOS", "AVISOS", "SUSCRIPCIÓN AL BOLETÍN JUDICIAL"}
+# Firma de titular que encabeza algunos órganos ("JUEZ GEORGINA RAMÍREZ
+# PAREDES", "SUBDIRECTOR ISRAEL TORRES TINAJERO"): sin esto se pegaba al
+# principio de la primera entrada.
+RE_TITULAR = re.compile(r"^(?:JUEZA?|SUBDIRECTORA?)\s+[A-ZÁÉÍÓÚÑ .]+$")
 RE_SECRETARIA = re.compile(r"^SECRETAR[IÍ]A\b")
 RE_ACUERDOS = re.compile(r"^ACUERDOS DEL\s+(.+)$")
 
@@ -344,15 +394,53 @@ def pdf_to_text(pdf_path):
     return res.stdout
 
 
+def _es_mayusculas(line):
+    return not re.search(r"[a-záéíóúñ]", line)
+
+
+def _es_continuacion_organo(line):
+    return (
+        _es_mayusculas(line) and len(line) <= 70
+        and line not in SECTION_HEADERS and line not in SKIP_LINES
+        and not RE_SKIP_PREFIX.match(line) and not RE_TITULAR.match(line)
+        and not RE_SECRETARIA.match(line) and not RE_ACUERDOS.match(line)
+        and not RE_JUZGADO.match(line) and not RE_SALA.match(line)
+        and not RE_ORGANO_INICIO.match(line)
+    )
+
+
 def parse_pdf(text, boletin_id, fecha_raw):
     entries = []
-    ctx = {"seccion": None, "juzgado": None, "secretaria": None, "fecha_acuerdo": None}
+    ctx = {"seccion": None, "juzgado": None, "sala": None, "secretaria": None, "fecha_acuerdo": None}
     block = []
+
+    def flush_bare():
+        """Si el bloque termina en "Núm. Exp. NNN/AAAA" sin punto (ver
+        RE_ENTRY_END_BARE), lo cierra como entrada y vacía el bloque."""
+        nonlocal block
+        if not block:
+            return
+        joined_block = " ".join(block)
+        if RE_ENTRY_END_BARE.search(joined_block):
+            entry = _parse_entry(joined_block.rstrip() + ".", boletin_id, fecha_raw, ctx)
+            if entry:
+                entries.append(entry)
+            block = []
+
+    organo = None  # líneas del nombre de un órgano multilínea, en curso
 
     for raw_line in text.splitlines():
         line = raw_line.strip()
 
+        if organo is not None:
+            if line and _es_continuacion_organo(line):
+                organo.append(line)
+                continue
+            ctx.update(juzgado=" ".join(organo), sala=None, secretaria=None)
+            organo = None
+
         if not line or len(line) < 3:
+            flush_bare()
             # Línea vacía: descartar bloque si no contiene expediente
             # (de ninguno de los dos formatos de terminador)
             if block:
@@ -361,8 +449,28 @@ def parse_pdf(text, boletin_id, fecha_raw):
                     block = []
             continue
 
+        es_organo = (
+            ctx["seccion"] not in SECCIONES_SIN_ORGANO
+            and _es_mayusculas(line) and RE_ORGANO_INICIO.match(line)
+            and not RE_JUZGADO.match(line)
+        )
+
+        if (line in SECTION_HEADERS or line in SKIP_LINES or RE_SKIP_PREFIX.match(line)
+                or RE_JUZGADO.match(line) or RE_SALA.match(line) or es_organo
+                or RE_TITULAR.match(line)
+                or RE_SECRETARIA.match(line) or RE_ACUERDOS.match(line)):
+            flush_bare()
+
+        if es_organo:
+            organo = [line]
+            block = []
+            continue
+
+        if RE_TITULAR.match(line):
+            continue
+
         if line in SECTION_HEADERS:
-            ctx.update(seccion=line, juzgado=None, secretaria=None)
+            ctx.update(seccion=line, juzgado=None, sala=None, secretaria=None)
             block = []
             continue
 
@@ -370,7 +478,12 @@ def parse_pdf(text, boletin_id, fecha_raw):
             continue
 
         if RE_JUZGADO.match(line):
-            ctx.update(juzgado=line, secretaria=None)
+            ctx.update(juzgado=line, sala=None, secretaria=None)
+            block = []
+            continue
+
+        if RE_SALA.match(line):
+            ctx.update(sala=line, juzgado=None, secretaria=None)
             block = []
             continue
 
@@ -542,9 +655,10 @@ def main():
 
     log = lambda msg: print(msg, file=sys.stderr)
 
-    # Directorio de salida: data/YYYY-MM-DD/
+    # Directorio de salida: data/YYYY-MM-DD/ (fecha de la corrida), salvo que
+    # se pase otro como 4to argumento.
     run_date = datetime.now().strftime("%Y-%m-%d")
-    out_dir = Path("data") / run_date
+    out_dir = Path(sys.argv[4]) if len(sys.argv) > 4 else Path("data") / run_date
     out_dir.mkdir(parents=True, exist_ok=True)
     pdf_dir = out_dir / "pdfs"
     pdf_dir.mkdir(exist_ok=True)
@@ -562,7 +676,13 @@ def main():
         json.dump(boletines, f, ensure_ascii=False, indent=2)
     log(f"  Índice guardado en {index_path}")
 
-    all_entries = []
+    # Las entradas se escriben al CSV a medida que se parsea cada boletín, en
+    # vez de juntarlas todas en memoria: con el histórico completo (~30M
+    # entradas) la lista no entra en RAM.
+    csv_path = out_dir / "entradas.csv"
+    csv_file = None
+    writer = None
+    total = completas = sin_vs = sin_tipo = 0
 
     for b in boletines[:max_boletines]:
         log(f"\nBoletín {b['id']} — {b['fecha_raw']}")
@@ -574,7 +694,13 @@ def main():
         pdf_path = pdf_dir / f"boletin_{b['id']}.pdf"
         if not pdf_path.exists():
             log("  Descargando PDF...")
-            download_pdf(b["pdf_url"], pdf_path)
+            try:
+                download_pdf(b["pdf_url"], pdf_path)
+            except requests.RequestException as e:
+                # Un boletín que falla (p. ej. el del día, que todavía no se
+                # subió y da 404) no debe tirar abajo una corrida de cientos.
+                log(f"  ERROR descargando, saltando: {e}")
+                continue
             log(f"  {pdf_path.stat().st_size / 1e6:.1f} MB descargados")
         else:
             log("  PDF ya en caché.")
@@ -589,12 +715,24 @@ def main():
         log("  Parseando entradas...")
         entries = parse_pdf(text, b["id"], b["fecha_raw"])
         log(f"  {len(entries)} entradas encontradas")
-        all_entries.extend(entries)
+        if entries and writer is None:
+            csv_file = open(csv_path, "w", newline="")
+            writer = csv.DictWriter(csv_file, fieldnames=list(entries[0].keys()), extrasaction="ignore")
+            writer.writeheader()
+        if entries:
+            writer.writerows(entries)
+            csv_file.flush()
+        total += len(entries)
+        completas += sum(1 for r in entries if r["actora"] and r["demandada"] and r["tipo_juicio"])
+        sin_vs += sum(1 for r in entries if not r["demandada"])
+        sin_tipo += sum(1 for r in entries if not r["tipo_juicio"])
 
-    log(f"\nTotal: {len(all_entries)} entradas")
+    if csv_file:
+        csv_file.close()
 
-    if all_entries:
-        fields = list(all_entries[0].keys())
+    log(f"\nTotal: {total} entradas")
+
+    if total:
 
         # Nota: acá antes se armaba también un search_index.json (índice
         # invertido en JSON) para búsqueda del lado del cliente. Se sacó:
@@ -604,20 +742,9 @@ def main():
         # build_search_index() que llegó a comerse >13GB de RAM y colgar
         # el proceso sin terminar.
 
-        # CSV completo
-        csv_path = out_dir / "entradas.csv"
-        with open(csv_path, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
-            writer.writeheader()
-            writer.writerows(all_entries)
         log(f"CSV guardado en {csv_path}")
 
         # Resumen de cobertura
-        total = len(all_entries)
-        completas = sum(1 for r in all_entries if r["actora"] and r["demandada"] and r["tipo_juicio"])
-        sin_vs = sum(1 for r in all_entries if not r["demandada"])
-        sin_tipo = sum(1 for r in all_entries if not r["tipo_juicio"])
-
         summary = {
             "fecha_inicio": fecha_inicio,
             "fecha_fin": fecha_fin,

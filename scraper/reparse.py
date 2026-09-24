@@ -45,29 +45,37 @@ def main():
         fecha_raw = index.get(boletin_id, {}).get("fecha_raw", "")
         jobs.append((txt_path, boletin_id, fecha_raw))
 
-    all_entries = []
+    # Se escribe al CSV a medida que llega cada boletín (imap, en orden de
+    # boletín) en vez de juntar todo en memoria: con el histórico completo
+    # (~30M entradas) la lista no entra en RAM.
+    csv_path = data_dir / "entradas.csv"
+    tmp_path = csv_path.with_suffix(".csv.part")
+    total = 0
     done = 0
-    with Pool(workers) as pool:
-        for boletin_id, entries in pool.imap_unordered(_parse_one, jobs, chunksize=4):
-            all_entries.extend(entries)
+    writer = None
+    with open(tmp_path, "w", newline="") as f, Pool(workers) as pool:
+        for boletin_id, entries in pool.imap(_parse_one, jobs, chunksize=4):
+            if entries and writer is None:
+                writer = csv.DictWriter(f, fieldnames=list(entries[0].keys()), extrasaction="ignore")
+                writer.writeheader()
+            if entries:
+                writer.writerows(entries)
+            total += len(entries)
             done += 1
             if done % 50 == 0 or done == len(jobs):
-                log(f"  {done}/{len(jobs)} boletines procesados ({len(all_entries)} entradas hasta ahora)")
+                log(f"  {done}/{len(jobs)} boletines procesados ({total} entradas hasta ahora)")
 
-    log(f"\nTotal: {len(all_entries)} entradas")
+    log(f"\nTotal: {total} entradas")
 
-    if not all_entries:
+    if not total:
+        tmp_path.unlink()
         log("Sin entradas. Abortando.")
         sys.exit(1)
 
-    fields = list(all_entries[0].keys())
-    csv_path = data_dir / "entradas.csv"
-    with open(csv_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(all_entries)
-    log(f"CSV guardado: {csv_path} ({len(all_entries)} filas)")
-
+    # Recién acá se reemplaza el CSV anterior: si el reparseo se corta a la
+    # mitad, el entradas.csv previo queda intacto.
+    tmp_path.rename(csv_path)
+    log(f"CSV guardado: {csv_path} ({total} filas)")
 
 if __name__ == "__main__":
     main()
