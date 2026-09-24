@@ -68,7 +68,7 @@ function setReady() {
   $('tipo').disabled = false;
   $('anio').disabled = false;
   $('search-btn').disabled = false;
-  $('q').focus();
+  if (!location.hash.startsWith('#fecha')) $('q').focus();
 }
 
 // Un mismo expediente acumula un aviso por cada acuerdo publicado. El
@@ -125,7 +125,7 @@ function renderResults(rows, total) {
               .sort((a, b) => (b.boletin_id || 0) - (a.boletin_id || 0))
               .map(a => `
                 <li>
-                  ${escHtml(a.fecha || '—')}
+                  ${fechaLink(a)}
                   ${a.tipo_juicio ? ` — ${escHtml(a.tipo_juicio)}` : ''}
                   ${a.pdf_url ? ` — <a href="${escHtml(a.pdf_url)}" target="_blank" rel="noopener">PDF</a>` : ''}
                 </li>`)
@@ -142,12 +142,18 @@ function renderResults(rows, total) {
           <span>Exp. ${escHtml(r.expediente || '—')}</span>
           <span>${escHtml(r.juzgado || '—')}</span>
           ${r.sala ? `<span>${escHtml(r.sala)}</span>` : ''}
-          <span>${escHtml(r.fecha || '—')}</span>
+          <span>${fechaLink(r)}</span>
         </div>
         ${otrosAvisos}
         ${pdfLink}
       </div>`;
   }).join('');
+}
+
+// Link a la vista del día ("Navegar por fecha") con la fecha legible.
+function fechaLink(r) {
+  if (!r.fecha_iso) return escHtml(r.fecha || '—');
+  return `<a href="#fecha/${r.fecha_iso}">${escHtml(fechaCorta(r.fecha_iso))}</a>`;
 }
 
 function escHtml(str) {
@@ -268,7 +274,9 @@ async function loadDb() {
   populateAnioFilter();
   renderYearChart();
   renderDbVersion();
+  if (!loadBoletinesIndex()) $('tab-fecha').classList.add('disabled');
   setReady();
+  route();
 }
 
 function renderDbVersion() {
@@ -458,7 +466,7 @@ function search() {
     params.unshift(`${expedienteQ[1]}/${expedienteQ[2]}%`);
     sql = `
       SELECT e.boletin_id, e.actora, e.demandada, e.tipo_juicio, e.expediente,
-             e.juzgado, e.sala, b.fecha, b.pdf_url
+             e.juzgado, e.sala, b.fecha, b.fecha_iso, b.pdf_url
       FROM entradas e
       LEFT JOIN boletines b ON e.boletin_id = b.id
       WHERE ${filtros.join(' AND ')}
@@ -477,7 +485,7 @@ function search() {
     }
     sql = `
       SELECT e.boletin_id, e.actora, e.demandada, e.tipo_juicio, e.expediente,
-             e.juzgado, e.sala, b.fecha, b.pdf_url
+             e.juzgado, e.sala, b.fecha, b.fecha_iso, b.pdf_url
       FROM entradas e
       JOIN entradas_fts f ON e.id = f.rowid
       LEFT JOIN boletines b ON e.boletin_id = b.id
@@ -489,7 +497,7 @@ function search() {
   } else {
     sql = `
       SELECT e.boletin_id, e.actora, e.demandada, e.tipo_juicio, e.expediente,
-             e.juzgado, e.sala, b.fecha, b.pdf_url
+             e.juzgado, e.sala, b.fecha, b.fecha_iso, b.pdf_url
       FROM entradas e
       LEFT JOIN boletines b ON e.boletin_id = b.id
       WHERE ${filtros.join(' AND ')}
@@ -512,12 +520,284 @@ function search() {
   }
 }
 
+// ── Navegar por fecha ────────────────────────────────────────────────────────
+
+const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio',
+  'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+const DIAS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+// Con el filtro activo, los grupos se abren solos si hay pocos resultados;
+// con muchos se muestran cerrados con su conteo (abrir 15k avisos de golpe
+// traba el navegador).
+const FILTRO_AUTO_ABRIR = 300;
+
+// fecha_iso -> [{ id, pdf_url, n, desde, hasta }]
+let boletinesPorFecha = null;
+let fechasOrdenadas = [];
+let calMes = null; // { anio, mes } con mes 1-12
+let boletinActual = null; // { iso, grupos }
+
+const pad = n => String(n).padStart(2, '0');
+
+function isoToDate(iso) {
+  const [a, m, d] = iso.split('-').map(Number);
+  return new Date(a, m - 1, d);
+}
+
+function fechaCorta(iso) {
+  const d = isoToDate(iso);
+  return `${d.getDate()} ${MESES[d.getMonth()].slice(0, 3)}. ${d.getFullYear()}`;
+}
+
+function fechaLarga(iso) {
+  const d = isoToDate(iso);
+  return `${DIAS[d.getDay()]} ${d.getDate()} de ${MESES[d.getMonth()]} de ${d.getFullYear()}`;
+}
+
+function normTxt(str) {
+  return (str || '').normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+}
+
+function loadBoletinesIndex() {
+  if (boletinesPorFecha) return boletinesPorFecha.size > 0;
+  let res;
+  try {
+    res = db.exec(`
+      SELECT id, fecha_iso, pdf_url, n_entradas, entrada_desde, entrada_hasta
+      FROM boletines
+      WHERE fecha_iso IS NOT NULL AND n_entradas > 0
+      ORDER BY fecha_iso, id
+    `);
+  } catch (e) {
+    boletinesPorFecha = new Map();
+    return false; // DB vieja, sin fecha_iso / n_entradas
+  }
+  boletinesPorFecha = new Map();
+  for (const [id, iso, pdf_url, n, desde, hasta] of (res[0]?.values || [])) {
+    if (!boletinesPorFecha.has(iso)) boletinesPorFecha.set(iso, []);
+    boletinesPorFecha.get(iso).push({ id, pdf_url, n, desde, hasta });
+  }
+  fechasOrdenadas = Array.from(boletinesPorFecha.keys());
+  if (!fechasOrdenadas.length) return false;
+
+  const primero = isoToDate(fechasOrdenadas[0]).getFullYear();
+  const ultimo = isoToDate(fechasOrdenadas[fechasOrdenadas.length - 1]).getFullYear();
+  $('cal-anio').innerHTML = '';
+  for (let a = ultimo; a >= primero; a--) {
+    $('cal-anio').insertAdjacentHTML('beforeend', `<option value="${a}">${a}</option>`);
+  }
+  $('cal-mes').innerHTML = MESES.map((m, i) => `<option value="${i + 1}">${m}</option>`).join('');
+  return true;
+}
+
+function mesKey(anio, mes) { return anio * 12 + (mes - 1); }
+
+function renderCalendar(selectedIso) {
+  const { anio, mes } = calMes;
+  $('cal-anio').value = anio;
+  $('cal-mes').value = mes;
+
+  const primero = isoToDate(fechasOrdenadas[0]);
+  const ultimo = isoToDate(fechasOrdenadas[fechasOrdenadas.length - 1]);
+  const actual = mesKey(anio, mes);
+  $('cal-prev').disabled = actual <= mesKey(primero.getFullYear(), primero.getMonth() + 1);
+  $('cal-next').disabled = actual >= mesKey(ultimo.getFullYear(), ultimo.getMonth() + 1);
+
+  // Semana de lunes a domingo.
+  const offset = (new Date(anio, mes - 1, 1).getDay() + 6) % 7;
+  const diasMes = new Date(anio, mes, 0).getDate();
+  const celdas = ['lun', 'mar', 'mié', 'jue', 'vie', 'sáb', 'dom']
+    .map(d => `<div class="cal-dow">${d}</div>`);
+  for (let i = 0; i < offset; i++) celdas.push('<div class="cal-day empty"></div>');
+  for (let d = 1; d <= diasMes; d++) {
+    const iso = `${anio}-${pad(mes)}-${pad(d)}`;
+    const bols = boletinesPorFecha.get(iso);
+    if (bols) {
+      const n = bols.reduce((s, b) => s + b.n, 0);
+      celdas.push(`
+        <a class="cal-day${iso === selectedIso ? ' selected' : ''}" href="#fecha/${iso}"
+           title="${n.toLocaleString('es-MX')} avisos">
+          ${d}<span class="cal-day-n">${n.toLocaleString('es-MX')}</span>
+        </a>`);
+    } else {
+      celdas.push(`<div class="cal-day">${d}</div>`);
+    }
+  }
+  $('cal-grid').innerHTML = celdas.join('');
+}
+
+function moverMes(delta) {
+  const k = mesKey(calMes.anio, calMes.mes) + delta;
+  calMes = { anio: Math.floor(k / 12), mes: (k % 12) + 1 };
+  renderCalendar(boletinActual?.iso);
+}
+
+// Agrupa las entradas de un boletín por juzgado o sala, en el orden en que
+// aparecen en el PDF (entradas.id sigue ese orden).
+function agruparPorJuzgado(rows) {
+  const grupos = new Map();
+  for (const r of rows) {
+    const nombre = r.sala || r.juzgado || 'Sin juzgado identificado';
+    if (!grupos.has(nombre)) grupos.set(nombre, { nombre, rows: [] });
+    r._t = normTxt(`${r.actora} ${r.demandada} ${r.expediente} ${r.tipo_juicio}`);
+    grupos.get(nombre).rows.push(r);
+  }
+  return Array.from(grupos.values());
+}
+
+function renderAvisos(rows) {
+  let secretaria = null;
+  return rows.map(r => {
+    let sec = '';
+    if (r.secretaria && r.secretaria !== secretaria) {
+      secretaria = r.secretaria;
+      sec = `<li class="secretaria">${escHtml(r.secretaria)}</li>`;
+    }
+    const partes = r.demandada
+      ? `<strong>${escHtml(r.actora)}</strong> vs. ${escHtml(r.demandada)}`
+      : `<strong>${escHtml(r.actora)}</strong>`;
+    const meta = [
+      r.tipo_juicio && escHtml(r.tipo_juicio),
+      r.expediente && `Exp. ${escHtml(r.expediente)}`,
+      r.num_acdos && `${r.num_acdos} acdo${r.num_acdos > 1 ? 's' : ''}.`,
+    ].filter(Boolean).join(' · ');
+    return `${sec}<li><div>${partes}</div><div class="aviso-meta">${meta}</div></li>`;
+  }).join('');
+}
+
+function renderBoletin(iso) {
+  const view = $('boletin-view');
+  const bols = boletinesPorFecha.get(iso);
+  if (!bols) {
+    boletinActual = { iso, grupos: [] };
+    view.innerHTML = `<p class="boletin-head"><span>No hay boletín del ${escHtml(fechaLarga(iso))}.</span></p>`;
+    return;
+  }
+
+  const rows = [];
+  for (const b of bols) {
+    const res = db.exec(`
+      SELECT juzgado, sala, secretaria, actora, demandada, tipo_juicio, expediente, num_acdos
+      FROM entradas
+      WHERE id BETWEEN ? AND ? AND boletin_id = ?
+      ORDER BY id
+    `, [b.desde, b.hasta, b.id]);
+    if (!res.length) continue;
+    const cols = res[0].columns;
+    for (const v of res[0].values) rows.push(Object.fromEntries(cols.map((c, i) => [c, v[i]])));
+  }
+  const grupos = agruparPorJuzgado(rows);
+  boletinActual = { iso, grupos };
+
+  const pdfs = bols.filter(b => b.pdf_url)
+    .map(b => `<a href="${escHtml(b.pdf_url)}" target="_blank" rel="noopener">Ver PDF del boletín</a>`)
+    .join(' · ');
+
+  view.innerHTML = `
+    <div class="boletin-head">
+      <h2>${escHtml(fechaLarga(iso))}</h2>
+      <span>${rows.length.toLocaleString('es-MX')} avisos · ${grupos.length} juzgados y salas</span>
+      ${pdfs}
+    </div>
+    <input id="boletin-filtro" type="search" autocomplete="off"
+           placeholder="Filtrar en este boletín por nombre, expediente o tipo de juicio...">
+    <div id="boletin-grupos">
+      ${grupos.map((g, i) => `
+        <details class="grupo" data-i="${i}">
+          <summary><span>${escHtml(g.nombre)}</span><span class="grupo-n">${g.rows.length.toLocaleString('es-MX')}</span></summary>
+          <ol></ol>
+        </details>`).join('')}
+    </div>`;
+
+  // El contenido de cada grupo se arma recién al abrirlo: un boletín tiene
+  // ~15k avisos y pintarlos todos de entrada es lento.
+  view.querySelectorAll('.grupo').forEach(el => {
+    el.addEventListener('toggle', () => { if (el.open) pintarGrupo(el); });
+  });
+
+  let t = null;
+  $('boletin-filtro').addEventListener('input', () => {
+    clearTimeout(t);
+    t = setTimeout(aplicarFiltro, 200);
+  });
+}
+
+function filasVisibles(g) {
+  const f = normTxt($('boletin-filtro')?.value.trim());
+  return f ? g.rows.filter(r => r._t.includes(f)) : g.rows;
+}
+
+function pintarGrupo(el) {
+  const g = boletinActual.grupos[Number(el.dataset.i)];
+  el.querySelector('ol').innerHTML = renderAvisos(filasVisibles(g));
+}
+
+function aplicarFiltro() {
+  const hayFiltro = !!$('boletin-filtro').value.trim();
+  const els = Array.from(document.querySelectorAll('#boletin-grupos .grupo'));
+  const visibles = els.map(el => filasVisibles(boletinActual.grupos[Number(el.dataset.i)]));
+  const total = visibles.reduce((s, v) => s + v.length, 0);
+
+  els.forEach((el, i) => {
+    const g = boletinActual.grupos[i];
+    const n = visibles[i].length;
+    el.style.display = n ? '' : 'none';
+    el.querySelector('.grupo-n').textContent = hayFiltro
+      ? `${n.toLocaleString('es-MX')} de ${g.rows.length.toLocaleString('es-MX')}`
+      : g.rows.length.toLocaleString('es-MX');
+    const abrir = hayFiltro && n > 0 && total <= FILTRO_AUTO_ABRIR;
+    if (abrir || el.open) {
+      el.open = abrir || (el.open && n > 0);
+      if (el.open) pintarGrupo(el);
+    }
+  });
+}
+
+// ── Vistas y ruteo ───────────────────────────────────────────────────────────
+// "#fecha" y "#fecha/AAAA-MM-DD" abren la vista por fecha; cualquier otro
+// hash, la búsqueda. Así se puede compartir el link a un día y el botón
+// "atrás" del navegador funciona.
+
+function showView(nombre) {
+  const fecha = nombre === 'fecha';
+  for (const id of ['search-box', 'chart-box', 'results']) $(id).classList.toggle('view-hidden', fecha);
+  $('fecha-view').classList.toggle('view-hidden', !fecha);
+  $('tab-buscar').classList.toggle('active', !fecha);
+  $('tab-fecha').classList.toggle('active', fecha);
+}
+
+function route() {
+  const m = location.hash.match(/^#fecha(?:\/(\d{4}-\d{2}-\d{2}))?$/);
+  if (!m) { showView('buscar'); return; }
+  showView('fecha');
+  if (!db || !loadBoletinesIndex()) return; // se vuelve a llamar al terminar de cargar la DB
+
+  const iso = m[1] || fechasOrdenadas[fechasOrdenadas.length - 1];
+  const d = isoToDate(iso);
+  calMes = { anio: d.getFullYear(), mes: d.getMonth() + 1 };
+  renderCalendar(iso);
+  if (boletinActual?.iso !== iso) renderBoletin(iso);
+}
+
 // ── Eventos ───────────────────────────────────────────────────────────────────
+
+window.addEventListener('hashchange', route);
+$('cal-prev').addEventListener('click', () => moverMes(-1));
+$('cal-next').addEventListener('click', () => moverMes(1));
+$('cal-mes').addEventListener('change', () => {
+  calMes = { anio: calMes.anio, mes: Number($('cal-mes').value) };
+  renderCalendar(boletinActual?.iso);
+});
+$('cal-anio').addEventListener('change', () => {
+  calMes = { anio: Number($('cal-anio').value), mes: calMes.mes };
+  renderCalendar(boletinActual?.iso);
+});
 
 $('search-btn').addEventListener('click', search);
 $('q').addEventListener('keydown', e => { if (e.key === 'Enter') search(); });
 
 // ── Init ──────────────────────────────────────────────────────────────────────
+
+route();
 
 loadDb().catch(err => {
   setStatus('Error cargando la base de datos: ' + err.message);

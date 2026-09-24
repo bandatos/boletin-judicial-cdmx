@@ -8,11 +8,11 @@ Este proyecto construye un pipeline que descarga, parsea y estructura el histori
 
 ## Demo
 
-**[bandatos.org/boletin-judicial-cdmx](https://bandatos.org/boletin-judicial-cdmx/)** — búsqueda de enero a septiembre 2026 (~1.77 millones de entradas), 100% en el browser.
+**[bandatos.org/boletin-judicial-cdmx](https://bandatos.org/boletin-judicial-cdmx/)** — búsqueda y navegación por fecha de los boletines de 2026 (~2.3 millones de entradas), 100% en el browser.
 
 ## Estado
 
-Demo desplegada con 120 boletines de 2026 (hasta el 22 de septiembre). Ver [PROYECTO.md](PROYECTO.md) para el diseño completo, [ARQUITECTURA.md](ARQUITECTURA.md) para el deploy y [scraper/PARSEO.md](scraper/PARSEO.md) para las notas técnicas de parseo.
+Demo desplegada con 157 boletines de 2026 (del 7 de enero al 22 de septiembre). El histórico completo (oct. 2016 en adelante) se scrapea en local para el server. Ver [PROYECTO.md](PROYECTO.md) para el diseño completo, [ARQUITECTURA.md](ARQUITECTURA.md) para el deploy y [scraper/PARSEO.md](scraper/PARSEO.md) para las notas técnicas de parseo.
 
 ## Correr el scraper
 
@@ -65,7 +65,7 @@ git commit -m "Actualizar DB"
 git push origin main
 ```
 
-`deploy.sh` omite por defecto el run histórico `scraper/data/2026-07-02` (ago. 2022 a jul. 2026), que no entra en la DB del browser. Se cambia con `EXCLUDE="..."`.
+El argumento de `deploy.sh` es la fecha de publicación del primer boletín que entra en la DB del browser (el histórico completo no entra). Toma los boletines de cualquier run en `scraper/data/` y, si un boletín está en varios, usa el del run más nuevo.
 
 El sitio (`index.html`, `search.js`, `boletin.sqlite.json`, `db/`) vive en la raíz de `main`. GitHub rechaza archivos de más de 100 MB, así que el `.gz` se parte en trozos de 90 MB y `search.js` los concatena. GitHub Pages está configurado como *Deploy from a branch* → `main` / `/ (root)`. La DB se sirve desde el mismo origen (no Releases) para evitar problemas de CORS.
 

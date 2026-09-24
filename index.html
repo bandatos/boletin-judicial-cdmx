@@ -400,6 +400,136 @@
       color: var(--fg-muted);
     }
 
+    /* ── Pestañas ── */
+    #tabs {
+      max-width: var(--max);
+      margin: 0 auto;
+      padding: 0 1.5rem;
+      display: flex;
+      gap: .25rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .tab {
+      padding: .7rem 1rem;
+      color: var(--fg-muted);
+      text-decoration: none;
+      font-size: .92rem;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+    }
+    .tab:hover { color: var(--accent); }
+    .tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+    .tab.disabled { pointer-events: none; opacity: .5; }
+
+    .view-hidden { display: none !important; }
+
+    /* ── Navegar por fecha ── */
+    #fecha-view {
+      max-width: var(--max);
+      margin: 1.5rem auto 3rem;
+      padding: 0 1.5rem;
+    }
+
+    .cal-nav {
+      display: flex;
+      align-items: center;
+      gap: .5rem;
+      margin-bottom: .75rem;
+    }
+
+    .cal-nav button, .cal-nav select {
+      padding: .45rem .7rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: #fff;
+      font-size: .9rem;
+      cursor: pointer;
+    }
+    .cal-nav button:disabled { opacity: .4; cursor: not-allowed; }
+
+    .cal-grid {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: .3rem;
+    }
+
+    .cal-dow {
+      font-size: .72rem;
+      color: var(--fg-muted);
+      text-align: center;
+      text-transform: uppercase;
+    }
+
+    .cal-day {
+      min-height: 3.2rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: .3rem .4rem;
+      font-size: .82rem;
+      color: #bbb;
+      background: #fff;
+      text-decoration: none;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .cal-day.empty { border: none; background: none; }
+    a.cal-day { color: var(--fg); background: var(--bg-card); }
+    a.cal-day:hover { border-color: var(--accent); }
+    a.cal-day.selected { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .cal-day-n { font-size: .68rem; color: var(--fg-muted); }
+    a.cal-day.selected .cal-day-n { color: rgba(255,255,255,.85); }
+
+    #boletin-view { margin-top: 1.75rem; }
+
+    .boletin-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: .4rem 1rem;
+      margin-bottom: .75rem;
+    }
+    .boletin-head h2 { font-size: 1.15rem; }
+    .boletin-head span { font-size: .85rem; color: var(--fg-muted); }
+    .boletin-head a { font-size: .85rem; color: var(--accent); }
+
+    #boletin-filtro {
+      width: 100%;
+      padding: .55rem .85rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: .95rem;
+      margin-bottom: .75rem;
+    }
+
+    .grupo {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      margin-bottom: .4rem;
+      background: #fff;
+    }
+    .grupo summary {
+      cursor: pointer;
+      padding: .55rem .85rem;
+      font-size: .9rem;
+      font-weight: 600;
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+    .grupo summary .grupo-n { font-weight: 400; color: var(--fg-muted); white-space: nowrap; }
+    .grupo ol { list-style: none; padding: 0 .85rem .6rem; }
+    .grupo li {
+      border-top: 1px solid var(--border);
+      padding: .45rem 0;
+      font-size: .86rem;
+    }
+    .grupo li .aviso-meta { color: var(--fg-muted); font-size: .8rem; }
+    .grupo .secretaria { font-size: .75rem; color: var(--fg-muted); text-transform: uppercase; margin-top: .5rem; }
+
+    .card-meta a { color: inherit; }
+
     @media (max-width: 600px) {
       #tipo { max-width: 100%; width: 100%; }
       #search-btn { width: 100%; }
@@ -414,6 +544,11 @@
     <button id="about-btn" type="button">¿Qué es esto?</button>
   </p>
 </header>
+
+<nav id="tabs">
+  <a class="tab active" id="tab-buscar" href="#">Buscar por nombre</a>
+  <a class="tab" id="tab-fecha" href="#fecha">Navegar por fecha</a>
+</nav>
 
 <div id="search-box">
   <div class="search-row">
@@ -445,6 +580,17 @@
   <div id="result-list"></div>
 </div>
 
+<div id="fecha-view" class="view-hidden">
+  <div class="cal-nav">
+    <button id="cal-prev" type="button" aria-label="Mes anterior">‹</button>
+    <select id="cal-mes" aria-label="Mes"></select>
+    <select id="cal-anio" aria-label="Año"></select>
+    <button id="cal-next" type="button" aria-label="Mes siguiente">›</button>
+  </div>
+  <div class="cal-grid" id="cal-grid"></div>
+  <div id="boletin-view"></div>
+</div>
+
 <footer id="db-version"></footer>
 
 <div id="about-overlay">
@@ -474,7 +620,8 @@
         laborales y de derechos humanos de la Ciudad de México, parseados
         desde los PDFs oficiales: expediente, partes actora/demandada, tipo
         de juicio, juzgado/sala, fecha y liga al PDF original. Cobertura
-        actual de la demo: enero-junio 2026, ~680,000 entradas (64 boletines).
+        de este buscador: los boletines publicados en 2026. En "Navegar por
+        fecha" se ve todo lo publicado cada día, agrupado por juzgado o sala.
       </p>
       <p>
         Son las resoluciones que un juzgado dicta sobre un expediente en
