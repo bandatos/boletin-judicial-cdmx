@@ -65,9 +65,12 @@ def fetch_index(session, token, fecha_inicio, fecha_fin):
             # el propio dominio del portal (.../pdf/boletines/NNN.pdf). Antes
             # solo se reconocía el primer patrón, así que todo boletín viejo
             # quedaba marcado (incorrectamente) como "sin PDF, saltando".
-            pm = re.search(r'(https://[^"#]+\.pdf)', src)
+            # Desde ~jul. 2026 el src viene envuelto en el proxy del portal
+            # (".../pdf/boletines/https://gestordocumental..."), que da 404.
+            # Nos quedamos con la última URL, la directa al CDN.
+            pm = re.findall(r'https://(?:(?!https://)[^"#])+\.pdf', src)
             if pm:
-                pdf_url = pm.group(1)
+                pdf_url = pm[-1]
 
         boletines.append({"id": boletin_id, "fecha_raw": fecha_raw, "pdf_url": pdf_url})
 
