@@ -530,6 +530,54 @@
 
     .card-meta a { color: inherit; }
 
+    /* ── Panel lateral con el PDF ── */
+    :root { --pdf-w: 48vw; }
+
+    #pdf-panel {
+      position: fixed;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: var(--pdf-w);
+      background: #fff;
+      border-left: 1px solid var(--border);
+      box-shadow: -4px 0 16px rgba(0,0,0,.08);
+      z-index: 50;
+      display: flex;
+      flex-direction: column;
+    }
+    #pdf-panel[hidden] { display: none; }
+
+    .pdf-panel-bar {
+      display: flex;
+      align-items: center;
+      gap: .75rem;
+      padding: .5rem .75rem;
+      border-bottom: 1px solid var(--border);
+      font-size: .85rem;
+    }
+    #pdf-panel-title { flex: 1; font-weight: 600; }
+    #pdf-panel-open { color: var(--accent); }
+    #pdf-panel-close {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: .15rem .55rem;
+      cursor: pointer;
+      font-size: .95rem;
+    }
+    #pdf-frame { flex: 1; width: 100%; border: 0; }
+
+    body.pdf-open { margin-right: var(--pdf-w); }
+
+    a.ver-pdf { color: var(--accent); white-space: nowrap; }
+    .grupo li.comparando { background: #fff8dc; }
+
+    @media (max-width: 900px) {
+      :root { --pdf-w: 100vw; }
+      body.pdf-open { margin-right: 0; }
+    }
+
     @media (max-width: 600px) {
       #tipo { max-width: 100%; width: 100%; }
       #search-btn { width: 100%; }
@@ -592,6 +640,15 @@
 </div>
 
 <footer id="db-version"></footer>
+
+<aside id="pdf-panel" aria-label="PDF del boletín" hidden>
+  <div class="pdf-panel-bar">
+    <span id="pdf-panel-title"></span>
+    <a id="pdf-panel-open" href="#" target="_blank" rel="noopener">Abrir en pestaña nueva</a>
+    <button id="pdf-panel-close" type="button" aria-label="Cerrar PDF">✕</button>
+  </div>
+  <iframe id="pdf-frame" title="PDF del boletín"></iframe>
+</aside>
 
 <div id="about-overlay">
   <div id="about-modal">

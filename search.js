@@ -113,7 +113,7 @@ function renderResults(rows, total) {
       : escHtml(r.actora);
 
     const pdfLink = r.pdf_url
-      ? `<div class="card-pdf"><a href="${escHtml(r.pdf_url)}" target="_blank" rel="noopener">Ver PDF del boletín</a></div>`
+      ? `<div class="card-pdf">${pdfLinkHtml(r, 'Ver PDF del boletín')}</div>`
       : '';
 
     const otrosAvisos = r.avisos.length > 1
@@ -127,7 +127,7 @@ function renderResults(rows, total) {
                 <li>
                   ${fechaLink(a)}
                   ${a.tipo_juicio ? ` — ${escHtml(a.tipo_juicio)}` : ''}
-                  ${a.pdf_url ? ` — <a href="${escHtml(a.pdf_url)}" target="_blank" rel="noopener">PDF</a>` : ''}
+                  ${a.pdf_url ? ` — ${pdfLinkHtml(a, 'PDF')}` : ''}
                 </li>`)
               .join('')}
           </ul>
@@ -148,6 +148,18 @@ function renderResults(rows, total) {
         ${pdfLink}
       </div>`;
   }).join('');
+}
+
+// Link al PDF del boletín en la página del aviso. Con clic normal se abre
+// en el panel lateral (ver abrirPdf); con Ctrl/clic del medio sigue siendo
+// un link común.
+function pdfLinkHtml(r, texto) {
+  const href = r.pagina ? `${r.pdf_url}#page=${r.pagina}` : r.pdf_url;
+  const titulo = [r.fecha_iso && fechaCorta(r.fecha_iso), r.pagina && `p. ${r.pagina}`]
+    .filter(Boolean).join(' · ');
+  return `<a class="ver-pdf" href="${escHtml(href)}" target="_blank" rel="noopener"
+            data-pdf="${escHtml(r.pdf_url)}" data-pagina="${r.pagina || ''}"
+            data-titulo="${escHtml(titulo)}">${escHtml(texto)}</a>`;
 }
 
 // Link a la vista del día ("Navegar por fecha") con la fecha legible.
@@ -466,7 +478,7 @@ function search() {
     params.unshift(`${expedienteQ[1]}/${expedienteQ[2]}%`);
     sql = `
       SELECT e.boletin_id, e.actora, e.demandada, e.tipo_juicio, e.expediente,
-             e.juzgado, e.sala, b.fecha, b.fecha_iso, b.pdf_url
+             e.juzgado, e.sala, e.pagina, b.fecha, b.fecha_iso, b.pdf_url
       FROM entradas e
       LEFT JOIN boletines b ON e.boletin_id = b.id
       WHERE ${filtros.join(' AND ')}
@@ -485,7 +497,7 @@ function search() {
     }
     sql = `
       SELECT e.boletin_id, e.actora, e.demandada, e.tipo_juicio, e.expediente,
-             e.juzgado, e.sala, b.fecha, b.fecha_iso, b.pdf_url
+             e.juzgado, e.sala, e.pagina, b.fecha, b.fecha_iso, b.pdf_url
       FROM entradas e
       JOIN entradas_fts f ON e.id = f.rowid
       LEFT JOIN boletines b ON e.boletin_id = b.id
@@ -497,7 +509,7 @@ function search() {
   } else {
     sql = `
       SELECT e.boletin_id, e.actora, e.demandada, e.tipo_juicio, e.expediente,
-             e.juzgado, e.sala, b.fecha, b.fecha_iso, b.pdf_url
+             e.juzgado, e.sala, e.pagina, b.fecha, b.fecha_iso, b.pdf_url
       FROM entradas e
       LEFT JOIN boletines b ON e.boletin_id = b.id
       WHERE ${filtros.join(' AND ')}
@@ -659,6 +671,7 @@ function renderAvisos(rows) {
       r.tipo_juicio && escHtml(r.tipo_juicio),
       r.expediente && `Exp. ${escHtml(r.expediente)}`,
       r.num_acdos && `${r.num_acdos} acdo${r.num_acdos > 1 ? 's' : ''}.`,
+      r.pdf_url && pdfLinkHtml(r, r.pagina ? `ver en PDF (p. ${r.pagina})` : 'ver PDF'),
     ].filter(Boolean).join(' · ');
     return `${sec}<li><div>${partes}</div><div class="aviso-meta">${meta}</div></li>`;
   }).join('');
@@ -676,20 +689,22 @@ function renderBoletin(iso) {
   const rows = [];
   for (const b of bols) {
     const res = db.exec(`
-      SELECT juzgado, sala, secretaria, actora, demandada, tipo_juicio, expediente, num_acdos
+      SELECT juzgado, sala, secretaria, actora, demandada, tipo_juicio, expediente, num_acdos, pagina
       FROM entradas
       WHERE id BETWEEN ? AND ? AND boletin_id = ?
       ORDER BY id
     `, [b.desde, b.hasta, b.id]);
     if (!res.length) continue;
     const cols = res[0].columns;
-    for (const v of res[0].values) rows.push(Object.fromEntries(cols.map((c, i) => [c, v[i]])));
+    for (const v of res[0].values) {
+      rows.push({ ...Object.fromEntries(cols.map((c, i) => [c, v[i]])), pdf_url: b.pdf_url, fecha_iso: iso });
+    }
   }
   const grupos = agruparPorJuzgado(rows);
   boletinActual = { iso, grupos };
 
   const pdfs = bols.filter(b => b.pdf_url)
-    .map(b => `<a href="${escHtml(b.pdf_url)}" target="_blank" rel="noopener">Ver PDF del boletín</a>`)
+    .map(b => pdfLinkHtml({ pdf_url: b.pdf_url, fecha_iso: iso }, 'Ver PDF del boletín'))
     .join(' · ');
 
   view.innerHTML = `
@@ -751,6 +766,50 @@ function aplicarFiltro() {
     }
   });
 }
+
+// ── Panel lateral con el PDF ─────────────────────────────────────────────────
+// Para comparar lo parseado contra el original: el PDF se abre al costado,
+// en la página del aviso, con el visor del navegador (el CDN del PJCDMX no
+// manda X-Frame-Options, así que se puede embeber).
+
+function abrirPdf(url, pagina, titulo) {
+  const href = pagina ? `${url}#page=${pagina}` : url;
+  const actual = $('pdf-frame');
+  // Si solo cambia el #page, el visor de Chrome no salta de página (ni
+  // cambiando el src del mismo iframe): se reemplaza el iframe por uno
+  // nuevo. El PDF sale de la caché del navegador, no se vuelve a bajar.
+  if (actual.dataset.href !== href) {
+    const frame = document.createElement('iframe');
+    frame.id = 'pdf-frame';
+    frame.title = actual.title;
+    frame.dataset.href = href;
+    frame.src = href;
+    actual.replaceWith(frame);
+  }
+  $('pdf-panel-title').textContent = titulo || 'PDF del boletín';
+  $('pdf-panel-open').href = href;
+  $('pdf-panel').hidden = false;
+  document.body.classList.add('pdf-open');
+}
+
+function cerrarPdf() {
+  $('pdf-panel').hidden = true;
+  document.body.classList.remove('pdf-open');
+  document.querySelectorAll('li.comparando').forEach(li => li.classList.remove('comparando'));
+}
+
+document.addEventListener('click', e => {
+  const a = e.target.closest('a[data-pdf]');
+  if (!a || e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return;
+  e.preventDefault();
+  document.querySelectorAll('li.comparando').forEach(li => li.classList.remove('comparando'));
+  a.closest('.grupo li')?.classList.add('comparando');
+  abrirPdf(a.dataset.pdf, Number(a.dataset.pagina) || null, a.dataset.titulo);
+});
+$('pdf-panel-close').addEventListener('click', cerrarPdf);
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && !$('pdf-panel').hidden) cerrarPdf();
+});
 
 // ── Vistas y ruteo ───────────────────────────────────────────────────────────
 // "#fecha" y "#fecha/AAAA-MM-DD" abren la vista por fecha; cualquier otro

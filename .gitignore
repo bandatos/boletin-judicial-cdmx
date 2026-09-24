@@ -3,3 +3,4 @@ boletin.sqlite
 boletin.sqlite.gz
 __pycache__/
 scraper/data/
+boletin_completo.sqlite*
