@@ -489,7 +489,9 @@ SQL_AGREGADOS_EMPRESAS = """
         FROM entradas_empresas ee
         JOIN entradas en ON en.id = ee.entrada_id
         JOIN boletines b ON b.id = en.boletin_id
-        GROUP BY ee.empresa_id, anio;
+        -- por expresión y no por alias: "anio" también es una columna de
+        -- entradas (año del expediente) y SQLite agruparía por esa.
+        GROUP BY ee.empresa_id, substr(b.fecha_iso, 1, 4);
     CREATE INDEX idx_empresas_anios ON empresas_anios (empresa_id, anio);
     -- Un renglón por (empresa, órgano, expediente, rol) con su último aviso.
     CREATE TABLE empresas_expedientes AS
