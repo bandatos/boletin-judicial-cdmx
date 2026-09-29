@@ -470,6 +470,41 @@ def build_empresas(conn, log):
         INSERT INTO empresas_fts(rowid, nombre) SELECT id, nombre FROM empresas;
     """)
     log(f"  {len(filas)} empresas con al menos {MIN_AVISOS_EMPRESA} avisos")
+    build_agregados_empresas(conn, log)
+
+
+SQL_AGREGADOS_EMPRESAS = """
+    -- Lo que muestra /empresas/:slug, precalculado: con cientos de miles de
+    -- avisos por empresa (bancos) agregarlo en cada visita tardaba ~35 s.
+    DROP TABLE IF EXISTS empresas_tipos;
+    DROP TABLE IF EXISTS empresas_anios;
+    DROP TABLE IF EXISTS empresas_expedientes;
+    CREATE TABLE empresas_tipos AS
+        SELECT ee.empresa_id, COALESCE(en.tipo_juicio_norm, 'Sin tipo reconocido') AS tipo, COUNT(*) AS n
+        FROM entradas_empresas ee JOIN entradas en ON en.id = ee.entrada_id
+        GROUP BY ee.empresa_id, tipo;
+    CREATE INDEX idx_empresas_tipos ON empresas_tipos (empresa_id, n DESC);
+    CREATE TABLE empresas_anios AS
+        SELECT ee.empresa_id, substr(b.fecha_iso, 1, 4) AS anio, COUNT(*) AS n
+        FROM entradas_empresas ee
+        JOIN entradas en ON en.id = ee.entrada_id
+        JOIN boletines b ON b.id = en.boletin_id
+        GROUP BY ee.empresa_id, anio;
+    CREATE INDEX idx_empresas_anios ON empresas_anios (empresa_id, anio);
+    -- Un renglón por (empresa, órgano, expediente, rol) con su último aviso.
+    CREATE TABLE empresas_expedientes AS
+        SELECT ee.empresa_id, COALESCE(en.sala, en.juzgado) AS organo, en.expediente, ee.rol,
+               COUNT(*) AS avisos, MAX(en.id) AS ultimo_id
+        FROM entradas_empresas ee JOIN entradas en ON en.id = ee.entrada_id
+        GROUP BY ee.empresa_id, organo, en.expediente, ee.rol;
+    CREATE INDEX idx_empresas_expedientes ON empresas_expedientes (empresa_id, ultimo_id DESC);
+"""
+
+
+def build_agregados_empresas(conn, log):
+    log("Agregados de empresas...")
+    conn.executescript(SQL_AGREGADOS_EMPRESAS)
+    conn.commit()
 
 
 def _init_empresas_worker(db_path):
@@ -554,6 +589,8 @@ def main():
     parser.add_argument("--sin-vacuum", action="store_true",
                         help="No compactar al final (más rápido; para la base del "
                              "server, donde el tamaño del archivo no importa)")
+    parser.add_argument("--agregados-empresas", action="store_true",
+                        help="Rearmar solo los agregados de /empresas/:slug de una base ya armada (--output)")
     parser.add_argument("--solo-empresas", action="store_true",
                         help="Rearmar solo las tablas de empresas de una base ya armada (--output)")
     parser.add_argument("--empresas", action="store_true",
@@ -571,6 +608,14 @@ def main():
     output = Path(args.output)
     log = lambda msg: print(msg, file=sys.stderr)
 
+    if args.agregados_empresas:
+        conn = sqlite3.connect(output)
+        conn.execute("PRAGMA cache_size=-2000000")
+        conn.execute("PRAGMA temp_store=FILE")
+        build_agregados_empresas(conn, log)
+        conn.close()
+        log(f"Listo: {output}")
+        return
     if args.solo_empresas:
         recalcular_empresas(output, log)
         log(f"Listo: {output}")
