@@ -28,6 +28,7 @@ FORMAS = [
     r"sociedad anonima de capital variable",
     r"sociedad de responsabilidad limitada de capital variable",
     r"sociedad de responsabilidad limitada",
+    r"sociedad de responsabilidad",
     r"sociedad cooperativa de responsabilidad limitada",
     r"sociedad financiera de objeto multiple entidad no regulada",
     r"sociedad financiera de objeto multiple entidad regulada",
@@ -90,6 +91,21 @@ RE_RESTO_ENCABEZADO = re.compile(r"\b(?:Juzgados?\s+de\s+lo|Secretar[ií]a\b|Acu
 # Bloque inicial en MAYÚSCULAS seguido de texto en minúsculas: casi siempre
 # un nombre de persona o un encabezado pegado ("MIGUEL ÁNGEL PÉREZ Grupo X").
 RE_PREFIJO_MAYUS = re.compile(r"^(?:[A-ZÁÉÍÓÚÑ]{2,}\s+){2,}(?=[A-ZÁÉÍÓÚÑ][a-záéíóúñ])")
+# Antes de la forma societaria, estas palabras separan otra cosa (una
+# persona, el nombre anterior, un amparo) de la empresa: se toma lo que
+# sigue. "Olivo Martínez Jaime antes HSBC México, S.A." -> "HSBC México, S.A.";
+# "Amparo Indirecto 438/2024 Promueve Dicipa S.A." -> "Dicipa S.A.".
+RE_CORTE_PREVIO = re.compile(
+    r"\b(?:antes|hoy|ahora|actualmente|vs\.?|promueve|promovido\s+por|quejos[oa]:?|tercero\s+interesado:?)\s+",
+    re.IGNORECASE,
+)
+# Fin de oración antes de la empresa: restos del aviso anterior ("1 Acdo. en
+# Exhorto. BBVA México S.A.", "Principal Tomo II. Banco Nacional de México").
+RE_FIN_ORACION = re.compile(r"(?:[.:;])\s+(?=[A-ZÁÉÍÓÚÑ0-9])")
+RE_ENCABEZADO_INICIAL = re.compile(
+    r"^(?:SENTENCIAS?|AUDIENCIAS?|ACUERDOS?|NO\s+PUBLICAD[OA]S?|MAL\s+PUBLICAD[OA]S?)\b[\s.:]*"
+)
+RE_MINUSCULAS_INICIALES = re.compile(r"^(?:[a-záéíóúñ][\w´'-]*\s+)+")
 RE_Y_OTROS = re.compile(r"[\s,]+y\s+(?:otr[oa]s?|coags?\.?)\s*\.?\s*$", re.IGNORECASE)
 
 # Corte entre varias partes de un mismo campo ("X S.A. de C.V. y Fulano").
@@ -137,6 +153,31 @@ def limpiar(trozo):
     return t.strip(" ,.;")
 
 
+def _palabras(texto):
+    return len(re.findall(r"[A-Za-zÁÉÍÓÚÑáéíóúñ0-9&]{2,}", texto))
+
+
+def recortar_inicio(t):
+    """Quita lo que hay antes del nombre de la empresa (ver RE_CORTE_PREVIO y
+    RE_FIN_ORACION). Solo corta si después queda un nombre antes de la forma
+    societaria ("Lwz Consultoría Estratégica. S.A. de C.V." no se corta)."""
+    t = RE_ENCABEZADO_INICIAL.sub("", t)
+    m = RE_FORMA_FUERTE.search(t)
+    if not m:
+        return t
+    antes = t[:m.start()]
+    # Con un separador explícito ("antes", "promueve") alcanza una palabra
+    # después; con un simple fin de oración se piden dos.
+    for regex, minimo in ((RE_CORTE_PREVIO, 1), (RE_FIN_ORACION, 2)):
+        cortes = [c.end() for c in regex.finditer(antes) if _palabras(antes[c.end():]) >= minimo]
+        if cortes:
+            t = t[cortes[-1]:]
+            m = RE_FORMA_FUERTE.search(t)
+            antes = t[:m.start()] if m else t
+    t = RE_MINUSCULAS_INICIALES.sub("", t)
+    return t
+
+
 def cortar_en_forma(t):
     """Corta el nombre al final de la forma societaria y sus colas conocidas."""
     m = RE_FORMA_FUERTE.search(t)
@@ -166,7 +207,7 @@ def partes(campo):
         if not t:
             continue
         if es_empresa(t) and not RE_RESTO_ENCABEZADO.search(t):
-            t = cortar_en_forma(t)
+            t = cortar_en_forma(recortar_inicio(t))
             n = normalizar(t)
             if nucleo_valido(n):
                 empresas.append((n, t))

@@ -3,6 +3,8 @@ boletin.sqlite
 boletin.sqlite.gz
 __pycache__/
 scraper/data/
-boletin_completo.sqlite*
+boletin_completo*.sqlite*
+build_db_*/
 cruces/*.gz
 cruces/*.csv
+*.log

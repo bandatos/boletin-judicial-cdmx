@@ -472,6 +472,67 @@ def build_empresas(conn, log):
     log(f"  {len(filas)} empresas con al menos {MIN_AVISOS_EMPRESA} avisos")
 
 
+def _init_empresas_worker(db_path):
+    _W["db"] = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+
+
+def _empresas_de_rango(bounds):
+    desde, hasta = bounds
+    filas_empresas, filas_partes = [], []
+    for entrada_id, actora, demandada in _W["db"].execute(
+            "SELECT id, actora, demandada FROM entradas WHERE id BETWEEN ? AND ?", (desde, hasta)):
+        emp_a, otras_a = emp.partes(actora)
+        emp_d, otras_d = emp.partes(demandada)
+        for rol, lista in (("actora", emp_a), ("demandada", emp_d)):
+            for nucleo, nombre in lista:
+                filas_empresas.append((entrada_id, rol, nucleo, nombre))
+        if emp_a or emp_d:
+            filas_partes.append((entrada_id, int(otras_a), int(otras_d)))
+    return filas_empresas, filas_partes
+
+
+def recalcular_empresas(output, log, workers=None):
+    """--solo-empresas: rearma las tablas de empresas sobre una base ya
+    armada, sin volver a cargar los 34M avisos (~10 min en vez de ~1 h).
+    Sirve cuando cambia la detección en scraper/empresas.py."""
+    conn = sqlite3.connect(output)
+    # WAL mientras dura: los procesos leen la base mientras este escribe.
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=OFF")
+    conn.execute("PRAGMA cache_size=-2000000")
+    conn.executescript("""
+        DROP TABLE IF EXISTS empresas_fts;
+        DROP TABLE IF EXISTS entradas_empresas;
+        DROP TABLE IF EXISTS empresas;
+        DROP TABLE IF EXISTS entradas_partes;
+        DROP TABLE IF EXISTS emp_stage;
+        CREATE TABLE emp_stage (entrada_id INTEGER, rol TEXT, nucleo TEXT, nombre TEXT);
+        CREATE TABLE entradas_partes (
+            entrada_id      INTEGER PRIMARY KEY,
+            otras_actora    INTEGER NOT NULL,
+            otras_demandada INTEGER NOT NULL
+        );
+    """)
+    max_id = conn.execute("SELECT MAX(id) FROM entradas").fetchone()[0] or 0
+    paso = 200_000
+    rangos = [(a, min(a + paso - 1, max_id)) for a in range(1, max_id + 1, paso)]
+    workers = workers or max(1, (os.cpu_count() or 2) - 1)
+    log(f"Recalculando empresas de {max_id:,} avisos en {len(rangos)} rangos...")
+    hechos = 0
+    with Pool(workers, initializer=_init_empresas_worker, initargs=(str(output),)) as pool:
+        for filas_empresas, filas_partes in pool.imap_unordered(_empresas_de_rango, rangos):
+            conn.executemany("INSERT INTO emp_stage VALUES (?, ?, ?, ?)", filas_empresas)
+            conn.executemany("INSERT INTO entradas_partes VALUES (?, ?, ?)", filas_partes)
+            conn.commit()
+            hechos += 1
+            if hechos % 20 == 0:
+                log(f"  {hechos}/{len(rangos)} rangos")
+    build_empresas(conn, log)
+    conn.commit()
+    conn.execute("PRAGMA journal_mode=DELETE")
+    conn.close()
+
+
 def find_runs(data_dir, since=None, exclude=()):
     """Devuelve lista de (run_dir) ordenados por fecha."""
     runs = sorted(data_dir.glob("*/entradas.csv"))
@@ -482,7 +543,7 @@ def find_runs(data_dir, since=None, exclude=()):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dir", required=True, help="Directorio raíz de datos (data/)")
+    parser.add_argument("--dir", help="Directorio raíz de datos (data/)")
     parser.add_argument("--output", default="boletin.sqlite", help="Archivo SQLite de salida")
     parser.add_argument("--since", help="Solo incluir runs desde esta fecha YYYY-MM-DD")
     parser.add_argument("--exclude", action="append", default=[],
@@ -493,6 +554,8 @@ def main():
     parser.add_argument("--sin-vacuum", action="store_true",
                         help="No compactar al final (más rápido; para la base del "
                              "server, donde el tamaño del archivo no importa)")
+    parser.add_argument("--solo-empresas", action="store_true",
+                        help="Rearmar solo las tablas de empresas de una base ya armada (--output)")
     parser.add_argument("--empresas", action="store_true",
                         help="Tablas de empresas que son parte (sección /empresas del server)")
     parser.add_argument("--web", action="store_true",
@@ -505,9 +568,16 @@ def main():
                              "por nombre del run)")
     args = parser.parse_args()
 
-    data_dir = Path(args.dir)
     output = Path(args.output)
     log = lambda msg: print(msg, file=sys.stderr)
+
+    if args.solo_empresas:
+        recalcular_empresas(output, log)
+        log(f"Listo: {output}")
+        return
+    if not args.dir:
+        parser.error("--dir es obligatorio (salvo con --solo-empresas)")
+    data_dir = Path(args.dir)
 
     runs = find_runs(data_dir, args.since, args.exclude)
     if not runs:
