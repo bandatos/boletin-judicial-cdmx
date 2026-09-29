@@ -493,13 +493,18 @@ SQL_AGREGADOS_EMPRESAS = """
         -- entradas (año del expediente) y SQLite agruparía por esa.
         GROUP BY ee.empresa_id, substr(b.fecha_iso, 1, 4);
     CREATE INDEX idx_empresas_anios ON empresas_anios (empresa_id, anio);
-    -- Un renglón por (empresa, órgano, expediente, rol) con su último aviso.
+    -- Un renglón por (empresa, órgano, expediente, rol) con su último aviso
+    -- por FECHA: los ids no son cronológicos (los runs se cargan del más
+    -- nuevo al más viejo). ultimo_id sale de la fila con la fecha máxima
+    -- (columna "bare" junto a MAX() en SQLite).
     CREATE TABLE empresas_expedientes AS
         SELECT ee.empresa_id, COALESCE(en.sala, en.juzgado) AS organo, en.expediente, ee.rol,
-               COUNT(*) AS avisos, MAX(en.id) AS ultimo_id
-        FROM entradas_empresas ee JOIN entradas en ON en.id = ee.entrada_id
-        GROUP BY ee.empresa_id, organo, en.expediente, ee.rol;
-    CREATE INDEX idx_empresas_expedientes ON empresas_expedientes (empresa_id, ultimo_id DESC);
+               COUNT(*) AS avisos, MAX(b.fecha_iso) AS ultima_fecha, en.id AS ultimo_id
+        FROM entradas_empresas ee
+        JOIN entradas en ON en.id = ee.entrada_id
+        JOIN boletines b ON b.id = en.boletin_id
+        GROUP BY ee.empresa_id, COALESCE(en.sala, en.juzgado), en.expediente, ee.rol;
+    CREATE INDEX idx_empresas_expedientes ON empresas_expedientes (empresa_id, ultima_fecha DESC);
 """
 
 
