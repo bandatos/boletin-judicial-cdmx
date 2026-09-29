@@ -61,6 +61,7 @@ RE_FORMA_FUERTE = re.compile(
     re.IGNORECASE,
 )
 # "A.C." / "S.C." solo al final y con al menos dos palabras antes.
+RE_FORMA_CORTA_FINAL_POS = re.compile(r"\s(?:A\.?\s?C|S\.?\s?C)\.?\s*$", re.IGNORECASE)
 RE_FORMA_FINAL_CORTA = re.compile(r"\S+\s+\S+.*\s(?:A\.?\s?C|S\.?\s?C)\.?\s*$", re.IGNORECASE)
 
 # Personas pegadas delante de la empresa en el mismo trozo: "Juan Pérez en
@@ -96,7 +97,16 @@ RE_PREFIJO_MAYUS = re.compile(r"^(?:[A-ZÁÉÍÓÚÑ]{2,}\s+){2,}(?=[A-ZÁÉÍÓ
 # sigue. "Olivo Martínez Jaime antes HSBC México, S.A." -> "HSBC México, S.A.";
 # "Amparo Indirecto 438/2024 Promueve Dicipa S.A." -> "Dicipa S.A.".
 RE_CORTE_PREVIO = re.compile(
-    r"\b(?:antes|hoy|ahora|actualmente|vs\.?|promueve|promovido\s+por|quejos[oa]:?|tercero\s+interesado:?)\s+",
+    r"(?:(?:\b|(?<=\d))(?:antes|hoy|ahora|actualmente|vs\.?|promueve|promovido\s+por|promov\.?(?:\s+por)?|promovente:?"
+    r"|quejos[oa]:?|tercero\s+interesado:?"
+    # "Representado por X", no "Representaciones X S.A." (nombre real)
+    r"|representad[oa]s?(?:\s+en\s+este\s+acto)?\s*por(?:\s+su\s+(?:apoderad[oa]|fiduciari[oa]|mandatari[oa]))?"
+    r"|sucesionari[oa]s?(?:\s+de)?|conocid[oa]s?\b.{0,60}?\bcomo"
+    r"|(?:por\s+)?(?:conducto\s+de\s+)?su\s+(?:apoderad[oa]|fiduciari[oa])(?:\s+legal)?"
+    r"|tambi[eé]n\s+conocid[oa]\s+(?:por\s+sus\s+abreviaturas\s+)?(?:como|por)"
+    r")"
+    # o un número de expediente / amparo: "Amparo Indirecto 885/2016 ..."
+    r"|\d+/\d{4}(?:-[A-Z0-9]+)?)[\s,.:]+",
     re.IGNORECASE,
 )
 # Fin de oración antes de la empresa: restos del aviso anterior ("1 Acdo. en
@@ -112,7 +122,7 @@ RE_Y_OTROS = re.compile(r"[\s,]+y\s+(?:otr[oa]s?|coags?\.?)\s*\.?\s*$", re.IGNOR
 # No se corta antes de una cola societaria ("S.A., Institución de Banca
 # Múltiple, Grupo Financiero X" es una sola empresa).
 RE_SEPARADOR = re.compile(
-    r"\s+(?:y|e)\s+(?=[A-ZÁÉÍÓÚÑ])"
+    r"\s*;\s*|\s+(?:y|e)\s+(?=[A-ZÁÉÍÓÚÑ])"
     r"|,\s+(?!(?:Instituci[oó]n|Grupo\s+Financiero|Sociedad|Sofom|Entidad|S\.)\b)(?=[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+\s)"
 )
 # Palabras de forma societaria: un núcleo hecho solo de estas no es una
@@ -120,6 +130,16 @@ RE_SEPARADOR = re.compile(
 PALABRAS_FORMA = set("""sociedad anonima responsabilidad limitada capital variable civil asociacion
 institucion banca multiple desarrollo grupo financiero financiera objeto entidad regulada no
 nacional credito cooperativa de del la y s a c v r l sofom enr snc sa cv""".split())
+
+# Red de seguridad: si después de limpiar el nombre todavía trae esto, puede
+# llevar una persona o un resto del aviso pegado, y no se publica (las
+# páginas de empresas se indexan). Mejor perder la empresa que mostrar a
+# una persona.
+RE_SOSPECHOSO = re.compile(
+    r"\bamparo\b|\bpromov|\bquejos|\bsucesi[oó]n\b|\balbacea|\bapoderad|\bLic\.|\d+/\d{4}"
+    r"|representad[oa]s?\s*por|\bconocid[oa]\s+(?:como|por)\b|\bvs\.",
+    re.IGNORECASE,
+)
 
 GENERICOS = {"banco", "grupo", "servicios", "inmobiliaria", "constructora", "comercializadora",
              "secreto", "desarrollos", "promotora", "operadora", "corporativo", "grupo industrial"}
@@ -162,7 +182,8 @@ def recortar_inicio(t):
     RE_FIN_ORACION). Solo corta si después queda un nombre antes de la forma
     societaria ("Lwz Consultoría Estratégica. S.A. de C.V." no se corta)."""
     t = RE_ENCABEZADO_INICIAL.sub("", t)
-    m = RE_FORMA_FUERTE.search(t)
+    # Forma larga o, si no hay, la corta del final ("... hoy Sun Belt S. C").
+    m = RE_FORMA_FUERTE.search(t) or RE_FORMA_CORTA_FINAL_POS.search(t)
     if not m:
         return t
     antes = t[:m.start()]
@@ -172,7 +193,7 @@ def recortar_inicio(t):
         cortes = [c.end() for c in regex.finditer(antes) if _palabras(antes[c.end():]) >= minimo]
         if cortes:
             t = t[cortes[-1]:]
-            m = RE_FORMA_FUERTE.search(t)
+            m = RE_FORMA_FUERTE.search(t) or RE_FORMA_CORTA_FINAL_POS.search(t)
             antes = t[:m.start()] if m else t
     t = RE_MINUSCULAS_INICIALES.sub("", t)
     return t
@@ -209,7 +230,7 @@ def partes(campo):
         if es_empresa(t) and not RE_RESTO_ENCABEZADO.search(t):
             t = cortar_en_forma(recortar_inicio(t))
             n = normalizar(t)
-            if nucleo_valido(n):
+            if nucleo_valido(n) and not RE_SOSPECHOSO.search(t):
                 empresas.append((n, t))
                 continue
         if re.search(r"[A-Za-zÁÉÍÓÚÑáéíóúñ]{2}", t) and not RE_Y_OTROS.match(" " + t):
