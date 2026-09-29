@@ -52,3 +52,17 @@ de las fechas de la tabla, con su número de boletín.
   revisaron los boletines que el índice lista.
 - Boletines anteriores al 3 de octubre de 2016, que el índice del portal no
   incluye.
+
+## Boletines sin avisos parseados (pendiente de investigar)
+
+Revisión del 29 de septiembre de 2026, sobre la base completa: 5 boletines del índice tienen el PDF descargado pero el parser no sacó ningún aviso (`n_entradas = 0`). Por eso la página de fuentes dice 2,030 boletines procesados de 2,035.
+
+| Fecha | ID | Texto extraído | Hipótesis (sin verificar) |
+|---|---|---|---|
+| 26 sep 2017 | 367 | 10.5 KB | Aviso o suspensión de labores (días después del sismo del 19 de septiembre) |
+| 9 mar 2020 | 1426 | 210 KB | Tiene texto de sobra: probable formato que el parser no reconoce |
+| 18 mar 2020 | 1438 | 0.9 KB | Aviso de suspensión (inicio de la pandemia) |
+| 11 ene 2022 | 1990 | 0.3 KB | PDF casi vacío o escaneado sin texto |
+| 2 ago 2026 | 4106 | 975 KB | Cae en domingo y tiene mucho texto: edición especial o error de fecha; el parser no lo reconoce |
+
+Para investigar: abrir cada PDF y el `.txt` en `scraper/data/*/pdfs/boletin_<id>.txt`. Los de 2020-03-09 y 2026-08-02 son los que más probablemente sean un fallo del parser.
