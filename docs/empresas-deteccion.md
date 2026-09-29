@@ -34,8 +34,11 @@ La primera versión tenía personas coladas ("Olivo Martínez Jaime antes HSBC M
 - **Empresas en campos de una sola parte** (sucesiones, jurisdicciones voluntarias) se toman como actora.
 - **Un mismo aviso puede nombrar a la misma empresa dos veces** en un campo: se cuenta una sola vez (`DISTINCT` en `entradas_empresas`).
 
+- **Sufijos del expediente en Unidades de Gestión Judicial**: el número trae pegada la descripción del acuerdo ("Exp. 9518/2026, Vista Con Razon Actuarial", "Exp. 6247/2026, # No Se Admite Recurso de Apelación"). Viene del parser (`RE_ENTRY_END` toma hasta el punto), no de la detección de empresas. Separarlo en `expediente` y `descripcion` mejoraría el agrupamiento por expediente.
+
 ## Cómo rearmar después de cambiar la detección
 
 ```bash
-python scraper/build_db.py --output boletin_completo.sqlite --solo-empresas   # ~10 min, sin recargar los 34M avisos
+python scraper/build_db.py --output boletin_completo.sqlite --solo-empresas        # empresas + agregados, ~20 min, sin recargar los 34M avisos
+python scraper/build_db.py --output boletin_completo.sqlite --agregados-empresas   # solo tipos/años/expedientes por empresa, ~3 min
 ```
