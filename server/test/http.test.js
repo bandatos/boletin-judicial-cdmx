@@ -352,3 +352,15 @@ test('el paginador muestra primera, ventana, "…" y última, con la actual marc
   assert.match(nav, /href="\/personas\?p=9"[^>]*rel="prev"/);
   assert.equal((nav.match(/page-ellipsis/g) || []).length, 2);
 });
+
+test('el paginador sin total conocido muestra la siguiente pero no la última', () => {
+  const { renderTemplate } = require('../lib/views');
+  const html = renderTemplate('persona', {
+    req: {}, persona: { nombre: 'X', slug: 'x', avisos: 1, como_actora: 1, como_demandada: 0 },
+    resultado: { grupos: [], pagina: 3, hayMas: true, totalExpedientes: null, totalAvisos: null },
+  });
+  const nav = html.match(/<nav class="pagesContainer[^]*?<\/nav>/)[0];
+  assert.match(nav, /href="\/personas\/x\?p=4"[^>]*rel="next"/);
+  assert.doesNotMatch(nav, /Última página/);
+  assert.match(html, /150\+/);
+});

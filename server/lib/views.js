@@ -63,22 +63,14 @@ function buscar(req, { juzgado, formAction, heading } = {}) {
   const chart = db.getYearChart();
 
   const searched = Boolean(q || tipo || anio || juzgado);
-  let groups = [];
-  let totalAvisos = 0;
-  let avisosMostrados = 0;
-
-  if (searched) {
-    // Del más reciente al más viejo. total es null si hay más de db.CANDIDATOS.
-    const { rows, total } = db.searchEntradas({ q, tipo, anio, juzgado });
-    totalAvisos = total;
-    avisosMostrados = rows.length;
-    groups = db.groupByExpediente(rows).slice(0, db.MAX_RESULTS);
-  }
+  // 50 expedientes por página, del que tiene el aviso más reciente al más viejo.
+  const resultado = searched ? db.buscarExpedientes({ q, tipo, anio, juzgado }, req.query.p) : null;
+  const params = Object.fromEntries(Object.entries({ q, tipo, anio }).filter(([, v]) => v));
 
   return renderTemplate('index', {
-    req, q, tipo, anio, tipos, anios, chart,
-    groups, totalAvisos, avisosMostrados, searched,
-    maxResults: db.MAX_RESULTS, candidatos: db.CANDIDATOS,
+    req, q, tipo, anio, tipos, anios, chart, searched, resultado,
+    groups: resultado ? resultado.grupos : [],
+    hrefPagina: n => `${formAction || '/buscar'}?${new URLSearchParams({ ...params, p: n })}`,
     formAction: formAction || '/buscar',
     heading: heading || null,
   });
@@ -264,17 +256,9 @@ function personas(req) {
 function persona(req, params) {
   const p = db.hayPersonas() ? db.getPersona(params.slug) : null;
   if (!p) return { status: 404, html: renderTemplate('404', { req }) };
-  const { grupos, truncado } = db.getAvisosPersona(p);
-  const pagina = Math.max(1, parseInt(req.query.p, 10) || 1);
-  const porPagina = db.PERSONAS_POR_PAGINA;
   return {
     status: 200,
-    html: renderTemplate('persona', {
-      req, persona: p, truncado,
-      totalExpedientes: grupos.length,
-      grupos: grupos.slice((pagina - 1) * porPagina, pagina * porPagina),
-      pagina, paginas: Math.max(1, Math.ceil(grupos.length / porPagina)),
-    }),
+    html: renderTemplate('persona', { req, persona: p, resultado: db.getExpedientesPersona(p, req.query.p) }),
   };
 }
 

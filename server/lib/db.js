@@ -154,9 +154,10 @@ function avisosRecientes({ from, where, params, limite, colId = 'e.id' }) {
   return { rows: rows.sort(porFecha), total: null };
 }
 
-// Avisos por nombre, expediente o filtros, del más reciente al más viejo.
-// Devuelve hasta MAX_ROWS; `total` es null si hay más de CANDIDATOS.
-function searchEntradas({ q, tipo, anio, juzgado }) {
+// Consulta de avisos por nombre, expediente o filtros: { from, where,
+// params, colId } para avisosRecientes / paginaExpedientes, o null si no hay
+// nada que buscar.
+function consultaAvisos({ q, tipo, anio, juzgado }) {
   const filtros = [];
   const params = [];
   if (tipo) { filtros.push('e.tipo_juicio_norm = ?'); params.push(tipo); }
@@ -168,26 +169,99 @@ function searchEntradas({ q, tipo, anio, juzgado }) {
   // sensible a mayúsculas y así SQLite puede usar idx_expediente_num.
   const expedienteQ = (q || '').match(/^\s*(\d+)\s*\/\s*(\d+)\s*$/);
   if (expedienteQ) {
-    filtros.unshift('e.expediente GLOB ?');
-    params.unshift(`${expedienteQ[1]}/${expedienteQ[2]}*`);
-    return avisosRecientes({ from: 'entradas e', where: filtros.join(' AND '), params, limite: MAX_ROWS });
+    return {
+      from: 'entradas e',
+      where: ['e.expediente GLOB ?', ...filtros].join(' AND '),
+      params: [`${expedienteQ[1]}/${expedienteQ[2]}*`, ...params],
+    };
   }
   if (q) {
     // FTS5 (detail=none) no soporta frases ni caracteres especiales ("/",
     // "-", "(", ":"...) fuera de un bareword: se sanean a espacios y se busca
     // cada palabra (AND implícito). Mismo criterio que search.js.
     const ftsQ = q.replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
-    if (!ftsQ) return { rows: [], total: 0 };
-    return avisosRecientes({
-      from: FROM_FTS,
+    if (!ftsQ) return null;
+    return {
+      from: FROM_FTS, colId: 'f.rowid',
       where: ['entradas_fts MATCH ?', ...filtros].join(' AND '),
-      params: [ftsQ, ...params], limite: MAX_ROWS, colId: 'f.rowid',
-    });
+      params: [ftsQ, ...params],
+    };
   }
-  if (filtros.length) {
-    return avisosRecientes({ from: 'entradas e', where: filtros.join(' AND '), params, limite: MAX_ROWS });
+  if (filtros.length) return { from: 'entradas e', where: filtros.join(' AND '), params };
+  return null;
+}
+
+// Avisos del más reciente al más viejo, hasta MAX_ROWS; `total` es null si
+// hay más de CANDIDATOS.
+function searchEntradas(filtros) {
+  const c = consultaAvisos(filtros);
+  return c ? avisosRecientes({ ...c, limite: MAX_ROWS }) : { rows: [], total: 0 };
+}
+
+// Página de expedientes (agrupados como groupByExpediente), del que tiene el
+// aviso más reciente al más viejo. Trae solo los avisos que hacen falta:
+// recorre los tramos del más nuevo al más viejo en lotes, con un cursor de
+// id dentro de cada tramo, hasta juntar los expedientes de la página y uno
+// más (para saber si hay otra). Con pocos resultados (menos de CANDIDATOS)
+// se traen todos y los totales son exactos. `filtro`: condición extra sobre
+// cada aviso (la ficha de persona exige el nombre exacto).
+// Devuelve { grupos, pagina, hayMas, totalExpedientes, totalAvisos }; los
+// totales son null cuando no se conocen. Cada grupo lleva solo los avisos
+// recorridos: en un expediente largo pueden faltar los más viejos.
+// (EXPEDIENTES_POR_PAGINA, 50, está con las empresas.)
+const LOTE = 1000;
+const MAX_RECORRIDOS = 200000;
+
+function paginaExpedientes({ from, where, params, colId = 'e.id', pagina, filtro = () => true }) {
+  const d = getDb();
+  const p = Math.max(1, parseInt(pagina, 10) || 1);
+  const desde = (p - 1) * EXPEDIENTES_POR_PAGINA;
+  const base = `SELECT ${COLS_AVISO} FROM ${from} LEFT JOIN boletines b ON e.boletin_id = b.id WHERE ${where}`;
+  const porFecha = (a, b) => String(b.fecha_iso || '').localeCompare(String(a.fecha_iso || '')) || b.id - a.id;
+
+  const candidatos = d.prepare(`${base} LIMIT ${CANDIDATOS}`).all(...params);
+  if (candidatos.length < CANDIDATOS) {
+    const rows = candidatos.filter(filtro).sort(porFecha);
+    const grupos = groupByExpediente(rows);
+    return {
+      grupos: grupos.slice(desde, desde + EXPEDIENTES_POR_PAGINA), pagina: p,
+      hayMas: grupos.length > desde + EXPEDIENTES_POR_PAGINA,
+      totalExpedientes: grupos.length, totalAvisos: rows.length,
+    };
   }
-  return { rows: [], total: 0 };
+
+  const stmt = d.prepare(`${base} AND ${colId} BETWEEN ? AND ? ORDER BY ${colId} DESC LIMIT ${LOTE}`);
+  const necesarios = desde + EXPEDIENTES_POR_PAGINA + 1;
+  const vistos = [];
+  const claves = new Set();
+  let recorridos = 0;
+  recorrer: for (const t of getTramos()) {
+    let hi = t.hi;
+    while (hi >= t.lo) {
+      const lote = stmt.all(...params, t.lo, hi);
+      recorridos += lote.length;
+      for (const r of lote) {
+        if (!filtro(r)) continue;
+        claves.add(r.expediente ? `${r.juzgado || ''}|${r.sala || ''}|${r.expediente}` : `id${r.id}`);
+        vistos.push(r);
+      }
+      if (claves.size >= necesarios || recorridos >= MAX_RECORRIDOS) break recorrer;
+      if (lote.length < LOTE) break;
+      hi = lote[lote.length - 1].id - 1;
+    }
+  }
+  const grupos = groupByExpediente(vistos);
+  return {
+    grupos: grupos.slice(desde, desde + EXPEDIENTES_POR_PAGINA), pagina: p,
+    hayMas: grupos.length > desde + EXPEDIENTES_POR_PAGINA,
+    totalExpedientes: null, totalAvisos: null,
+  };
+}
+
+function buscarExpedientes(filtros, pagina) {
+  const c = consultaAvisos(filtros);
+  if (!c) return { grupos: [], pagina: 1, hayMas: false, totalExpedientes: 0, totalAvisos: 0 };
+  return paginaExpedientes({ ...c, pagina });
 }
 
 // Un mismo expediente acumula un aviso por cada acuerdo publicado. El
@@ -556,7 +630,6 @@ function getPortada() {
 // en vivo en entradas_fts y se filtran por el nombre exacto.
 
 const PERSONAS_POR_PAGINA = 50;
-const MAX_AVISOS_PERSONA = 3000;
 
 function hayPersonas() {
   return hayTabla('personas');
@@ -596,23 +669,20 @@ function normNombre(str) {
   return ` ${normTxt(str).replace(/[^a-z0-9ñ ]+/g, ' ').replace(/\s+/g, ' ').trim()} `;
 }
 
-// Avisos donde la persona es actora o demandada, agrupados por expediente.
-// Las palabras cortas y las partículas ("de", "la") quedan fuera del MATCH
-// (con detail=none sus listas son enormes) y se verifican en el filtro.
-function getAvisosPersona(persona) {
+// Expedientes donde la persona es actora o demandada, de a 50 (ver
+// paginaExpedientes). Las palabras cortas y las partículas ("de", "la")
+// quedan fuera del MATCH (con detail=none sus listas son enormes) y se
+// verifican en el filtro, que además exige el nombre exacto.
+function getExpedientesPersona(persona, pagina) {
   const palabras = persona.nucleo.split(' ').filter(w => w.length >= 3 && !['del', 'las', 'los'].includes(w));
-  if (!palabras.length) return { grupos: [], truncado: false };
-  const { rows, total } = avisosRecientes({
-    from: FROM_FTS,
-    where: 'entradas_fts MATCH ?', params: [palabras.join(' ')],
-    limite: MAX_AVISOS_PERSONA, colId: 'f.rowid',
-  });
+  if (!palabras.length) return { grupos: [], pagina: 1, hayMas: false, totalExpedientes: 0, totalAvisos: 0 };
   const buscado = ` ${persona.nucleo} `;
-  const propios = rows.filter(r => normNombre(r.actora).includes(buscado) || normNombre(r.demandada).includes(buscado))
-    .map(r => ({ ...r, rol: normNombre(r.actora).includes(buscado) ? 'actora' : 'demandada' }));
-  const grupos = groupByExpediente(propios)
-    .sort((a, b) => String(b.fecha_iso || '').localeCompare(String(a.fecha_iso || '')));
-  return { grupos, truncado: total === null || total > MAX_AVISOS_PERSONA };
+  const res = paginaExpedientes({
+    from: FROM_FTS, colId: 'f.rowid', where: 'entradas_fts MATCH ?', params: [palabras.join(' ')],
+    pagina, filtro: r => normNombre(r.actora).includes(buscado) || normNombre(r.demandada).includes(buscado),
+  });
+  for (const g of res.grupos) g.rol = normNombre(g.actora).includes(buscado) ? 'actora' : 'demandada';
+  return res;
 }
 
 function getStats() {
@@ -640,6 +710,6 @@ function ping() {
 module.exports = {
   ping, getTipos, getAnios, findJuzgadoBySlug, searchEntradas, groupByExpediente, getExpedienteById,
   getYearChart, getPublicacionChart, getStats, getResumen, getDia, getFechas, reloadDb,
-  getPortada, hayPersonas, getPersonas, getPersona, getResumenPersonas, getAvisosPersona, PERSONAS_POR_PAGINA,
+  getPortada, hayPersonas, getPersonas, getPersona, getResumenPersonas, getExpedientesPersona, buscarExpedientes, EXPEDIENTES_POR_PAGINA, PERSONAS_POR_PAGINA,
   hayEmpresas, getEmpresas, getEmpresa, getExpedientesEmpresa, getEmpresasDeEntradas, getResumenEmpresas, MAX_RESULTS, MAX_ROWS, CANDIDATOS, CHART_COLORS, DB_PATH,
 };

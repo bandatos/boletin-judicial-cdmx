@@ -69,7 +69,11 @@ mixin avisosDia(rows)
 //- Paginador con el formato del de sociedad-web-front (templates/buscador.pug):
 //- flechas, primera y última página, una ventana de 4 páginas alrededor de
 //- la actual y "..." cuando se saltean páginas.
-mixin paginacion(actual, total, href)
+//- total null: no se sabe cuántas páginas hay (búsquedas muy grandes); se
+//- muestra hasta la actual y, si hayMas, la siguiente, sin "última".
+mixin paginacion(actual, total, href, hayMas)
+  - const conocido = total != null
+  - total = conocido ? total : actual + (hayMas ? 1 : 0)
   if total > 1
     - const VENTANA = 4
     - let desde = Math.max(1, actual - 1)
@@ -88,7 +92,7 @@ mixin paginacion(actual, total, href)
           a.page.current(href=href(n) aria-current="page" aria-label=`Página actual, ${num(n)}`)= num(n)
         else
           a.page(href=href(n) aria-label=`Ir a la página ${num(n)}`)= num(n)
-      if hasta < total
+      if conocido && hasta < total
         if hasta < total - 1
           span.page-ellipsis(aria-hidden="true") …
         a.page(href=href(total) aria-label=`Última página, ${num(total)}`)= num(total)

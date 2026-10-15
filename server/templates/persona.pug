@@ -12,7 +12,7 @@ include mixins.pug
 
     .stats-grid
       .stat
-        strong= num(totalExpedientes)
+        strong= resultado.totalExpedientes == null ? `${num(resultado.pagina * 50)}+` : num(resultado.totalExpedientes)
         span expedientes
       .stat
         strong= num(persona.avisos)
@@ -25,17 +25,16 @@ include mixins.pug
         span como demandada
     if persona.primer_boletin
       p.nota Del #{fechaLarga(persona.primer_boletin)} al #{fechaLarga(persona.ultimo_boletin)}. Puede incluir juicios de otras personas con el mismo nombre.
-    if truncado
-      p.nota Este nombre aparece en muchos avisos: se muestran solo los primeros encontrados.
 
     .bloque
       h3 Expedientes
-      if !grupos.length
+      p.nota Del más reciente al más viejo.
+      if !resultado.grupos.length
         p Sin avisos encontrados.
       #result-list
-        each g in grupos
+        each g in resultado.grupos
           +resultCard(g)
 
-    +paginacion(pagina, paginas, n => `/personas/${persona.slug}?p=${n}`)
+    +paginacion(resultado.pagina, resultado.totalExpedientes == null ? null : Math.ceil(resultado.totalExpedientes / 50), n => `/personas/${persona.slug}?p=${n}`, resultado.hayMas)
 
   +siteFooter()

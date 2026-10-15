@@ -171,3 +171,15 @@ test('searchEntradas devuelve del aviso más reciente al más viejo, con el tota
   const fechas = rows.map(r => r.fecha_iso);
   assert.deepEqual(fechas, [...fechas].sort().reverse());
 });
+
+test('buscarExpedientes pagina de a 50, del más reciente al más viejo, con totales exactos si son pocos', () => {
+  const r = db.buscarExpedientes({ q: 'thebart' }, 1);
+  assert.equal(r.pagina, 1);
+  assert.equal(r.hayMas, false);
+  assert.equal(r.totalExpedientes, r.grupos.length);
+  const fechas = r.grupos.map(g => g.fecha_iso);
+  assert.deepEqual(fechas, [...fechas].sort().reverse());
+  const fuera = db.buscarExpedientes({ q: 'thebart' }, 9);
+  assert.equal(fuera.grupos.length, 0);
+  assert.equal(db.buscarExpedientes({}, 1).grupos.length, 0);
+});

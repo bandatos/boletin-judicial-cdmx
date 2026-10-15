@@ -26,8 +26,11 @@ server.listen(PORT, HOST, () => {
 // alcanza con reemplazarla con mv (boletin.sqlite.new -> boletin.sqlite).
 // Recarga recién cuando dos revisiones seguidas ven lo mismo, así no abre un
 // archivo a medio copiar si alguien lo pisa con cp. Por sondeo y no con
-// inotify: anda igual dentro de Docker con el directorio montado. Mientras
-// se recalcula el resumen (unos segundos) los pedidos esperan.
+// eventos del sistema (inotify/chokidar): un mv cambia el archivo debajo del
+// nombre, y con eventos hay que vigilar el directorio y esperar a que
+// termine la escritura; un stat cada 30 s resuelve las dos cosas sin
+// dependencias, a cambio de tardar hasta un minuto en tomar la base nueva.
+// Mientras se recalcula el resumen (unos segundos) los pedidos esperan.
 const fs = require('fs');
 const INTERVALO = Number(process.env.DB_WATCH_MS) || 30000;
 

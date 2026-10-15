@@ -29,15 +29,16 @@ include mixins.pug
   #results
     if searched
       #result-count
-        = num(groups.length) + ' expediente' + (groups.length !== 1 ? 's' : '')
-        if totalAvisos === null || totalAvisos > avisosMostrados
-          = ` · ${totalAvisos === null ? 'más de ' + num(candidatos) : num(totalAvisos)} avisos, se muestran los ${num(avisosMostrados)} más recientes`
-        else if totalAvisos > groups.length
-          = ` (${num(totalAvisos)} avisos)`
+        if resultado.totalExpedientes != null
+          = `${num(resultado.totalExpedientes)} expediente${resultado.totalExpedientes !== 1 ? 's' : ''} (${num(resultado.totalAvisos)} avisos)`
+        else
+          = `Más de ${num(candidatos)} avisos`
+        |  · del más reciente al más viejo
       if !groups.length
         p Sin resultados.
       #result-list
         each g in groups
           +resultCard(g)
+      +paginacion(resultado.pagina, resultado.totalExpedientes == null ? null : Math.ceil(resultado.totalExpedientes / porPagina), hrefPagina, resultado.hayMas)
 
   +siteFooter()
