@@ -14,7 +14,6 @@
   "type": "commonjs",
   "dependencies": {
     "better-sqlite3": "^12.11.1",
-    "chokidar": "^5.0.0",
     "minify": "^15.3.1",
     "pug": "^3.0.4"
   }

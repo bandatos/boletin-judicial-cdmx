@@ -18,10 +18,8 @@ function getDb() {
   return db;
 }
 
-// El archivo .sqlite no es parte del grafo de módulos de Node, así que
-// `node --watch` (que reinicia el proceso ante cambios de código) no lo
-// detecta. reloadDb() la reabre en caliente cuando cambia el archivo en
-// disco — la llama el watcher de chokidar en litigios-cdmx.js (solo dev).
+// Reabre la base y descarta los agregados en memoria. La llama
+// litigios-cdmx.js cuando cambia el archivo en disco (en dev y en producción).
 function reloadDb() {
   if (db) db.close();
   db = null;

@@ -21,17 +21,39 @@ server.listen(PORT, HOST, () => {
   console.log(`Resumen de la DB listo en ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 });
 
-// En dev, "node --watch" ya reinicia el proceso cuando cambia código (lib/,
-// config/, este archivo). Pero boletin.sqlite no es un módulo require()-ado,
-// así que node --watch no lo ve — por eso acá se lo vigila aparte con
-// chokidar y se reabre la conexión en caliente, sin reiniciar el server.
-if (process.env.NODE_ENV !== 'production') {
-  const chokidar = require('chokidar');
-  const watcher = chokidar.watch(db.DB_PATH, { ignoreInitial: true });
-  watcher.on('change', () => {
-    console.log(`[watch] ${db.DB_PATH} cambió, recargando conexión...`);
-    db.reloadDb();
-  });
+// Recarga de la base sin reiniciar: se revisa cada DB_WATCH_MS (30 s) si
+// cambió el archivo (inodo, tamaño o fecha). Para publicar una base nueva
+// alcanza con reemplazarla con mv (boletin.sqlite.new -> boletin.sqlite).
+// Recarga recién cuando dos revisiones seguidas ven lo mismo, así no abre un
+// archivo a medio copiar si alguien lo pisa con cp. Por sondeo y no con
+// inotify: anda igual dentro de Docker con el directorio montado. Mientras
+// se recalcula el resumen (unos segundos) los pedidos esperan.
+const fs = require('fs');
+const INTERVALO = Number(process.env.DB_WATCH_MS) || 30000;
+
+function firma() {
+  try {
+    const s = fs.statSync(db.DB_PATH);
+    return `${s.ino}:${s.size}:${s.mtimeMs}`;
+  } catch {
+    return null;
+  }
 }
+
+let actual = firma();
+let candidata = null;
+setInterval(() => {
+  const f = firma();
+  if (!f || f === actual) { candidata = null; return; }
+  if (f !== candidata) { candidata = f; return; }
+  actual = f;
+  candidata = null;
+  console.log(`[db] ${db.DB_PATH} cambió, recargando...`);
+  const t0 = Date.now();
+  db.reloadDb();
+  db.getResumen();
+  db.getPublicacionChart();
+  console.log(`[db] base recargada en ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+}, INTERVALO).unref();
 
 module.exports = server;
