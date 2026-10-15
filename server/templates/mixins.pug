@@ -99,7 +99,7 @@ mixin paginacion(actual, total, href)
 //- Avisos por año, apilados por tipo de juicio (colores en db.CHART_COLORS).
 mixin graficoAnios(chart)
   #chart-box
-    h2#chart-title Avisos por año
+    h2#chart-title Avisos por año del expediente
     #chart
       each y in chart.years
         .chart-col(style=`height:${(y.total / chart.maxTotal) * 100}%` title=`${y.anio}: ${num(y.total)} avisos`)

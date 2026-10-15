@@ -54,6 +54,9 @@ mixin pestanas(grupo, pestanas)
       a(href="/fecha") Lo publicado cada día
       a(href="/sources") De dónde vienen los datos
 
+    section.tarjeta
+      +graficoAnios(chart)
+
     if datos.empresas
       +tarjeta('🏢', 'Empresas con más juicios', '/empresas', 'Ver todas las empresas')
         +pestanas('empresas', [{ id: 'empresas-avisos', titulo: 'Con más avisos' }, { id: 'empresas-expedientes', titulo: 'Con más expedientes' }])
@@ -117,9 +120,6 @@ mixin pestanas(grupo, pestanas)
                 td
                   a(href=`/buscar?${new URLSearchParams({ tipo: t.tipo })}`)= t.tipo
                 td.num= num(t.avisos)
-
-    section.tarjeta
-      +graficoAnios(chart)
 
     +tarjeta('🗄️', 'Fuentes de datos', '/sources', 'De dónde vienen los datos')
       p.
