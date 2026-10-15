@@ -34,6 +34,44 @@ include mixins.pug
 
     #results
       if searched
+        if fichas && (fichas.empresas.length || fichas.personas.length)
+          section.coincidencias(aria-labelledby="titulo-coincidencias")
+            h2#titulo-coincidencias Fichas que coinciden con «#{q}»
+            .coincidencias-grupos
+              if fichas.empresas.length
+                div
+                  h3 Empresas
+                  ul
+                    each e in fichas.empresas
+                      li
+                        a(href=`/empresas/${e.slug}`)!= resaltar(e.nombre, q)
+                        span.coincidencia-n= ` · ${num(e.avisos)} avisos`
+              if fichas.personas.length
+                div
+                  h3 Personas
+                  ul
+                    each p in fichas.personas
+                      li
+                        a(href=`/personas/${p.slug}`)!= resaltar(p.nombre, q)
+                        span.coincidencia-n= ` · ${num(p.avisos)} avisos`
+            p.nota Cada ficha reúne los juicios de esa empresa o persona, con su resumen por año y tipo de juicio.
+
+        if resultado.palabras && resultado.palabras.length === 1 && resultado.totalAvisos > AVISO_AMPLIO
+          p.aviso-amplio
+            | «#{q}» aparece en #{num(resultado.totalAvisos)} avisos. Para encontrar a alguien en particular, agrega un apellido o el nombre completo.
+        if resultado.relajado
+          p.aviso-amplio Ningún aviso tiene todas esas palabras del mismo lado del juicio: se muestran los que las tienen en cualquier parte.
+        if resultado.juzgados && resultado.juzgados.length > 1
+          .juzgados-expediente
+            p El expediente #{resultado.expediente} existe en #{num(resultado.juzgados.length)} juzgados. Elige uno:
+            ul
+              each j in resultado.juzgados.slice(0, 30)
+                li
+                  a(href=`/juzgado/${j.slug}?${new URLSearchParams({ q })}`)= j.nombre
+                  span.coincidencia-n= ` (${num(j.n)})`
+            if resultado.juzgados.length > 30
+              p.nota Y #{num(resultado.juzgados.length - 30)} más: usa el filtro de tipo de juicio o agrega un nombre.
+
         #result-count
           if resultado.totalExpedientes != null
             = `${num(resultado.totalExpedientes)} expediente${resultado.totalExpedientes !== 1 ? 's' : ''} (${num(resultado.totalAvisos)} avisos)`

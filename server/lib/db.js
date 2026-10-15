@@ -5,6 +5,7 @@
 const path = require('path');
 const Database = require('better-sqlite3');
 const { slugify } = require('./slug');
+const busqueda = require('./busqueda');
 
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, '..', '..', 'boletin.sqlite');
 
@@ -172,30 +173,28 @@ function consultaAvisos({ q, tipo, anio, juzgado }) {
   if (anio) { filtros.push('e.anio = ?'); params.push(Number(anio)); }
   if (juzgado) { filtros.push('e.juzgado = ?'); params.push(juzgado); }
 
-  // Número de expediente ("1201/2017"): no está en el índice FTS (y la "/"
-  // lo rompe), se busca por prefijo en la columna. GLOB y no LIKE: es
-  // sensible a mayúsculas y así SQLite puede usar idx_expediente_num.
-  const expedienteQ = (q || '').match(/^\s*(\d+)\s*\/\s*(\d+)\s*$/);
-  if (expedienteQ) {
+  // Número de expediente en cualquier formato (ver busqueda.parsearExpediente):
+  // no está en el índice FTS, se busca por prefijo en la columna. GLOB y no
+  // LIKE: es sensible a mayúsculas y así SQLite puede usar idx_expediente_num.
+  // Si además hay palabras ("garcia 184/2025"), se buscan en el FTS.
+  const { expediente, palabras } = busqueda.parsearConsulta(q);
+  if (expediente) {
+    filtros.unshift('e.expediente GLOB ?');
+    params.unshift(`${expediente}*`);
     return {
-      from: 'entradas e',
-      where: ['e.expediente GLOB ?', ...filtros].join(' AND '),
-      params: [`${expedienteQ[1]}/${expedienteQ[2]}*`, ...params],
+      from: 'entradas e', where: filtros.join(' AND '), params, expediente, palabras,
+      filtro: busqueda.filtroPalabras(palabras),
     };
   }
-  if (q) {
-    // FTS5 (detail=none) no soporta frases ni caracteres especiales ("/",
-    // "-", "(", ":"...) fuera de un bareword: se sanean a espacios y se busca
-    // cada palabra (AND implícito). Mismo criterio que search.js.
-    const ftsQ = q.replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
-    if (!ftsQ) return null;
+  if (palabras.length) {
     return {
-      from: FROM_FTS, colId: 'f.rowid',
+      from: FROM_FTS, colId: 'f.rowid', expediente, palabras,
       where: ['entradas_fts MATCH ?', ...filtros].join(' AND '),
-      params: [ftsQ, ...params],
+      params: [busqueda.consultaFts(palabras), ...params],
+      filtro: busqueda.filtroMismoLado(palabras),
     };
   }
-  if (filtros.length) return { from: 'entradas e', where: filtros.join(' AND '), params };
+  if (filtros.length) return { from: 'entradas e', where: filtros.join(' AND '), params, expediente, palabras };
   return null;
 }
 
@@ -267,28 +266,69 @@ function paginaExpedientes({ from, where, params, colId = 'e.id', pagina, filtro
   };
 }
 
-// Total exacto de avisos cuando la búsqueda es solo texto o un solo filtro:
-// contar en el índice FTS o en el índice del filtro es barato (0.1 s para
-// "garcia", 2.7M avisos). Con combinaciones (texto + juzgado) hay que cruzar
-// cada coincidencia con la tabla y puede tardar segundos: se deja sin total.
-function contarAvisos({ q, tipo, anio, juzgado }) {
-  const filtros = [tipo, anio, juzgado].filter(Boolean).length;
-  const expedienteQ = (q || '').match(/^\s*(\d+)\s*\/\s*(\d+)\s*$/);
-  if (q && !expedienteQ && filtros === 0) {
-    const ftsQ = q.replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
-    return ftsQ ? getDb().prepare('SELECT COUNT(*) AS n FROM entradas_fts WHERE entradas_fts MATCH ?').get(ftsQ).n : 0;
+// Total exacto de avisos cuando contarlo es barato: una sola palabra (se
+// cuenta en el índice FTS, 0.1 s para "garcia", 2.7M avisos) o un solo filtro
+// sin texto. Con dos palabras o más el total depende del filtro de "mismo
+// lado", que hay que aplicar aviso por aviso; con combinaciones de texto y
+// filtros hay que cruzar cada coincidencia con la tabla.
+function contarAvisos(c, { tipo, anio, juzgado }) {
+  const filtros = [tipo, anio, juzgado, c.expediente].filter(Boolean).length;
+  if (c.palabras.length === 1 && filtros === 0) {
+    return getDb().prepare('SELECT COUNT(*) AS n FROM entradas_fts WHERE entradas_fts MATCH ?')
+      .get(busqueda.consultaFts(c.palabras)).n;
   }
-  if ((q ? 1 : 0) + filtros !== 1) return null;
-  const c = consultaAvisos({ q, tipo, anio, juzgado });
-  return getDb().prepare(`SELECT COUNT(*) AS n FROM ${c.from} WHERE ${c.where}`).get(...c.params).n;
+  if (c.palabras.length === 0 && filtros === 1) {
+    return getDb().prepare(`SELECT COUNT(*) AS n FROM ${c.from} WHERE ${c.where}`).get(...c.params).n;
+  }
+  return null;
 }
 
+// Búsqueda de /buscar y /juzgado: página de expedientes más los datos para
+// ayudar a acotar. Si con dos palabras o más ningún aviso las tiene todas del
+// mismo lado del juicio, se muestran los que las tienen en cualquier parte
+// (relajado: true).
 function buscarExpedientes(filtros, pagina) {
   const c = consultaAvisos(filtros);
   if (!c) return { grupos: [], pagina: 1, hayMas: false, totalExpedientes: 0, totalAvisos: 0 };
-  const res = paginaExpedientes({ ...c, pagina });
-  if (res.totalAvisos == null) res.totalAvisos = contarAvisos(filtros);
+  let res = paginaExpedientes({ ...c, pagina, filtro: c.filtro || undefined });
+  if (c.filtro && !c.expediente && !res.grupos.length && res.pagina === 1) {
+    res = paginaExpedientes({ ...c, pagina, filtro: undefined });
+    res.relajado = true;
+  }
+  if (res.totalAvisos == null) res.totalAvisos = contarAvisos(c, filtros);
+  res.palabras = c.palabras;
+  res.expediente = c.expediente;
+  // El mismo número de expediente existe en muchos juzgados: se listan los
+  // que aparecen, para elegir uno (solo si se trajeron todos los avisos).
+  if (c.expediente && res.todos) {
+    const porJuzgado = new Map();
+    for (const r of res.todos) if (r.juzgado) porJuzgado.set(r.juzgado, (porJuzgado.get(r.juzgado) || 0) + 1);
+    res.juzgados = [...porJuzgado.entries()].sort((a, b) => b[1] - a[1])
+      .map(([nombre, n]) => ({ nombre, slug: slugify(nombre), n }));
+  }
+  delete res.todos;
   return res;
+}
+
+// Personas y empresas cuyo nombre tiene todas las palabras buscadas (la
+// última como prefijo): se muestran antes de los avisos, con link a la
+// ficha. Primero las de nombre idéntico a lo buscado, después las de más
+// avisos.
+const MAX_COINCIDENCIAS = 5;
+function coincidenciasFichas(q) {
+  const { expediente, palabras } = busqueda.parsearConsulta(q);
+  if (expediente || !palabras.length) return { empresas: [], personas: [] };
+  const fts = palabras.map(w => `${w}*`).join(' ');
+  const exacto = palabras.join(' ');
+  const buscar = (tabla, cols) => hayTabla(tabla) ? getDb().prepare(`
+    SELECT ${cols} FROM ${tabla}
+    WHERE id IN (SELECT rowid FROM ${tabla}_fts WHERE ${tabla}_fts MATCH ?)
+    ORDER BY (nucleo = ?) DESC, avisos DESC LIMIT ${MAX_COINCIDENCIAS}
+  `).all(fts, exacto) : [];
+  return {
+    empresas: buscar('empresas', 'nombre, slug, avisos, expedientes'),
+    personas: buscar('personas', 'nombre, slug, avisos'),
+  };
 }
 
 // Un mismo expediente acumula un aviso por cada acuerdo publicado. El
@@ -752,6 +792,6 @@ function ping() {
 module.exports = {
   ping, getGeneracion, getTipos, getAnios, findJuzgadoBySlug, searchEntradas, groupByExpediente, getExpedienteById,
   getYearChart, getPublicacionChart, getStats, getResumen, getDia, getFechas, reloadDb,
-  getPortada, hayPersonas, getPersonas, getPersona, getResumenPersonas, getExpedientesPersona, buscarExpedientes, EXPEDIENTES_POR_PAGINA, PERSONAS_POR_PAGINA,
+  coincidenciasFichas, getPortada, hayPersonas, getPersonas, getPersona, getResumenPersonas, getExpedientesPersona, buscarExpedientes, EXPEDIENTES_POR_PAGINA, PERSONAS_POR_PAGINA,
   hayEmpresas, getEmpresas, getEmpresa, getExpedientesEmpresa, getEmpresasDeEntradas, getResumenEmpresas, MAX_RESULTS, MAX_ROWS, CANDIDATOS, CHART_COLORS, DB_PATH,
 };

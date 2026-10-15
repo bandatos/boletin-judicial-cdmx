@@ -444,3 +444,27 @@ test('con una búsqueda no se muestra el gráfico general; sin resultados hay su
   assert.match((await get('/buscar')).body, /class="chart-box"/);
   assert.match((await get('/buscar?q=zzzqqq')).body, /Busca solo un apellido/);
 });
+
+test('búsqueda: expediente en otros formatos y combinado con un nombre', async () => {
+  for (const q of ['184-2025', 'exp. 184/2025', 'expediente 0184/2025', '184/25']) {
+    const body = (await get('/buscar?' + new URLSearchParams({ q }))).body;
+    assert.match(body, /Exp\. 184\/2025/, q);
+  }
+  const mixto = (await get('/buscar?' + new URLSearchParams({ q: 'esquivel 184/2025' }))).body;
+  assert.match(mixto, /Exp\. 184\/2025/);
+  assert.doesNotMatch(mixto, /Exp\. 722\/2016/);
+});
+
+test('búsqueda: fichas que coinciden, prefijo y palabras del mismo lado', async () => {
+  const body = (await get('/buscar?q=garcia')).body;
+  assert.match(body, /Fichas que coinciden/);
+  assert.match(body, /href="\/personas\/garcia-perez-juan"/);
+  assert.match((await get('/buscar?' + new URLSearchParams({ q: 'esquivel theb' }))).body, /Exp\. 184\/2025/, 'prefijo de la última palabra');
+  // "tello thebart": cada palabra está en un lado distinto del juicio 722/2016;
+  // como ningún aviso las tiene juntas, se avisa y se muestran igual.
+  const repartidas = (await get('/buscar?' + new URLSearchParams({ q: 'tello thebart' }))).body;
+  assert.match(repartidas, /Ningún aviso tiene todas esas palabras del mismo lado/);
+  assert.match(repartidas, /Exp\. 722\/2016/);
+  const juntas = (await get('/buscar?' + new URLSearchParams({ q: 'esquivel thebart' }))).body;
+  assert.doesNotMatch(juntas, /Ningún aviso tiene todas esas palabras del mismo lado/);
+});

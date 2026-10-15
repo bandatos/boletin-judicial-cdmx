@@ -493,3 +493,20 @@ mark { background: #f3dfa2; color: inherit; padding: 0 .1em; border-radius: 2px;
 }
 .glosario dt { font-weight: bold; margin-top: .75rem; }
 .glosario dd { margin: .15rem 0 0; }
+
+/* ── Búsqueda: fichas que coinciden y avisos para acotar ── */
+.coincidencias {
+  border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-card);
+  padding: 1rem 1.25rem; margin: 1rem 0;
+}
+.coincidencias h2 { font-size: 1.1rem; margin-bottom: .5rem; }
+.coincidencias-grupos { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: .5rem 2rem; }
+.coincidencias h3 { font-size: .95rem; color: var(--fg-muted); margin: .25rem 0; }
+.coincidencias ul, .juzgados-expediente ul { list-style: none; }
+.coincidencias li, .juzgados-expediente li { padding: .2rem 0; }
+.coincidencia-n { color: var(--fg-muted); font-size: .875rem; }
+.aviso-amplio {
+  background: #f3e7c9; border-left: 4px solid #a8730f; padding: .6rem .9rem; border-radius: 4px; margin: .75rem 0;
+}
+.juzgados-expediente { margin: 1rem 0; }
+.juzgados-expediente ul { columns: 2 22rem; margin-top: .4rem; }

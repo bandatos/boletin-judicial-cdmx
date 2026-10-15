@@ -128,6 +128,9 @@ function renderTemplate(name, locals) {
   return fn({ ...pugLocals, css: cssInline(), ...locals });
 }
 
+// Con una sola palabra que aparece en más avisos que esto, se sugiere acotar.
+const AVISO_AMPLIO = 100000;
+
 function buscar(req, { juzgado, formAction, heading } = {}) {
   const q = (req.query.q || '').trim();
   const tipo = req.query.tipo || '';
@@ -140,10 +143,14 @@ function buscar(req, { juzgado, formAction, heading } = {}) {
   const searched = Boolean(q || tipo || anio || juzgado);
   // 50 expedientes por página, del que tiene el aviso más reciente al más viejo.
   const resultado = searched ? db.buscarExpedientes({ q, tipo, anio, juzgado }, req.query.p) : null;
+  // Fichas que coinciden con el nombre: solo en la primera página y sin
+  // filtros (con filtros se busca un juicio puntual, no a alguien).
+  const fichas = q && !tipo && !anio && !juzgado && !(req.query.p > 1) ? db.coincidenciasFichas(q) : null;
   const params = Object.fromEntries(Object.entries({ q, tipo, anio }).filter(([, v]) => v));
 
   return renderTemplate('index', {
-    req, q, tipo, anio, tipos, anios, chart, searched, resultado,
+    req, q, tipo, anio, tipos, anios, chart, searched, resultado, fichas,
+    AVISO_AMPLIO,
     groups: resultado ? resultado.grupos : [],
     hrefPagina: n => `${formAction || '/buscar'}?${new URLSearchParams({ ...params, p: n })}`,
     formAction: formAction || '/buscar',
