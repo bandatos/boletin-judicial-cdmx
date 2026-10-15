@@ -14,6 +14,10 @@ Las páginas `/empresas` y `/empresas/[slug]` se indexan y **no pueden mostrar n
 - Dos nombres pegados sin separador: se corta en el último "Banco" que no sea el primero ni parte de otro nombre ("Santander Consumo Banco Santander México Sa" da "Banco Santander México Sa"; "Ixe Banco, S.A." queda igual).
 - Paréntesis sin cerrar antes de la forma: se toma lo de adentro, la razón social ("Hospital X (Operadora Y, S.A. de C.V." da "Operadora Y, S.A. de C.V.").
 - "X S.A. en su carácter de fiduciaria en el Fideicomiso N": si lo de la derecha no es empresa, se queda X (antes se perdía).
+- Persona delante de la empresa separada por coma o por "y la / y el / y su / y por el" ("Fulano, BBVA Bancomer, S.A.", "Fulano y la Latinoamericana Seguros S.A."): se separa si lo de la izquierda tiene forma de nombre de persona con algún nombre de pila (`personas.NOMBRES_PILA`, un diccionario de nombres de pila frecuentes) y lo de la derecha es una empresa con nombre propio. Así "Mercader Financial, S.A." o "Integradora Estatal de Productores, de Chih, S.A." no se cortan.
+- Roles de una persona en la empresa, con su contexto: "Secretario del Consejo de Administración de", "Director General de", "Administrador Único de", "Socio Accionista de la Moral". "Administradora de Portafolios" sigue siendo una empresa.
+- Palabras pegadas por el boletín ("José AntonioSinergia") se separan antes de todo.
+- Segunda red de seguridad (`persona_al_inicio`): si el nombre ya limpio empieza con un nombre de pila, o con "Apellido Apellido Nombre", y no tiene una palabra de negocio en las tres primeras ("Centro", "Industrias", "Transportes"...), la empresa no se publica. Atrapa personas pegadas por erratas que ningún separador reconoce ("Fulano Anteshsbc México S.A.", "Fulano Ycustompiec, S.A."). También pierde empresas con nombre de persona ("Silvestre Casas Grúas Rally, S.A.", despachos "José Fulano Abogados S.C."): es a propósito.
 - Red de seguridad: si después de limpiar el nombre todavía trae "amparo", "promov", "quejoso", "sucesión", "albacea", "apoderado", "Lic.", "representado por", "conocida como", "vs." un número de expediente, "menor", "licenciado" o "notario", la empresa no se publica. "Menor" frena casos como "su menor hija G. S. S.A.", donde las iniciales se leen como "S.A.".
 - Solo se publican empresas con al menos 2 avisos (`MIN_AVISOS_EMPRESA`): los restos de parseo casi siempre aparecen una sola vez.
 - La contraparte en `/empresas/[slug]` sale solo de `entradas_empresas` (otras empresas) y del indicador de `entradas_partes` ("persona(s) física(s)"). Ninguna consulta de esas páginas lee `entradas.actora` ni `entradas.demandada`.
@@ -30,6 +34,8 @@ La primera versión tenía personas coladas ("Olivo Martínez Jaime antes HSBC M
 `python3 scraper/bench_empresas.py` corre los casos etiquetados (errores ya corregidos y nuevos, con nombres de personas inventados). Con `--db <base>` compara además contra la versión del último commit (`--ref`) sobre 1 de cada 500 avisos: cuántas empresas se detectan, cuántos campos cambian, cuáles pierden alguna empresa y cuántos nombres conservan restos sospechosos (conectores, listas, tomo, notario, paréntesis sin cerrar). Antes de rearmar las tablas, todo cambio en `empresas.py` tiene que pasar los casos y revisarse con esa comparación.
 
 Resultado del ajuste del 2026-10-14 contra el commit anterior: 24,072 a 25,336 empresas detectadas en la muestra, conectores de rol en el nombre 87 a 0, "como" / "y/o" 49 a 2, "anteriormente" 10 a 0, paréntesis sin cerrar 18 a 2. El único campo que pierde una empresa es uno que llevaba el nombre de un notario pegado.
+
+Segundo ajuste (personas delante de la empresa), contra el commit anterior: "persona delante" (nombre de pila entre las primeras palabras) 30 a 4 en la muestra; los 15 campos que pierden una empresa son personas pegadas, salvo tres nombres de negocio con nombre de persona.
 
 ## Problemas conocidos (pendientes)
 

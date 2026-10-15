@@ -69,7 +69,14 @@ RE_FORMA_FINAL_CORTA = re.compile(r"\S+\s+\S+.*\s(?:A\.?\s?C|S\.?\s?C)\.?\s*$", 
 RE_PREFIJO_PERSONA = re.compile(
     r"^(.*?)\b(?:en\s+(?:su\s+)?(?:car[aá]cter|calidad|representaci[oó]n)\s+de"
     r"|apoderad[oa]s?\s+(?:legal(?:es)?\s+)?de|representante\s+legal\s+de"
-    r"|por\s+conducto\s+de|a\s+trav[eé]s\s+de)\s+",
+    r"|por\s+conducto\s+de|a\s+trav[eé]s\s+de"
+    # "Fulano Secretario del Consejo de Administración de Banco X", "Socio
+    # Accionista de la Moral X", "Directora General de X"
+    # (con su contexto: "Administradora de Portafolios" es una empresa)
+    r"|(?:secretari[oa]|director[a]?|gerente)\s+general\s+de(?:l|\s+la)?"
+    r"|administrador[a]?\s+[uú]nic[oa]\s+de(?:l|\s+la)?"
+    r"|(?:secretari[oa]|president[ea])\s+del?\s+consejo\s+de\s+administraci[oó]n\s+de(?:l|\s+la)?"
+    r"|socio\s+accionista\s+de(?:\s+la)?(?:\s+moral)?|accionista\s+de\s+la\s+moral)\s+",
     re.IGNORECASE,
 )
 # Lo que puede seguir a la forma societaria sin dejar de ser el nombre de la
@@ -138,6 +145,7 @@ RE_SEPARADOR_ROL = re.compile(
     + ROLES + r"(?:\s+de\s+los\s+derechos\s+\w+)?(?:\s+(?:del?|de\s+la))?[\s,]+"
     r"|[\s,(]+(?:anteri?o?r?mente|antes\s+denominad[oa]|tambi[eé]n\s+identificad[oa]\s+como)[\s,]+"
     r"|\s+y/o\s+|[\s,]+quien\s+(?:tambi[eé]n\s+)?se\s+ostenta\s+como[\s,]+"
+    r"|[\s,]+quien\s+opera\s+bajo\s+la\s+raz[oó]n\s+social[\s,]+"
     r"|[\s,]+por\s+(?:su\s+)?(?:propio\s+derecho|derecho\s+propio)(?:\s+y)?(?:\s+como\s+(?:\w+\s+){0,3}?del?)?[\s,]+"
     r"|[\s,]+contra\s+(?!(?:incendios?|fuegos?|el|la|los|las|todo)\b)"
     r"|[\s,]*(?<![\w/])\d{1,2}\)\s*"
@@ -149,7 +157,7 @@ RE_SEPARADOR_ROL = re.compile(
 # tomo del boletín ("Tomo II Banco X", "Segundo Tomo HSBC").
 RE_INICIO_NO_NOMBRE = re.compile(
     r"^(?:su\s+)?(?:" + ROLES + r"|anteri?o?r?mente|denominad[oa])(?:\s+(?:del?|de\s+la))?\s+"
-    r"|^persona\s+moral\s+(?:denominada\s+)?"
+    r"|^(?:y\s+)?(?:de\s+)?(?:la\s+)?(?:persona\s+moral|sociedad)\s+denominada\s+|^persona\s+moral\s+"
     r"|^(?:(?:primer|segundo|tercer)\s+tomo|tomo\s+(?:[ivxl]+|\d+))\b\.?\s*",
     re.IGNORECASE,
 )
@@ -270,10 +278,66 @@ def cortar_en_forma(t):
     return t[:fin].strip(" ,;")
 
 
+# Persona delante de una empresa: "Fulano, BBVA Bancomer, S.A.", "Fulano y
+# la Latinoamericana Seguros S.A.". RE_SEPARADOR no corta ahí (lo que sigue
+# va en mayúsculas o empieza con artículo), así que se corta acá si lo de la
+# izquierda tiene forma de nombre de persona (personas.es_nombre) con algún
+# nombre de pila (personas.NOMBRES_PILA: "Mercader Financial, S.A." no) y lo
+# de la derecha es una empresa con nombre propio, no solo "Asociados, S.C.".
+RE_CORTE_PERSONA = re.compile(r",\s+|\s+y\s+(?:la|el|los|las|su|sus|por\s+el|por\s+la)\s+")
+GENERICOS_DERECHA = set("""y e de del la asociados abogados consultores hermanos hijos sucesores socios
+compania cia contadores arquitectos ingenieros""".split())
+
+
+def _persona_delante(t):
+    import personas  # personas.py importa este módulo: se importa acá adentro
+    m = RE_CORTE_PERSONA.search(t)
+    if not m or not es_empresa(t[m.end():]) or es_empresa(t[:m.start()]):
+        return None
+    izquierda, derecha = t[:m.start()], t[m.end():]
+    izquierda_limpia = personas.limpiar(izquierda)
+    if not personas.es_nombre(izquierda_limpia) or not set(normalizar(izquierda_limpia).split()) & personas.NOMBRES_PILA:
+        return None
+    f = RE_FORMA_FUERTE.search(derecha) or RE_FORMA_CORTA_FINAL_POS.search(derecha)
+    propias = set(normalizar(derecha[:f.start()] if f else derecha).split()) - GENERICOS_DERECHA
+    return (izquierda, derecha) if propias else None
+
+
+# Dos palabras pegadas por el boletín: "José AntonioSinergia Consultores".
+RE_PEGADO = re.compile(r"(?<=[a-záéíóúñ]{2})(?=[A-ZÁÉÍÓÚÑ][a-záéíóúñ])")
+
+
+def persona_al_inicio(nombre):
+    """Red de seguridad para el nombre ya limpio: empieza como una persona
+    ("Sergio Armando Ruiz ...", "Ruiz Vega Elvira ...") y no con una palabra
+    de negocio. Atrapa personas pegadas a la empresa por erratas que ningún
+    separador reconoce ("Fulano Anteshsbc México S.A."). Pierde también
+    empresas con nombre de persona ("Juan Pérez Construcciones S.A."): las
+    páginas de empresas se indexan y no pueden nombrar personas."""
+    import personas
+    m = RE_FORMA_FUERTE.search(nombre) or RE_FORMA_CORTA_FINAL_POS.search(nombre)
+    palabras = [w for w in (nombre[:m.start()] if m else nombre).split()
+                if w.lower() not in personas.PARTICULAS]
+    if len(palabras) < 4 or not all(personas.RE_PALABRA_NOMBRE.match(w) for w in palabras[:3]):
+        return False
+    norm = [personas.normalizar(w) for w in palabras[:3]]
+    if set(norm) & personas.NO_PERSONA:
+        return False
+    return norm[0] in personas.NOMBRES_PILA or norm[2] in personas.NOMBRES_PILA
+
+
 def trozos(campo):
     """Divide un campo actora/demandada en las partes que nombra (ver
-    RE_SEPARADOR y RE_SEPARADOR_ROL). Lo usan partes() y personas.py."""
-    return [t for parte in RE_SEPARADOR.split(campo) for t in RE_SEPARADOR_ROL.split(parte) if t and t.strip()]
+    RE_SEPARADOR, RE_SEPARADOR_ROL y _persona_delante). Lo usan partes() y
+    personas.py."""
+    salida = []
+    for parte in RE_SEPARADOR.split(RE_PEGADO.sub(" ", campo)):
+        for t in RE_SEPARADOR_ROL.split(parte):
+            if not t or not t.strip():
+                continue
+            corte = _persona_delante(t)
+            salida.extend(corte if corte else [t])
+    return salida
 
 
 def partes(campo):
@@ -293,7 +357,7 @@ def partes(campo):
         if es_empresa(t) and not RE_RESTO_ENCABEZADO.search(t):
             t = cortar_en_forma(recortar_inicio(t))
             n = normalizar(t)
-            if nucleo_valido(n) and not RE_SOSPECHOSO.search(t):
+            if nucleo_valido(n) and not RE_SOSPECHOSO.search(t) and not persona_al_inicio(t):
                 empresas.append((n, t))
                 continue
         if re.search(r"[A-Za-zÁÉÍÓÚÑáéíóúñ]{2}", t) and not RE_Y_OTROS.match(" " + t):

@@ -80,8 +80,61 @@ paternidad rectificacion acta adopcion tutela interdiccion ausencia presuncion m
 segunda primera tercera cuarta quinta seccion audiencia sentencia definitiva interlocutoria
 autos auto vista termino plazo dias fecha lugar domicilio conocido desconocido ignorado
 ingresos maquinaria fraccionamiento colonia puentes
+abogados asociados consultores constructores arquitectos ingenieros contadores hermanos hijos
+sucesores socios despacho bufete editores autos seguros inmobiliarios
+centro sanatorio consorcio corredor pasaje producciones promociones industrias transportes
+autotransportes administraciones sociales electronica camionero
 """.split())
 
+
+# Nombres de pila frecuentes (normalizados). Salen de la tabla personas: las
+# palabras que más aparecen al final del nombre ("García Pérez Juan") y casi
+# nunca al principio ni en empresas, más los nombres comunes que también
+# aparecen primero ("Juan García Pérez"). Los usa empresas.py para decidir si
+# lo que va delante de una empresa ("Fulano, BBVA Bancomer, S.A.") es una
+# persona: no es un nombre de persona en particular, es un diccionario.
+NOMBRES_PILA = set("""
+abigail abraham abril adelaida adelina adolfo adrian adriana agripina agustin aide aidee alberta
+alberto aldair alejandra alejandrina alejandro alexander alexandra alexis alfonso alfredo alicia
+aline alma alondra altagracia alvaro amairani amalia amelia ana anabel anahi anai anaid anayeli
+andrea andres anel angel angelica angelina antonia antonieta antonio araceli aracely arcelia areli
+arely argelia ariadna ariana ariel arlette armando arturo astrid asuncion augusto aurelia aurelio
+aurora avelina axel azael azucena beatriz belem belen benito benjamin berenice betsabe betzabe
+bibiana blanca brenda camila candelaria caridad carina carlo carlos carlota carmen carmina carolina
+catalina cecilia celeste celina cesar citlali citlalli claudia clemencia clotilde columba concepcion
+consuelo corina cristian cristina cristobal dalila damaris danae daniel daniela dario david dayana
+delfina delia denise denisse deyanira diana diego dinorah dolores dominga domitila donaji edelmira
+edgar edith eduardo efrain elena elisa eliseo eliud elizabeth elodia eloisa elpidio elsa elvira
+emanuel emelia emilia emilio emmanuel enedina engracia enrique enriqueta epifania erendira erica
+erick erika ernestina ernesto esmeralda esperanza esteban estefani estefania estefany estela esthela
+esther eugenia eugenio eulalia eunice eustolia evangelina evelia evelyn ezequiel fabiola fabricio
+fausto federico felicitas felipa felipe felisa fernanda fernando fidel filiberto florentina
+francisca francisco froylan gabina gabriel gabriela gamaliel genoveva georgina geovanni geraldine
+gerardo gibran gilberto giovanna giovanni gisela giselle gloria gonzalo graciela gregoria gregorio
+grisel griselda guadalupe gudelia guillermina guillermo gustavo haydee hector heriberto herlinda
+hermelinda hermila herminia hilaria hilario hortencia hortensia hugo humberto ibeth idalia ignacia
+ignacio ileana iliana imelda ines inocencia irais irasema irene irma isaac isabel isai isaura isela
+isidra ismael israel itzel ivan ivet iveth ivette ivon ivone ivonne ixchel jacobo jacqueline jael
+jaime jair janet janeth janette jaquelin jaqueline javier jazmin jessica jesus jimena joana joaquin
+joaquina jocelyn johana jonathan jorge josafat jose josefa josefina joselin joselyn josue jovita
+juan judith julian juliana julieta julio karen karina karla laura leonardo leonila leonor leopoldo
+leticia lidia lilia lilian liliana lisbeth lisset lizbeth lizet lizeth lorena lorenzo lourdes lucero
+lucia lucila lucrecia luis luisa mabel magali magaly magdalena manuel manuela marcela marco marcos
+margarita maria mariana maribel maricarmen maricruz mariel mariela marilu mario marisa marisela
+marisol marlen marlene marta martha martin martina matilde mauricio maximiliano mayela mayte melina
+melissa micaela michelle miguel milagros minerva mireya miroslava misael moises monica monserrat
+montserrat nalleli nallely nancy natali natalia nataly natividad nayeli nayely neftali nicolas
+nicolasa noemi nohemi norma obdulia obed octavio odette ofelia olivia omar oralia orlando oscar
+osiris otilia pablo paloma pamela paola pascual patricia patricio paula paulina pedro penelope pilar
+porfirio priscila rafael rafaela ramiro ramon raquel raul rebeca refugio regina remedios reynalda
+reynaldo ricarda ricardo rigoberto roberta roberto rocio rodrigo rogelio rolando rosa rosalia
+rosalva rosario ruben rufina ruth sabina sagrario salvador samanta samantha samuel sandra santiago
+sara sarahi sarai saul sebastian selene sergio silvestre silvia simon socorro sofia soledad
+stephanie susana tamara tatiana teodora teodoro teresa thalia tiburcio tomas ulises uriel valentin
+valentina valeria vanesa vanessa veronica vianey vicente victor viridiana viviana vladimir xavier
+ximena xochitl yadira yael yair yanet yaneth yareli yasmin yazmin yesenia yesica yolanda yoselin
+yuliana yuridia zenaida zulema
+""".split())
 
 def normalizar(nombre):
     s = unicodedata.normalize("NFD", str(nombre or ""))

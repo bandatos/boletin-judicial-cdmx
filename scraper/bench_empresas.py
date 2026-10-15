@@ -125,6 +125,48 @@ CASOS = [
     ("Notario Público Nuero 221 de la Ciudad de México Licenciado Pedro Gómez Rey Santander Hipotecario S.A. de C.V.",
      [], True),
 
+    # ── Persona delante de la empresa, con coma o "y la" ──
+    ("Robles Vega Luis Alberto, BBVA Bancomer, S.A. Institución de Banca Múltiple, Grupo Financiero BBVA Bancomer",
+     ["BBVA Bancomer, S.A. Institución de Banca Múltiple, Grupo Financiero BBVA Bancomer"], True),
+    ("Olmos Duarte Rafael Antonio, Ficrea, S.A. de C.V", ["Ficrea, S.A. de C.V"], True),
+    ("Jesús de la Peña Gómez y la Latinoamericana Seguros S.A", ["Latinoamericana Seguros S.A"], True),
+    ("Méndez Ríos Laura y por el Bienestar Social Cedros Asociación Civil", ["Bienestar Social Cedros Asociación Civil"], True),
+    ("Torres Gil Ana Patricia, Sociedad Hipotecaria Federal S.N.C. Institución de Banca de Desarrollo",
+     ["Sociedad Hipotecaria Federal S.N.C. Institución de Banca de Desarrollo"], True),
+    ("Campos Rey Ana Lucía Secretario del Consejo de Administración de Banco del Bajío, Sociedad Anónima",
+     ["Banco del Bajío, Sociedad Anónima"], False),
+    ("Vega Ruiz Sergio Socio Accionista de la Moral Yomoga S.A. de C.V", ["Yomoga S.A. de C.V"], False),
+    # No cortar: despachos con nombre de personas
+    ("Jiménez Aguirre Abogados, S. C", ["Jiménez Aguirre Abogados, S. C"], False),
+    ("Mejía Salazar & Sáenz Abogados S. C", ["Mejía Salazar & Sáenz Abogados S. C"], False),
+    ("Inmobiliaria García Espinosa S.A. de C.V.", ["Inmobiliaria García Espinosa S.A. de C.V."], False),
+    ("Sólida Administradora de Portafolios, S.A. de C.V.", ["Sólida Administradora de Portafolios, S.A. de C.V."], False),
+    ("Maja Administradora de Edificios S.C", ["Maja Administradora de Edificios S.C"], False),
+    ("Administradora General de Sociedades S.A. de C.V", ["Administradora General de Sociedades S.A. de C.V"], False),
+    ("Vega Ruiz Sergio en su Carácter de Presidente del Consejo de Administración de la Sociedad Denominada Grupo de Desarrollos Fasse, S.A. de C.V",
+     ["Grupo de Desarrollos Fasse, S.A. de C.V"], False),
+    ("Mercader Financial, S.A. de Sofom E. R", ["Mercader Financial, S.A. de Sofom"], False),
+    ("Integradora Estatal de Productores, de Chih, S.A. de C.V", ["Integradora Estatal de Productores, de Chih, S.A. de C.V"], False),
+    ("Lara Soto Juan Carlos y Productos Químicos y de Servicios, S.A. de C.V",
+     ["Productos Químicos y de Servicios, S.A. de C.V"], True),
+    ("Autobuses de Oriente, A. D. O., S.A. de C.V. y Ricardo Gómez Rojas", ["Autobuses de Oriente, A. D. O., S.A. de C.V"], True),
+
+    # ── Personas pegadas por erratas: red de seguridad ──
+    ("Rivas Paredes Ricardo Anteshsbc México Sociedad Anónima Institución de Banca Múltiple", [], True),
+    ("Morales Pinto José AntonioSinergia Consultores de Negocios, S. C", [], True),
+    ("Figueroa Vilchis Elvira Ycustompiec, S.A. de C.V", [], True),
+    ("Guzmán García Roberto y 2ar Desarrollos Inmobiliarios Sociedad Anónima de Capital Variable", [], True),
+    ("Grupo Ser 1 y 2 S.A. de C.V.", ["Grupo Ser 1 y 2 S.A. de C.V."], False),
+    ("Inmobiliaria Lm y 3p S.A. de C.V. y Ruiz Soto Florencio", ["Inmobiliaria Lm y 3p S.A. de C.V."], True),
+    ("Lara Soto Sergio y el Responsable Médico del Hospital Ángeles Quien Opera Bajo la Razon Social Operadora de Hospitales Ángeles S.A. de C.V.",
+     ["Operadora de Hospitales Ángeles S.A. de C.V."], True),
+    # No perder: nombres de persona dentro de un nombre de negocio
+    ("Industrias Vinícolas Pedro Domecq, S.A. de C.V", ["Industrias Vinícolas Pedro Domecq, S.A. de C.V"], False),
+    ("Centro Pedagógico María Montessori de Ecatepec S.C", ["Centro Pedagógico María Montessori de Ecatepec S.C"], False),
+    ("Transportes Juan Pablo II S.A. de C.V", ["Transportes Juan Pablo II S.A. de C.V"], False),
+    ("Administraciones José Luis Ordóñez S C", ["Administraciones José Luis Ordóñez S C"], False),
+    ("Sanatorio Santa Teresa Zacatecas, S.A. de C.V", ["Sanatorio Santa Teresa Zacatecas, S.A. de C.V"], False),
+
     # ── Listas numeradas y notarios ──
     ("1) Campos Rey Ernesto Abel, 2) Apjusto, S.A. P. I. de C.V., Sofom, Enr 3) Notario Público Número 17 Licenciado Pedro Gómez Rey",
      ["Apjusto, S.A. P. I. de C.V., Sofom, Enr"], True),
@@ -144,6 +186,7 @@ CONOCIDOS = [
 ]
 
 CONOCIDOS += [
+    ("Ortiz Ortiz y Asociados, S.C.", ["Ortiz Ortiz y Asociados, S.C."], False),
     ("Banco Nacional de Obras y Servicios Públicos S N C por Propio Derecho y Otros",
      ["Banco Nacional de Obras y Servicios Públicos S N C"], False),
 ]
@@ -159,6 +202,8 @@ CASOS_PERSONAS = [
     ("1) Campos Rey Ernesto Abel, 2) Apjusto, S.A. P. I. de C.V.", ["Campos Rey Ernesto Abel"]),
     ("Secreto", []),
     ("Fuerza Aérea", []),
+    ("Robles Vega Luis Alberto, BBVA Bancomer, S.A. Institución de Banca Múltiple", ["Robles Vega Luis Alberto"]),
+    ("Jesús de la Peña Gómez y la Latinoamericana Seguros S.A", ["Jesús de la Peña Gómez"]),
 ]
 
 # Restos que no deberían quedar en el nombre visible de una empresa.
@@ -214,12 +259,29 @@ def cargar_ref(ref):
     return mod
 
 
+def persona_delante(nombre):
+    """El nombre visible empieza con algo que parece una persona: las dos
+    primeras palabras con forma de nombre, un nombre de pila entre las
+    cuatro primeras y al menos dos palabras más antes de la forma."""
+    m = emp.RE_FORMA_FUERTE.search(nombre) or emp.RE_FORMA_CORTA_FINAL_POS.search(nombre)
+    antes = (nombre[:m.start()] if m else nombre).split()
+    palabras = [w for w in antes if w.lower() not in pers.PARTICULAS]
+    if len(palabras) < 4:
+        return False
+    norm = [pers.normalizar(w) for w in palabras]
+    return (all(pers.RE_PALABRA_NOMBRE.match(w) for w in palabras[:2])
+            and not set(norm[:4]) & pers.NO_PERSONA
+            and bool(set(norm[:4]) & pers.NOMBRES_PILA))
+
+
 def sospechas(nombres):
     c = Counter()
     for n in nombres:
         for k, rx in SOSPECHOSOS.items():
             if rx.search(n):
                 c[k] += 1
+        if persona_delante(n):
+            c["persona delante"] += 1
     return c
 
 
@@ -242,7 +304,7 @@ def comparar(db, ref, cada, mostrar):
     print(f"Campos con resultado distinto: {len(cambios):,}")
     sa, sd = sospechas(antes_nombres), sospechas(despues_nombres)
     print(f"\n{'resto sospechoso':24} {ref:>8} {'actual':>8}")
-    for k in SOSPECHOSOS:
+    for k in [*SOSPECHOSOS, "persona delante"]:
         print(f"{k:24} {sa[k]:8} {sd[k]:8}")
     perdidas = [x for x in cambios if len(x[2]) < len(x[1])]
     print(f"\nCampos que pierden alguna empresa: {len(perdidas)}")
