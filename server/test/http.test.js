@@ -364,3 +364,22 @@ test('el paginador sin total conocido muestra la siguiente pero no la última', 
   assert.doesNotMatch(nav, /Última página/);
   assert.match(html, /150\+/);
 });
+
+test('el conteo de una búsqueda grande dice "más de 5,000" y pagina sin NaN', () => {
+  const { renderTemplate } = require('../lib/views');
+  const db = require('../lib/db');
+  const html = renderTemplate('index', {
+    req: {}, q: 'x', tipo: '', anio: '', tipos: [], anios: [], chart: db.getYearChart(), searched: true,
+    resultado: { grupos: [], pagina: 2, hayMas: true, totalExpedientes: null, totalAvisos: null },
+    groups: [], hrefPagina: n => `/buscar?q=x&p=${n}`, formAction: '/buscar', heading: null,
+    candidatos: db.CANDIDATOS, porPagina: db.EXPEDIENTES_POR_PAGINA,
+  });
+  assert.match(html, /Más de 5,000 avisos/);
+  assert.doesNotMatch(html, /NaN/);
+  assert.match(html, /href="\/buscar\?q=x&amp;p=3"/);
+});
+
+test('GET /buscar con resultados no muestra NaN', async () => {
+  const { body } = await get('/buscar?q=thebart');
+  assert.doesNotMatch(body, /NaN/);
+});

@@ -73,6 +73,7 @@ function buscar(req, { juzgado, formAction, heading } = {}) {
     hrefPagina: n => `${formAction || '/buscar'}?${new URLSearchParams({ ...params, p: n })}`,
     formAction: formAction || '/buscar',
     heading: heading || null,
+    candidatos: db.CANDIDATOS, porPagina: db.EXPEDIENTES_POR_PAGINA,
   });
 }
 
