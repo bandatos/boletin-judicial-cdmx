@@ -28,8 +28,9 @@ COPY server/ ./
 RUN chown -R node:node /app/static
 USER node
 EXPOSE 3000
-# Al arrancar se recorren los ~34M avisos para los agregados: hay que darle
-# margen antes de que cuente el healthcheck.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10m --retries=3 \
+# Al arrancar se calculan los agregados (~20 s con la base completa).
+# Coolify espera el start-period entero antes del primer chequeo: con 10 min
+# cada deploy tardaba más de 10 min y se encolaban.
+HEALTHCHECK --interval=10s --timeout=5s --start-period=90s --retries=6 \
   CMD node -e "fetch('http://127.0.0.1:'+process.env.PORT+'/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
 CMD ["node", "litigios-cdmx.js"]
