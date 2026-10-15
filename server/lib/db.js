@@ -310,6 +310,49 @@ function buscarExpedientes(filtros, pagina) {
   return res;
 }
 
+// "¿Quisiste decir…?": por cada palabra de 4 letras o más que no está en el
+// vocabulario de nombres (o es muy rara) se buscan parecidas: a una letra
+// de distancia, todas las variantes exactas; a dos (palabras de 7 letras o
+// más), por trigramas. Gana la más frecuente a una letra, salvo que haya una
+// a dos letras 100 veces más frecuente ("rodriges" -> "rodriguez" y no
+// "rodrigues"; "bancomr" -> "bancomer" y no "banco"). Se sugiere si la
+// palabra no existe o si la parecida es al menos 20 veces más frecuente
+// ("santnder", con erratas del boletín, -> "santander"). Devuelve la
+// consulta corregida o null.
+function sugerirConsulta(q) {
+  if (!hayTabla('vocabulario')) return null;
+  const { expediente, palabras } = busqueda.parsearConsulta(q);
+  if (!palabras.length) return null;
+  const d = getDb();
+  const exacta = d.prepare('SELECT n FROM vocabulario WHERE palabra = ?');
+  const porTrigramas = d.prepare(`
+    SELECT v.palabra, v.n FROM vocabulario_tri t JOIN vocabulario v ON v.id = t.rowid
+    WHERE vocabulario_tri MATCH ? ORDER BY bm25(vocabulario_tri) LIMIT 500
+  `);
+  const masFrecuente = lista => lista.reduce((m, c) => (!m || c.n > m.n ? c : m), null);
+  let cambio = false;
+  const corregidas = palabras.map(w => {
+    if (w.length < 4) return w;
+    const n = (exacta.get(w) || { n: 0 }).n;
+    const vars = busqueda.variantes1(w);
+    const a1 = [];
+    for (let k = 0; k < vars.length; k += 500) {
+      const lote = vars.slice(k, k + 500);
+      a1.push(...d.prepare(`SELECT palabra, n FROM vocabulario WHERE palabra IN (${lote.map(() => '?').join(',')})`).all(...lote));
+    }
+    const a2 = w.length >= 7
+      ? porTrigramas.all(busqueda.consultaTrigramas(w)).filter(c => busqueda.distancia(w, c.palabra) === 2)
+      : [];
+    const m1 = masFrecuente(a1);
+    const m2 = masFrecuente(a2);
+    const mejor = m2 && (!m1 || m2.n >= m1.n * 100) ? m2 : m1;
+    if (mejor && (n === 0 || mejor.n >= n * 20)) { cambio = true; return mejor.palabra; }
+    return w;
+  });
+  if (!cambio) return null;
+  return [...corregidas, expediente].filter(Boolean).join(' ');
+}
+
 // Personas y empresas cuyo nombre tiene todas las palabras buscadas (la
 // última como prefijo): se muestran antes de los avisos, con link a la
 // ficha. Primero las de nombre idéntico a lo buscado, después las de más
@@ -792,6 +835,6 @@ function ping() {
 module.exports = {
   ping, getGeneracion, getTipos, getAnios, findJuzgadoBySlug, searchEntradas, groupByExpediente, getExpedienteById,
   getYearChart, getPublicacionChart, getStats, getResumen, getDia, getFechas, reloadDb,
-  coincidenciasFichas, getPortada, hayPersonas, getPersonas, getPersona, getResumenPersonas, getExpedientesPersona, buscarExpedientes, EXPEDIENTES_POR_PAGINA, PERSONAS_POR_PAGINA,
+  sugerirConsulta, coincidenciasFichas, getPortada, hayPersonas, getPersonas, getPersona, getResumenPersonas, getExpedientesPersona, buscarExpedientes, EXPEDIENTES_POR_PAGINA, PERSONAS_POR_PAGINA,
   hayEmpresas, getEmpresas, getEmpresa, getExpedientesEmpresa, getEmpresasDeEntradas, getResumenEmpresas, MAX_RESULTS, MAX_ROWS, CANDIDATOS, CHART_COLORS, DB_PATH,
 };

@@ -34,6 +34,12 @@ include mixins.pug
 
     #results
       if searched
+        if sugerencia
+          p.sugerencia
+            | ¿Quisiste decir
+            = ' '
+            a(href=`${formAction}?${new URLSearchParams({ q: sugerencia, ...(tipo ? { tipo } : {}), ...(anio ? { anio } : {}) })}`) «#{sugerencia}»
+            | ?
         if fichas && (fichas.empresas.length || fichas.personas.length)
           section.coincidencias(aria-labelledby="titulo-coincidencias")
             h2#titulo-coincidencias Fichas que coinciden con «#{q}»

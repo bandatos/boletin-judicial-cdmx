@@ -468,3 +468,11 @@ test('búsqueda: fichas que coinciden, prefijo y palabras del mismo lado', async
   const juntas = (await get('/buscar?' + new URLSearchParams({ q: 'esquivel thebart' }))).body;
   assert.doesNotMatch(juntas, /Ningún aviso tiene todas esas palabras del mismo lado/);
 });
+
+test('¿Quisiste decir…? ante una errata, y nada si la búsqueda está bien escrita', async () => {
+  const errata = (await get('/buscar?' + new URLSearchParams({ q: 'esquivel thebrat' }))).body;
+  assert.match(errata, /¿Quisiste decir/);
+  assert.match(errata, /href="\/buscar\?q=esquivel\+thebart">«esquivel thebart»<\/a>/);
+  assert.doesNotMatch((await get('/buscar?q=thebart')).body, /¿Quisiste decir/);
+  assert.match((await get('/buscar?' + new URLSearchParams({ q: 'constructra' }))).body, /«constructora»/);
+});

@@ -78,4 +78,45 @@ function filtroMismoLado(palabras) {
   return r => cumple(r.actora) || cumple(r.demandada);
 }
 
-module.exports = { normalizar, tokens, parsearExpediente, parsearConsulta, consultaFts, filtroMismoLado, filtroPalabras };
+// Distancia de edición (Levenshtein) entre dos palabras cortas.
+function distancia(a, b) {
+  let previa = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const fila = [i];
+    for (let j = 1; j <= b.length; j++) {
+      fila[j] = Math.min(previa[j] + 1, fila[j - 1] + 1, previa[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    previa = fila;
+  }
+  return previa[b.length];
+}
+
+// Todas las palabras a una edición de distancia (borrar, cambiar o agregar
+// una letra, o invertir dos seguidas). Para buscarlas exactas en el
+// vocabulario: con trigramas, "garsia" y "garcia" comparten uno solo.
+const LETRAS = 'abcdefghijklmnopqrstuvwxyz';
+function variantes1(w) {
+  const out = new Set();
+  for (let i = 0; i <= w.length; i++) {
+    const a = w.slice(0, i);
+    const b = w.slice(i);
+    if (b) out.add(a + b.slice(1));
+    if (b.length > 1) out.add(a + b[1] + b[0] + b.slice(2));
+    for (const c of LETRAS) {
+      if (b) out.add(a + c + b.slice(1));
+      out.add(a + c + b);
+    }
+  }
+  out.delete(w);
+  return [...out];
+}
+
+// Trigramas de una palabra, como consulta FTS5 con OR (cada uno entre comillas).
+function consultaTrigramas(palabra) {
+  const tri = new Set();
+  for (let i = 0; i + 3 <= palabra.length; i++) tri.add(palabra.slice(i, i + 3));
+  return [...tri].map(t => `"${t}"`).join(' OR ');
+}
+
+module.exports = {
+  distancia, consultaTrigramas, variantes1, normalizar, tokens, parsearExpediente, parsearConsulta, consultaFts, filtroMismoLado, filtroPalabras };

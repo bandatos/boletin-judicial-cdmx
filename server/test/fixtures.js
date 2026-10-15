@@ -129,6 +129,16 @@ function buildFixtureDb() {
     INSERT INTO personas_fts(rowid, nombre) SELECT id, nombre FROM personas;
   `);
 
+  // Mismas tablas que build_db.py build_vocabulario.
+  db.exec(`
+    CREATE TABLE vocabulario (id INTEGER PRIMARY KEY, palabra TEXT UNIQUE NOT NULL, n INTEGER NOT NULL);
+    INSERT INTO vocabulario (palabra, n) VALUES
+      ('esquivel', 3), ('thebart', 3), ('alejandro', 3), ('garcia', 2), ('perez', 2), ('juan', 2),
+      ('constructora', 2), ('ejemplo', 3), ('banco', 1), ('thebrat', 0);
+    CREATE VIRTUAL TABLE vocabulario_tri USING fts5(palabra, content='vocabulario', content_rowid='id', tokenize='trigram', detail=none);
+    INSERT INTO vocabulario_tri(rowid, palabra) SELECT id, palabra FROM vocabulario;
+  `);
+
   db.exec(`
     INSERT INTO entradas_fts(rowid, actora, demandada, tipo_juicio)
     SELECT id, actora, demandada, tipo_juicio FROM entradas

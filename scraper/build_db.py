@@ -710,6 +710,42 @@ def build_personas(output, log, workers=None):
     log(f"  {total:,} personas con al menos {MIN_AVISOS_PERSONA} avisos")
 
 
+def build_vocabulario(output, log):
+    """Tablas vocabulario / vocabulario_tri para sugerir correcciones en el
+    buscador ("santnder" -> "santander"). Palabras de los nombres de
+    personas y empresas (núcleos, sin acentos), con la suma de avisos de los
+    nombres que las usan como frecuencia. vocabulario_tri es un índice de
+    trigramas (FTS5 tokenize=trigram) para encontrar palabras parecidas."""
+    conn = sqlite3.connect(output)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=OFF")
+    frecuencia = {}
+    for tabla in ("empresas", "personas"):
+        existe = conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (tabla,)).fetchone()
+        if not existe:
+            continue
+        for nucleo, avisos in conn.execute(f"SELECT nucleo, avisos FROM {tabla}"):
+            for palabra in set(nucleo.split()):
+                if len(palabra) >= 3 and not palabra.isdigit():
+                    frecuencia[palabra] = frecuencia.get(palabra, 0) + avisos
+    conn.executescript("""
+        DROP TABLE IF EXISTS vocabulario_tri;
+        DROP TABLE IF EXISTS vocabulario;
+        CREATE TABLE vocabulario (id INTEGER PRIMARY KEY, palabra TEXT UNIQUE NOT NULL, n INTEGER NOT NULL);
+    """)
+    conn.executemany("INSERT INTO vocabulario (palabra, n) VALUES (?, ?)", sorted(frecuencia.items()))
+    conn.executescript("""
+        CREATE VIRTUAL TABLE vocabulario_tri USING fts5(
+            palabra, content='vocabulario', content_rowid='id', tokenize='trigram', detail=none
+        );
+        INSERT INTO vocabulario_tri(rowid, palabra) SELECT id, palabra FROM vocabulario;
+    """)
+    conn.commit()
+    conn.execute("PRAGMA journal_mode=DELETE")
+    conn.close()
+    log(f"  {len(frecuencia):,} palabras en el vocabulario")
+
+
 def find_runs(data_dir, since=None, exclude=()):
     """Devuelve lista de (run_dir) ordenados por fecha."""
     runs = sorted(data_dir.glob("*/entradas.csv"))
@@ -741,6 +777,8 @@ def main():
                         help="Tabla de personas físicas que son parte (sección /personas del server, noindex)")
     parser.add_argument("--solo-personas", action="store_true",
                         help="Rearmar solo la tabla de personas de una base ya armada (--output)")
+    parser.add_argument("--solo-vocabulario", action="store_true",
+                        help="Rearmar solo el vocabulario de sugerencias de una base ya armada (--output)")
     parser.add_argument("--web", action="store_true",
                         help="Base para el sitio estático: sin el índice (juzgado, expediente)")
     parser.add_argument("--hasta-fecha",
@@ -770,8 +808,12 @@ def main():
         build_personas(output, log)
         log(f"Listo: {output}")
         return
+    if args.solo_vocabulario:
+        build_vocabulario(output, log)
+        log(f"Listo: {output}")
+        return
     if not args.dir:
-        parser.error("--dir es obligatorio (salvo con --solo-empresas / --solo-personas / --agregados-empresas)")
+        parser.error("--dir es obligatorio (salvo con --solo-empresas / --solo-personas / --solo-vocabulario / --agregados-empresas)")
     data_dir = Path(args.dir)
 
     runs = find_runs(data_dir, args.since, args.exclude)
@@ -854,6 +896,8 @@ def main():
     if args.personas:
         # Después de cerrar: los procesos leen la base mientras se escribe.
         build_personas(output, log)
+    if args.empresas or args.personas:
+        build_vocabulario(output, log)
 
     size_mb = output.stat().st_size / 1e6
     log(f"\nListo: {output} ({size_mb:.1f} MB)")

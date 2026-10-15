@@ -35,3 +35,13 @@ test('mismo lado del juicio: todas las palabras en la actora o en la demandada',
   assert.ok(b.filtroMismoLado(['garcia', 'gonz'])({ actora: 'García González Ana', demandada: '' }), 'prefijo');
   assert.equal(b.filtroMismoLado(['garcia']), null, 'con una palabra no filtra');
 });
+
+test('distancia de edición y trigramas', () => {
+  assert.equal(b.distancia('santnder', 'santander'), 1);
+  assert.equal(b.distancia('thebrat', 'thebart'), 2);
+  assert.equal(b.distancia('garcia', 'garcia'), 0);
+  assert.equal(b.consultaTrigramas('pepe'), '"pep" OR "epe"');
+  const v = b.variantes1('garsia');
+  assert.ok(v.includes('garcia') && v.includes('gasria') && v.includes('garia') && v.includes('garsias'));
+  assert.ok(!v.includes('garsia'));
+});

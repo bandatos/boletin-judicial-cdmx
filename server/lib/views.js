@@ -146,10 +146,11 @@ function buscar(req, { juzgado, formAction, heading } = {}) {
   // Fichas que coinciden con el nombre: solo en la primera página y sin
   // filtros (con filtros se busca un juicio puntual, no a alguien).
   const fichas = q && !tipo && !anio && !juzgado && !(req.query.p > 1) ? db.coincidenciasFichas(q) : null;
+  const sugerencia = q && !(req.query.p > 1) ? db.sugerirConsulta(q) : null;
   const params = Object.fromEntries(Object.entries({ q, tipo, anio }).filter(([, v]) => v));
 
   return renderTemplate('index', {
-    req, q, tipo, anio, tipos, anios, chart, searched, resultado, fichas,
+    req, q, tipo, anio, tipos, anios, chart, searched, resultado, fichas, sugerencia,
     AVISO_AMPLIO,
     groups: resultado ? resultado.grupos : [],
     hrefPagina: n => `${formAction || '/buscar'}?${new URLSearchParams({ ...params, p: n })}`,

@@ -510,3 +510,5 @@ mark { background: #f3dfa2; color: inherit; padding: 0 .1em; border-radius: 2px;
 }
 .juzgados-expediente { margin: 1rem 0; }
 .juzgados-expediente ul { columns: 2 22rem; margin-top: .4rem; }
+.sugerencia { font-size: 1.05rem; margin: 1rem 0 .5rem; }
+.sugerencia a { font-weight: bold; }
