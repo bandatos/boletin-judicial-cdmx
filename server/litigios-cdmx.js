@@ -18,6 +18,7 @@ server.listen(PORT, HOST, () => {
   const t0 = Date.now();
   db.getResumen();
   db.getPublicacionChart();
+  db.getPortada();
   console.log(`Resumen de la DB listo en ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 });
 
@@ -56,6 +57,7 @@ setInterval(() => {
   db.reloadDb();
   db.getResumen();
   db.getPublicacionChart();
+  db.getPortada();
   console.log(`[db] base recargada en ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 }, INTERVALO).unref();
 

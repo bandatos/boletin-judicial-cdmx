@@ -4,7 +4,7 @@
 mixin siteHeader(activo)
   header.site-header
     a.brand(href="/")
-      img.logo(src="/static/img/bandatos-logo.webp" alt="Bandatos" width="110" height="52")
+      img.logo(src=asset('img/bandatos-logo.webp') alt="Bandatos" width="110" height="52" fetchpriority="high")
       span.producto= siteTitle
     nav.menu
       a(href="/empresas" class=(activo === 'empresas' ? 'activo' : '')) Empresas
@@ -28,7 +28,7 @@ mixin siteFooter()
   footer.site-footer
     .container
       a(href="https://bandatos.org" target="_blank" rel="noopener")
-        img(src="/static/img/bandatos-logo.webp" alt="Bandatos" width="110" height="52" loading="lazy")
+        img(src=asset('img/bandatos-logo.webp') alt="Bandatos" width="110" height="52" loading="lazy" decoding="async")
       p.
         #[strong= siteTitle] es un proyecto de Todo Derecho Vecino, dentro de
         #[a(href="https://bandatos.org" target="_blank" rel="noopener") Bandatos],
@@ -42,4 +42,4 @@ mixin siteFooter()
       button#pdf-panel-close(type="button" aria-label="Cerrar PDF") ✕
     iframe#pdf-frame(title="PDF del boletín")
 
-  script(src=`/static/js/behavior.js?v=${staticVersion}`)
+  script(src=asset('js/behavior.js') defer)

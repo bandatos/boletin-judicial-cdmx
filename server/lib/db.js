@@ -20,7 +20,15 @@ function getDb() {
 
 // Reabre la base y descarta los agregados en memoria. La llama
 // litigios-cdmx.js cuando cambia el archivo en disco (en dev y en producción).
+// Cambia cada vez que se reabre la base: la caché de HTML del router lo usa
+// para descartar lo renderizado con la base anterior.
+let generacion = 0;
+function getGeneracion() {
+  return generacion;
+}
+
 function reloadDb() {
+  generacion++;
   if (db) db.close();
   db = null;
   resumen = null;
@@ -709,7 +717,7 @@ function ping() {
 }
 
 module.exports = {
-  ping, getTipos, getAnios, findJuzgadoBySlug, searchEntradas, groupByExpediente, getExpedienteById,
+  ping, getGeneracion, getTipos, getAnios, findJuzgadoBySlug, searchEntradas, groupByExpediente, getExpedienteById,
   getYearChart, getPublicacionChart, getStats, getResumen, getDia, getFechas, reloadDb,
   getPortada, hayPersonas, getPersonas, getPersona, getResumenPersonas, getExpedientesPersona, buscarExpedientes, EXPEDIENTES_POR_PAGINA, PERSONAS_POR_PAGINA,
   hayEmpresas, getEmpresas, getEmpresa, getExpedientesEmpresa, getEmpresasDeEntradas, getResumenEmpresas, MAX_RESULTS, MAX_ROWS, CANDIDATOS, CHART_COLORS, DB_PATH,

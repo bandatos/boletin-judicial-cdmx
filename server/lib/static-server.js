@@ -18,7 +18,9 @@ const MIME = {
   '.json': 'application/json; charset=utf-8',
 };
 
-async function serveStatic(file, res) {
+// versionado: la URL trae ?v=<hash del contenido> (views.asset): se cachea un
+// año como inmutable; si cambia el archivo cambia la URL.
+async function serveStatic(file, res, versionado = false) {
   const safePath = path.normalize(file).replace(/^(\.\.[/\\])+/, '');
   const fullPath = path.join(STATIC_DIR, safePath);
 
@@ -56,7 +58,7 @@ async function serveStatic(file, res) {
 
   res.writeHead(200, {
     'Content-Type': MIME[ext] || 'application/octet-stream',
-    'Cache-Control': 'public, max-age=3600',
+    'Cache-Control': versionado ? 'public, max-age=31536000, immutable' : 'public, max-age=3600',
   });
   res.end(content);
 }

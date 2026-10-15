@@ -30,13 +30,51 @@ function num(n) {
   return numberFormat.format(n);
 }
 
+// Assets con la versión en la URL: un hash del contenido del archivo. Así se
+// pueden servir con cache "immutable" de un año (static-server.js) y el
+// navegador baja de nuevo solo lo que cambió. En dev se recalcula si cambia
+// la fecha del archivo.
+const fs = require('fs');
+const crypto = require('crypto');
+const STATIC_DIR = path.join(__dirname, '..', 'static');
+const versiones = new Map();
+function asset(rel) {
+  const archivo = path.join(STATIC_DIR, rel);
+  let mtime = 0;
+  try { mtime = fs.statSync(archivo).mtimeMs; } catch { return `/static/${rel}`; }
+  const v = versiones.get(rel);
+  if (v && v.mtime === mtime) return v.url;
+  const hash = crypto.createHash('md5').update(fs.readFileSync(archivo)).digest('hex').slice(0, 10);
+  const url = `/static/${rel}?v=${hash}`;
+  versiones.set(rel, { mtime, url });
+  return url;
+}
+
+// Todo el CSS va inline en el <head> (headStyle.css + main.css, ~17 KB, ~4 KB
+// comprimido): con main.css asíncrono la página se pintaba sin los estilos de
+// tarjetas y tablas y después se corría (CLS 0.30); bloqueante costaba un
+// viaje más al server. Minificado simple: sin comentarios ni espacios de más.
+let cssCache = null;
+function cssInline() {
+  if (cssCache && !isDev) return cssCache;
+  const crudo = ['headStyle.css', 'main.css']
+    .map(f => fs.readFileSync(path.join(STATIC_DIR, 'css', f), 'utf8')).join('\n');
+  cssCache = crudo
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\s+/g, ' ')
+    .replace(/\s*([{}:;,>])\s*/g, '$1')
+    .replace(/;}/g, '}')
+    .trim();
+  return cssCache;
+}
+
 // pugLocals: se mezcla en TODOS los renders (mismo patrón que sociedad-web-front).
 const pugLocals = {
   siteTitle: 'Boletín Judicial CDMX',
   tagline: 'Juicios civiles, mercantiles y familiares en la Ciudad de México, ' +
     'a partir del Boletín Judicial del Poder Judicial de la CDMX.',
   gaId: process.env.GA_ID || '',
-  staticVersion: String(Date.now()),
+  asset,
   CHART_COLORS: db.CHART_COLORS,
   num,
   expedienteHref,
@@ -50,7 +88,7 @@ const pugLocals = {
 
 function renderTemplate(name, locals) {
   const fn = compile(name);
-  return fn({ ...pugLocals, ...locals });
+  return fn({ ...pugLocals, css: cssInline(), ...locals });
 }
 
 function buscar(req, { juzgado, formAction, heading } = {}) {

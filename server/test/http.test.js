@@ -398,3 +398,28 @@ test('empresa y persona usan la misma ficha: resumen con pestañas y expedientes
   assert.doesNotMatch(empresa, /<meta name="robots" content="noindex">/);
   assert.doesNotMatch(empresa, PERSONAS_FIXTURE);
 });
+
+test('CSS inline en el head, sin pedir main.css aparte', async () => {
+  const { body } = await get('/');
+  assert.match(body, /<style>[^<]*\.tarjeta\{[^<]*<\/style>/);
+  assert.doesNotMatch(body, /href="\/static\/css\/main\.css/);
+});
+
+test('assets con versión por hash, cacheados como inmutables', async () => {
+  const { body } = await get('/');
+  const logo = body.match(/src="(\/static\/img\/bandatos-logo\.webp\?v=[0-9a-f]{10})"/)[1];
+  assert.match(body, /<script src="\/static\/js\/behavior\.js\?v=[0-9a-f]{10}" defer>/);
+  const res = await fetch(base + logo);
+  assert.equal(res.headers.get('cache-control'), 'public, max-age=31536000, immutable');
+  const sinVersion = await fetch(base + '/static/img/bandatos-logo.webp');
+  assert.equal(sinVersion.headers.get('cache-control'), 'public, max-age=3600');
+});
+
+test('el HTML lleva ETag y responde 304 si no cambió', async () => {
+  const res = await fetch(base + '/sources');
+  const etag = res.headers.get('etag');
+  assert.ok(etag);
+  assert.equal(res.headers.get('cache-control'), 'public, max-age=300');
+  const again = await fetch(base + '/sources', { headers: { 'If-None-Match': etag } });
+  assert.equal(again.status, 304);
+});
