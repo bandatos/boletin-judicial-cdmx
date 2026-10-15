@@ -220,15 +220,15 @@ function searchEntradas(filtros) {
 const LOTE = 1000;
 const MAX_RECORRIDOS = 200000;
 
-function paginaExpedientes({ from, where, params, colId = 'e.id', pagina, filtro = () => true }) {
+function paginaExpedientes({ from, where, params, colId = 'e.id', pagina, filtro = () => true, maxCandidatos = CANDIDATOS }) {
   const d = getDb();
   const p = Math.max(1, parseInt(pagina, 10) || 1);
   const desde = (p - 1) * EXPEDIENTES_POR_PAGINA;
   const base = `SELECT ${COLS_AVISO} FROM ${from} LEFT JOIN boletines b ON e.boletin_id = b.id WHERE ${where}`;
   const porFecha = (a, b) => String(b.fecha_iso || '').localeCompare(String(a.fecha_iso || '')) || b.id - a.id;
 
-  const candidatos = d.prepare(`${base} LIMIT ${CANDIDATOS}`).all(...params);
-  if (candidatos.length < CANDIDATOS) {
+  const candidatos = d.prepare(`${base} LIMIT ${maxCandidatos}`).all(...params);
+  if (candidatos.length < maxCandidatos) {
     const rows = candidatos.filter(filtro).sort(porFecha);
     const grupos = groupByExpediente(rows);
     return {
@@ -267,10 +267,28 @@ function paginaExpedientes({ from, where, params, colId = 'e.id', pagina, filtro
   };
 }
 
+// Total exacto de avisos cuando la búsqueda es solo texto o un solo filtro:
+// contar en el índice FTS o en el índice del filtro es barato (0.1 s para
+// "garcia", 2.7M avisos). Con combinaciones (texto + juzgado) hay que cruzar
+// cada coincidencia con la tabla y puede tardar segundos: se deja sin total.
+function contarAvisos({ q, tipo, anio, juzgado }) {
+  const filtros = [tipo, anio, juzgado].filter(Boolean).length;
+  const expedienteQ = (q || '').match(/^\s*(\d+)\s*\/\s*(\d+)\s*$/);
+  if (q && !expedienteQ && filtros === 0) {
+    const ftsQ = q.replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+    return ftsQ ? getDb().prepare('SELECT COUNT(*) AS n FROM entradas_fts WHERE entradas_fts MATCH ?').get(ftsQ).n : 0;
+  }
+  if ((q ? 1 : 0) + filtros !== 1) return null;
+  const c = consultaAvisos({ q, tipo, anio, juzgado });
+  return getDb().prepare(`SELECT COUNT(*) AS n FROM ${c.from} WHERE ${c.where}`).get(...c.params).n;
+}
+
 function buscarExpedientes(filtros, pagina) {
   const c = consultaAvisos(filtros);
   if (!c) return { grupos: [], pagina: 1, hayMas: false, totalExpedientes: 0, totalAvisos: 0 };
-  return paginaExpedientes({ ...c, pagina });
+  const res = paginaExpedientes({ ...c, pagina });
+  if (res.totalAvisos == null) res.totalAvisos = contarAvisos(filtros);
+  return res;
 }
 
 // Un mismo expediente acumula un aviso por cada acuerdo publicado. El
@@ -682,15 +700,30 @@ function normNombre(str) {
 // paginaExpedientes). Las palabras cortas y las partículas ("de", "la")
 // quedan fuera del MATCH (con detail=none sus listas son enormes) y se
 // verifican en el filtro, que además exige el nombre exacto.
+const MAX_CANDIDATOS_PERSONA = 200000;
 function getExpedientesPersona(persona, pagina) {
   const palabras = persona.nucleo.split(' ').filter(w => w.length >= 3 && !['del', 'las', 'los'].includes(w));
   if (!palabras.length) return { grupos: [], pagina: 1, hayMas: false, totalExpedientes: 0, totalAvisos: 0 };
   const buscado = ` ${persona.nucleo} `;
+  // Se traen todas las coincidencias del índice (las de la persona y las de
+  // otros nombres con las mismas palabras) para contar expedientes exactos y
+  // resumir por año y tipo. Tope: varias veces sus avisos, hasta
+  // MAX_CANDIDATOS_PERSONA; si se pasa, se pagina sin totales.
   const res = paginaExpedientes({
     from: FROM_FTS, colId: 'f.rowid', where: 'entradas_fts MATCH ?', params: [palabras.join(' ')],
     pagina, filtro: r => normNombre(r.actora).includes(buscado) || normNombre(r.demandada).includes(buscado),
+    maxCandidatos: Math.min(MAX_CANDIDATOS_PERSONA, Math.max(CANDIDATOS, (persona.avisos || 0) * 5)),
   });
   for (const g of res.grupos) g.rol = normNombre(g.actora).includes(buscado) ? 'actora' : 'demandada';
+  // Con todos los avisos a mano, las cifras de la ficha salen de ellos (así
+  // cierran con los expedientes listados) y no de la tabla personas.
+  if (res.todos) {
+    res.conteos = {
+      avisos: res.todos.length,
+      como_actora: res.todos.filter(r => normNombre(r.actora).includes(buscado)).length,
+      como_demandada: res.todos.filter(r => normNombre(r.demandada).includes(buscado)).length,
+    };
+  }
   return res;
 }
 

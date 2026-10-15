@@ -372,7 +372,7 @@ function persona(req, params) {
   return {
     status: 200,
     html: renderTemplate('parte', {
-      req, clase: 'persona', parte: p,
+      req, clase: 'persona', parte: res.conteos ? { ...p, ...res.conteos } : p,
       totalExpedientes: res.totalExpedientes,
       chart: resumen && resumen.porAnio.length > 1 ? chartPorAnio(resumen.porAnio) : null,
       tipos: resumen ? resumen.tipos : null,

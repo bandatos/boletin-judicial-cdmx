@@ -37,6 +37,8 @@ include mixins.pug
         #result-count
           if resultado.totalExpedientes != null
             = `${num(resultado.totalExpedientes)} expediente${resultado.totalExpedientes !== 1 ? 's' : ''} (${num(resultado.totalAvisos)} avisos)`
+          else if resultado.totalAvisos != null
+            = `${num(resultado.totalAvisos)} avisos`
           else
             = `Más de ${num(candidatos)} avisos`
           |  · del más reciente al más viejo
