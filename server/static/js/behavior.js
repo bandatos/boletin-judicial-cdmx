@@ -50,18 +50,61 @@
   });
 })();
 
-// Pestañas de la portada: cada botón muestra su tabpanel y oculta los otros
-// del mismo grupo.
+// Pestañas: cada botón muestra su tabpanel y oculta los otros del mismo
+// grupo. Teclado como el patrón ARIA de pestañas: flechas, Inicio y Fin
+// mueven entre pestañas; solo la activa está en el orden de tabulación.
 (function () {
-  document.addEventListener('click', function (e) {
-    var tab = e.target.closest && e.target.closest('button.pestana');
-    if (!tab) return;
-    var grupo = tab.getAttribute('data-grupo');
-    var tabs = document.querySelectorAll('button.pestana[data-grupo="' + grupo + '"]');
+  function delGrupo(tab) {
+    return document.querySelectorAll('button.pestana[data-grupo="' + tab.getAttribute('data-grupo') + '"]');
+  }
+  function activar(tab, enfocar) {
+    var tabs = delGrupo(tab);
     for (var i = 0; i < tabs.length; i++) {
       var activa = tabs[i] === tab;
       tabs[i].setAttribute('aria-selected', activa ? 'true' : 'false');
+      tabs[i].tabIndex = activa ? 0 : -1;
       document.getElementById(tabs[i].getAttribute('aria-controls')).hidden = !activa;
+    }
+    if (enfocar) tab.focus();
+  }
+  var iniciales = document.querySelectorAll('button.pestana');
+  for (var i = 0; i < iniciales.length; i++) {
+    iniciales[i].tabIndex = iniciales[i].getAttribute('aria-selected') === 'true' ? 0 : -1;
+  }
+  document.addEventListener('click', function (e) {
+    var tab = e.target.closest && e.target.closest('button.pestana');
+    if (tab) activar(tab, false);
+  });
+  document.addEventListener('keydown', function (e) {
+    var tab = e.target.closest && e.target.closest('button.pestana');
+    if (!tab) return;
+    var tabs = Array.prototype.slice.call(delGrupo(tab));
+    var k = tabs.indexOf(tab);
+    var destino = { ArrowRight: k + 1, ArrowLeft: k - 1, Home: 0, End: tabs.length - 1 }[e.key];
+    if (destino === undefined) return;
+    e.preventDefault();
+    activar(tabs[(destino + tabs.length) % tabs.length], true);
+  });
+})();
+
+// Formularios de búsqueda: el botón avisa que está buscando (algunas
+// búsquedas tardan uno o dos segundos en el server).
+(function () {
+  document.addEventListener('submit', function (e) {
+    var boton = e.target.querySelector('button[type="submit"]');
+    if (!boton || boton.getAttribute('aria-busy') === 'true') return;
+    boton.setAttribute('aria-busy', 'true');
+    boton.setAttribute('data-texto', boton.textContent);
+    boton.textContent = 'Buscando…';
+  });
+  // Al volver con "atrás", el navegador puede mostrar la página guardada con
+  // el botón en "Buscando…".
+  window.addEventListener('pageshow', function (e) {
+    if (!e.persisted) return;
+    var botones = document.querySelectorAll('button[aria-busy="true"]');
+    for (var i = 0; i < botones.length; i++) {
+      botones[i].removeAttribute('aria-busy');
+      botones[i].textContent = botones[i].getAttribute('data-texto') || 'Buscar';
     }
   });
 })();

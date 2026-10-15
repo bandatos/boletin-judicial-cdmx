@@ -3,8 +3,9 @@ include chrome.pug
 
 +head(`No encontrado — ${siteTitle}`, siteTitle)
   +siteHeader()
-  .container
-    h2 No encontramos esa página
-    p
-      a(href="/") ← Ir a la portada
+  main#contenido
+    .container
+      h2 No encontramos esa página
+      p
+        a(href="/") ← Ir a la portada
   +siteFooter()

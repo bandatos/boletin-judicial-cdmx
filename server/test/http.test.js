@@ -34,8 +34,10 @@ test('GET / responde 200 y trae el formulario de búsqueda', async () => {
 });
 
 test('GET /?q=... hace la búsqueda server-side y agrupa por expediente', async () => {
-  const { status, body } = await get('/buscar?q=thebart');
+  const { status, body: html } = await get('/buscar?q=thebart');
   assert.equal(status, 200);
+  assert.match(html, /<mark>Thebart<\/mark>/);
+  const body = html.replace(/<\/?mark>/g, '');
   assert.match(body, /2 expedientes/);
   assert.match(body, /Esquivel Thebart Alejandro/);
   assert.match(body, /5 avisos|2 avisos/); // el detail de "N avisos" para el grupo con 2
@@ -422,4 +424,23 @@ test('el HTML lleva ETag y responde 304 si no cambió', async () => {
   assert.equal(res.headers.get('cache-control'), 'public, max-age=300');
   const again = await fetch(base + '/sources', { headers: { 'If-None-Match': etag } });
   assert.equal(again.status, 304);
+});
+
+test('accesibilidad: main, salto al contenido, un h1, selects con nombre y sin envío automático', async () => {
+  for (const ruta of ['/', '/buscar', '/buscar?q=thebart', '/fecha', '/empresas', '/personas', '/sources', '/empresas/constructora-ejemplo']) {
+    const { body } = await get(ruta);
+    assert.match(body, /<main id="contenido">/, `main en ${ruta}`);
+    assert.match(body, /<a class="saltar" href="#contenido">/, `salto en ${ruta}`);
+    assert.equal((body.match(/<h1[ >]/g) || []).length, 1, `un h1 en ${ruta}`);
+    assert.doesNotMatch(body, /onchange="this\.form\.submit\(\)"/, `envío automático en ${ruta}`);
+  }
+  const buscar = (await get('/buscar')).body;
+  assert.match(buscar, /<select id="tipo" name="tipo" aria-label="Tipo de juicio">/);
+  assert.match(buscar, /class="chart" role="img" aria-label="[^"]*\d{4}: /);
+});
+
+test('con una búsqueda no se muestra el gráfico general; sin resultados hay sugerencias', async () => {
+  assert.doesNotMatch((await get('/buscar?q=thebart')).body, /class="chart-box"/);
+  assert.match((await get('/buscar')).body, /class="chart-box"/);
+  assert.match((await get('/buscar?q=zzzqqq')).body, /Busca solo un apellido/);
 });

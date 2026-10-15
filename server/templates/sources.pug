@@ -4,127 +4,146 @@ include chrome.pug
 +head(`Boletín Judicial del PJCDMX: fuente de datos — ${siteTitle}`, `De dónde vienen los datos de ${siteTitle}: el Boletín Judicial del Poder Judicial de la Ciudad de México, qué incluye, qué no y cómo se procesa.`)
   +siteHeader('fuentes')
   +breadcrumbs([[siteTitle, '/'], ['Fuentes']])
+  main#contenido
 
-  .container.fuente-view
-    h1.titulo-ficha
-      span.icono-ficha(aria-hidden="true") 🗄️
-      span Boletín Judicial del PJCDMX
+    .container.fuente-view
+      h1.titulo-ficha
+        span.icono-ficha(aria-hidden="true") 🗄️
+        span Boletín Judicial del PJCDMX
 
-    section.ficha
-      h2 Información básica
-      .campos
-        .campo
-          span.campo-titulo Editor
-          span.campo-valor Poder Judicial de la Ciudad de México
-        .campo
-          span.campo-titulo Última actualización
-          span.campo-valor= fechaCorta(stats.maxFecha)
-        .campo
-          span.campo-titulo Rango de fechas
-          span.campo-valor #{fechaCorta(stats.minFecha)} a #{fechaCorta(stats.maxFecha)}
-        .campo
-          span.campo-titulo Boletines
-          span.campo-valor= num(stats.boletines)
-        .campo
-          span.campo-titulo Avisos
-          span.campo-valor= num(stats.totalEntradas)
-        if stats.empresas
+      section.ficha
+        h2 Información básica
+        .campos
           .campo
-            span.campo-titulo Empresas identificadas
-            span.campo-valor= num(stats.empresas.empresas)
-        if stats.personas
+            span.campo-titulo Editor
+            span.campo-valor Poder Judicial de la Ciudad de México
           .campo
-            span.campo-titulo Personas identificadas
-            span.campo-valor= num(stats.personas.personas)
-        .campo
-          span.campo-titulo Estado de actualización
-          span.campo-valor Actualización periódica
-      p.
-        La publicación oficial con la que los juzgados y salas del Poder Judicial
-        de la Ciudad de México notifican sus acuerdos a las partes. Se publica en
-        PDF cada día hábil, con entre 300 y 500 páginas por día. Cada aviso dice
-        quiénes son las partes, el tipo de juicio, el número de expediente y el
-        órgano que dictó el acuerdo.
-      .acciones-ficha
-        a.boton-borde(href="https://consultabpj.poderjudicialcdmx.gob.mx:2096/consultaboletinpjcdmx" target="_blank" rel="noopener") Conjunto de datos original
-
-    article.texto-panel
-      section
-        h2 Cómo trabajamos
+            span.campo-titulo Última actualización
+            span.campo-valor= fechaCorta(stats.maxFecha)
+          .campo
+            span.campo-titulo Rango de fechas
+            span.campo-valor #{fechaCorta(stats.minFecha)} a #{fechaCorta(stats.maxFecha)}
+          .campo
+            span.campo-titulo Boletines
+            span.campo-valor= num(stats.boletines)
+          .campo
+            span.campo-titulo Avisos
+            span.campo-valor= num(stats.totalEntradas)
+          if stats.empresas
+            .campo
+              span.campo-titulo Empresas identificadas
+              span.campo-valor= num(stats.empresas.empresas)
+          if stats.personas
+            .campo
+              span.campo-titulo Personas identificadas
+              span.campo-valor= num(stats.personas.personas)
+          .campo
+            span.campo-titulo Estado de actualización
+            span.campo-valor Actualización periódica
         p.
-          #[strong= siteTitle] toma cada boletín publicado por el PJCDMX y lo
-          convierte en datos consultables por empresa, por fecha y por nombre.
-        h3 El proceso en términos simples:
-        ol
-          li #[strong Descarga:] se consulta el índice del portal oficial y se baja el PDF de cada boletín.
-          li #[strong Extracción de texto:] se lee el texto de cada página, conservando en qué página está cada aviso.
-          li #[strong Separación en avisos:] un parser identifica en cada aviso las partes, el tipo de juicio, el expediente y el juzgado o sala.
-          li #[strong Tipos de juicio:] las abreviaturas se normalizan contra una lista de tipos reales; el #{stats.pctConTipo}% de los avisos queda clasificado.
-          li #[strong Empresas:] se reconocen las partes que son empresas por su forma societaria (S.A. de C.V., S. de R.L., Institución de Banca, etc.).
-          li #[strong Personas:] el resto de las partes con forma de nombre propio se agrupan por nombre, sin CURP ni otro dato que distinga a dos personas homónimas.
-        p.
-          #[strong Principio fundamental:] no reemplazamos la fuente oficial. Cada
-          aviso lleva a la página exacta del PDF donde se publicó, para verificarlo
-          contra el original.
+          La publicación oficial con la que los juzgados y salas del Poder Judicial
+          de la Ciudad de México notifican sus acuerdos a las partes. Se publica en
+          PDF cada día hábil, con entre 300 y 500 páginas por día. Cada aviso dice
+          quiénes son las partes, el tipo de juicio, el número de expediente y el
+          órgano que dictó el acuerdo.
+        .acciones-ficha
+          a.boton-borde(href="https://consultabpj.poderjudicialcdmx.gob.mx:2096/consultaboletinpjcdmx" target="_blank" rel="noopener") Conjunto de datos original
 
-      hr
+      article.texto-panel
+        section
+          h2 Cómo trabajamos
+          p.
+            #[strong= siteTitle] toma cada boletín publicado por el PJCDMX y lo
+            convierte en datos consultables por empresa, por fecha y por nombre.
+          h3 El proceso en términos simples:
+          ol
+            li #[strong Descarga:] se consulta el índice del portal oficial y se baja el PDF de cada boletín.
+            li #[strong Extracción de texto:] se lee el texto de cada página, conservando en qué página está cada aviso.
+            li #[strong Separación en avisos:] un parser identifica en cada aviso las partes, el tipo de juicio, el expediente y el juzgado o sala.
+            li #[strong Tipos de juicio:] las abreviaturas se normalizan contra una lista de tipos reales; el #{stats.pctConTipo}% de los avisos queda clasificado.
+            li #[strong Empresas:] se reconocen las partes que son empresas por su forma societaria (S.A. de C.V., S. de R.L., Institución de Banca, etc.).
+            li #[strong Personas:] el resto de las partes con forma de nombre propio se agrupan por nombre, sin CURP ni otro dato que distinga a dos personas homónimas.
+          p.
+            #[strong Principio fundamental:] no reemplazamos la fuente oficial. Cada
+            aviso lleva a la página exacta del PDF donde se publicó, para verificarlo
+            contra el original.
 
-      section
-        h2 Qué incluye y qué no
-        .dos-columnas
-          div
-            h3 Incluye
-            ul
-              li Juzgados civiles, familiares, de proceso oral y de tutela de derechos humanos.
-              li Salas (segunda instancia), Unidades de Gestión Judicial y tribunales laborales locales.
-              li Boletines desde el 3 de octubre de 2016, el primero que ofrece el portal.
-          div
-            h3 No incluye
-            ul
-              li Juicios federales (amparos, juzgados de distrito) ni de otros estados.
-              li El contenido del expediente: solo el aviso de que hubo un acuerdo.
-              li Domicilios, RFC ni ubicación de los inmuebles en disputa.
+        hr
 
-      hr
+        section
+          h2 Qué incluye y qué no
+          .dos-columnas
+            div
+              h3 Incluye
+              ul
+                li Juzgados civiles, familiares, de proceso oral y de tutela de derechos humanos.
+                li Salas (segunda instancia), Unidades de Gestión Judicial y tribunales laborales locales.
+                li Boletines desde el 3 de octubre de 2016, el primero que ofrece el portal.
+            div
+              h3 No incluye
+              ul
+                li Juicios federales (amparos, juzgados de distrito) ni de otros estados.
+                li El contenido del expediente: solo el aviso de que hubo un acuerdo.
+                li Domicilios, RFC ni ubicación de los inmuebles en disputa.
 
-      section
-        h2 Compromiso de privacidad
-        p.
-          Las páginas de empresas muestran solo empresas: cuando la otra parte es
-          una persona física, se indica como “persona física” sin su nombre. El
-          listado de personas, las búsquedas por nombre, las fichas de expediente y
-          la vista por fecha no se ofrecen a los buscadores de internet.
+        hr
 
-      hr
+        section
+          h2 Compromiso de privacidad
+          p.
+            Las páginas de empresas muestran solo empresas: cuando la otra parte es
+            una persona física, se indica como “persona física” sin su nombre. El
+            listado de personas, las búsquedas por nombre, las fichas de expediente y
+            la vista por fecha no se ofrecen a los buscadores de internet.
 
-      section
-        h2 Quiénes hacemos esto
-        p.
-          #[strong= siteTitle] es un proyecto de #[strong Todo Derecho Vecino], que
-          construye herramientas legales y de datos para temas vecinales, dentro de
-          #[a(href="https://bandatos.org" target="_blank" rel="noopener") Bandatos],
-          una comunidad mexicana de personas que trabajan con datos en proyectos de
-          impacto social.
+        hr
 
-      hr
+        section
+          h2 Glosario
+          dl.glosario
+            dt Aviso
+            dd Cada línea del boletín: avisa que un juzgado o sala dictó un acuerdo en un expediente. Un mismo juicio acumula muchos avisos a lo largo del tiempo.
+            dt Expediente
+            dd El número del juicio en un juzgado ("184/2025": el juicio 184 que entró en 2025). El número se repite entre juzgados: un expediente se identifica por número y juzgado.
+            dt Actora y demandada
+            dd Quien inicia el juicio (actora) y contra quien se presenta (demandada).
+            dt Juzgado y sala
+            dd El juzgado resuelve en primera instancia; la sala revisa en segunda instancia (apelaciones).
+            dt Tipo de juicio
+            dd La clase de procedimiento: ordinario civil, especial hipotecario, controversia familiar, sucesorio, etc.
+            dt Boletín Judicial
+            dd La publicación oficial del Poder Judicial de la Ciudad de México donde se notifican los acuerdos, cada día hábil.
 
-      section
-        h2 Limitaciones
-        ul
-          li #[strong Interpretación del texto:] el boletín se lee con reglas; en avisos con formato inusual puede haber errores.
-          li #[strong Empresas sin RFC:] una empresa se identifica por su nombre, así que variantes muy distintas pueden figurar por separado.
-          li #[strong Año del expediente:] el año de los filtros de búsqueda es el del expediente, no el de publicación.
+        hr
 
-      hr
+        section
+          h2 Quiénes hacemos esto
+          p.
+            #[strong= siteTitle] es un proyecto de #[strong Todo Derecho Vecino], que
+            construye herramientas legales y de datos para temas vecinales, dentro de
+            #[a(href="https://bandatos.org" target="_blank" rel="noopener") Bandatos],
+            una comunidad mexicana de personas que trabajan con datos en proyectos de
+            impacto social.
 
-      section
-        h2 Próximo paso
-        p
-          | 👉
-          = ' '
-          a(href="/empresas") #[strong Explora las empresas con juicios]
-          |  o
-          = ' '
-          a(href="/fecha") #[strong revisa lo publicado cada día].
+        hr
+
+        section
+          h2 Limitaciones
+          ul
+            li #[strong Interpretación del texto:] el boletín se lee con reglas; en avisos con formato inusual puede haber errores.
+            li #[strong Empresas sin RFC:] una empresa se identifica por su nombre, así que variantes muy distintas pueden figurar por separado.
+            li #[strong Año del expediente:] el año de los filtros de búsqueda es el del expediente, no el de publicación.
+
+        hr
+
+        section
+          h2 Próximo paso
+          p
+            | 👉
+            = ' '
+            a(href="/empresas") #[strong Explora las empresas con juicios]
+            |  o
+            = ' '
+            a(href="/fecha") #[strong revisa lo publicado cada día].
 
   +siteFooter()

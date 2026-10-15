@@ -68,6 +68,42 @@ function cssInline() {
   return cssCache;
 }
 
+// Resalta en `texto` las palabras de `buscado` (sin distinguir acentos ni
+// mayúsculas) con <mark>. Devuelve HTML escapado, para usar con !=.
+function escaparHtml(t) {
+  return String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+function resaltar(texto, buscado) {
+  if (texto == null) return '';
+  const original = String(texto);
+  const palabras = String(buscado || '').normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u).filter(w => w.length >= 3);
+  if (!palabras.length) return escaparHtml(original);
+  // Texto normalizado letra por letra, con el índice de cada letra en el original.
+  let norm = '';
+  const indice = [];
+  for (let i = 0; i < original.length; i++) {
+    const n = original[i].normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+    for (const c of n) { norm += c; indice.push(i); }
+  }
+  const marcado = new Array(original.length).fill(false);
+  for (const w of palabras) {
+    let k = norm.indexOf(w);
+    while (k !== -1) {
+      for (let j = k; j < k + w.length; j++) marcado[indice[j]] = true;
+      k = norm.indexOf(w, k + w.length);
+    }
+  }
+  let html = '';
+  let abierto = false;
+  for (let i = 0; i < original.length; i++) {
+    if (marcado[i] && !abierto) { html += '<mark>'; abierto = true; }
+    if (!marcado[i] && abierto) { html += '</mark>'; abierto = false; }
+    html += escaparHtml(original[i]);
+  }
+  return abierto ? html + '</mark>' : html;
+}
+
 // pugLocals: se mezcla en TODOS los renders (mismo patrón que sociedad-web-front).
 const pugLocals = {
   siteTitle: 'Boletín Judicial CDMX',
@@ -75,6 +111,7 @@ const pugLocals = {
     'a partir del Boletín Judicial del Poder Judicial de la CDMX.',
   gaId: process.env.GA_ID || '',
   asset,
+  resaltar,
   CHART_COLORS: db.CHART_COLORS,
   num,
   expedienteHref,
@@ -356,5 +393,5 @@ function health() {
 }
 
 module.exports = {
-  health, home, portada, personas, persona, juzgado, expediente, fecha, empresas, empresa, sources, renderTemplate, pugLocals,
+  resaltar, health, home, portada, personas, persona, juzgado, expediente, fecha, empresas, empresa, sources, renderTemplate, pugLocals,
 };

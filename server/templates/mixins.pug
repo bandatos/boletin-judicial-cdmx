@@ -1,12 +1,12 @@
-mixin resultCard(g)
+mixin resultCard(g, buscado)
   .card
     .card-partes
       if g.demandada
-        b= g.actora
+        b!= resaltar(g.actora, buscado)
         span.card-vs &nbsp;vs.&nbsp;
-        b= g.demandada
+        b!= resaltar(g.demandada, buscado)
       else
-        b= g.actora
+        b!= resaltar(g.actora, buscado)
     .card-meta
       if g.tipo_juicio
         span.tag= g.tipo_juicio
@@ -106,16 +106,17 @@ mixin graficoAnios(chart, titulo)
   .chart-box
     if titulo
       h2.chart-title= titulo
-    .chart
+    - const resumenChart = chart.years.map(y => `${y.anio}: ${num(y.total)}`).join('; ')
+    .chart(role="img" aria-label=`${titulo || 'Avisos por año'}. ${resumenChart} avisos.`)
       each y in chart.years
-        .chart-col(style=`height:${(y.total / chart.maxTotal) * 100}%` title=`${y.anio}: ${num(y.total)} avisos`)
+        .chart-col(style=`height:${(y.total / chart.maxTotal) * 100}%` data-valor=`${y.anio}: ${num(y.total)} avisos` aria-hidden="true")
           each seg, i in y.segments
             if seg.n
               .chart-col-segment(style=`height:${(seg.n / y.total) * 100}%;background:${chart.colors[i]}`)
-    .chart-labels
+    .chart-labels(aria-hidden="true")
       each y in chart.years
         .chart-col-label= y.anio
-    .chart-legend
+    .chart-legend(aria-hidden="true")
       each b, i in chart.buckets
         span.chart-legend-item
           span.chart-legend-swatch(style=`background:${chart.colors[i]}`)

@@ -5,87 +5,91 @@ include mixins.pug
 //- noindex: la vista de un día lista los nombres de todas las partes.
 +head(dia ? `Boletín del ${fechaLarga(iso)} — ${siteTitle}` : `Navegar por fecha — ${siteTitle}`, 'Todo lo publicado en el Boletín Judicial CDMX cada día', true)
   +siteHeader('fecha')
+  main#contenido
 
-  .container.fecha-view
-    .cal-nav
-      if calendario.anterior
-        a.cal-nav-btn(href=`/fecha/${iso}?mes=${calendario.anterior}` aria-label="Mes anterior") ‹
+    .container.fecha-view
+      h1.visualmente-oculto Lo publicado cada día
+      .cal-nav
+        if calendario.anterior
+          a.cal-nav-btn(href=`/fecha/${iso}?mes=${calendario.anterior}` aria-label="Mes anterior") ‹
+        else
+          span.cal-nav-btn.disabled ‹
+        form.cal-selector(method="GET" action=`/fecha/${iso}`)
+          select(name="m" aria-label="Mes")
+            each nombre, k in calendario.meses
+              option(value=k + 1 selected=(k + 1 === calendario.mes))= nombre
+          select(name="a" aria-label="Año")
+            each a in calendario.anios
+              option(value=a selected=(a === calendario.anio))= a
+          button.cal-ir(type="submit") Ir
+        if calendario.siguiente
+          a.cal-nav-btn(href=`/fecha/${iso}?mes=${calendario.siguiente}` aria-label="Mes siguiente") ›
+        else
+          span.cal-nav-btn.disabled ›
+
+      p.nota El número de cada día es la cantidad de avisos publicados ese día.
+      .cal-grid
+        each d in ['lun', 'mar', 'mié', 'jue', 'vie', 'sáb', 'dom']
+          .cal-dow= d
+        each semana in calendario.semanas
+          each c in semana
+            if !c
+              .cal-day.empty
+            else if c.n
+              a.cal-day(href=`/fecha/${c.iso}` class=(c.iso === iso ? 'selected' : '') title=`${num(c.n)} avisos`)
+                = c.dia
+                span.cal-day-n
+                = num(c.n)
+                span.visualmente-oculto  avisos
+            else
+              .cal-day= c.dia
+
+      .dia-nav
+        if diaAnterior
+          a(href=`/fecha/${diaAnterior}`) ← #{fechaCorta(diaAnterior)}
+        if diaSiguiente
+          a(href=`/fecha/${diaSiguiente}`) #{fechaCorta(diaSiguiente)} →
+
+      if !dia
+        p.boletin-head No hay boletín del #{fechaLarga(iso)}.
       else
-        span.cal-nav-btn.disabled ‹
-      form.cal-selector(method="GET" action=`/fecha/${iso}`)
-        select(name="m" aria-label="Mes" onchange="this.form.submit()")
-          each nombre, k in calendario.meses
-            option(value=k + 1 selected=(k + 1 === calendario.mes))= nombre
-        select(name="a" aria-label="Año" onchange="this.form.submit()")
-          each a in calendario.anios
-            option(value=a selected=(a === calendario.anio))= a
-        noscript
-          button(type="submit") Ver
-      if calendario.siguiente
-        a.cal-nav-btn(href=`/fecha/${iso}?mes=${calendario.siguiente}` aria-label="Mes siguiente") ›
-      else
-        span.cal-nav-btn.disabled ›
+        .boletin-head
+          h2= fechaLarga(iso)
+          span #{num(dia.total)} avisos · #{num(dia.grupos.length)} juzgados y salas
+          each b in dia.boletines
+            if b.pdf_url
+              +pdfLink({ pdf_url: b.pdf_url, fecha_iso: iso }, 'Ver PDF del boletín')
 
-    .cal-grid
-      each d in ['lun', 'mar', 'mié', 'jue', 'vie', 'sáb', 'dom']
-        .cal-dow= d
-      each semana in calendario.semanas
-        each c in semana
-          if !c
-            .cal-day.empty
-          else if c.n
-            a.cal-day(href=`/fecha/${c.iso}` class=(c.iso === iso ? 'selected' : '') title=`${num(c.n)} avisos`)
-              = c.dia
-              span.cal-day-n= num(c.n)
-          else
-            .cal-day= c.dia
+        form.dia-filtro(method="GET" action=`/fecha/${iso}`)
+          input(type="search" name="q" value=q placeholder="Filtrar en este boletín por nombre, expediente o tipo de juicio..." autocomplete="off")
+          if organo
+            input(type="hidden" name="organo" value=organo)
+          button(type="submit") Filtrar
 
-    .dia-nav
-      if diaAnterior
-        a(href=`/fecha/${diaAnterior}`) ← #{fechaCorta(diaAnterior)}
-      if diaSiguiente
-        a(href=`/fecha/${diaSiguiente}`) #{fechaCorta(diaSiguiente)} →
+        if organo || q
+          p.active-filter
+            if q
+              | #{num(coincidencias)} avisos con “#{q}”
+            if organo && grupos.length
+              | #{q ? ' en ' : ''}#{grupos[0].nombre}
+            a(href=`/fecha/${iso}`) Quitar filtro
+          if truncado
+            p.active-filter Se muestran los primeros #{num(maxAvisos)}. Afiná el filtro para ver el resto.
 
-    if !dia
-      p.boletin-head No hay boletín del #{fechaLarga(iso)}.
-    else
-      .boletin-head
-        h2= fechaLarga(iso)
-        span #{num(dia.total)} avisos · #{num(dia.grupos.length)} juzgados y salas
-        each b in dia.boletines
-          if b.pdf_url
-            +pdfLink({ pdf_url: b.pdf_url, fecha_iso: iso }, 'Ver PDF del boletín')
-
-      form.dia-filtro(method="GET" action=`/fecha/${iso}`)
-        input(type="search" name="q" value=q placeholder="Filtrar en este boletín por nombre, expediente o tipo de juicio..." autocomplete="off")
-        if organo
-          input(type="hidden" name="organo" value=organo)
-        button(type="submit") Filtrar
-
-      if organo || q
-        p.active-filter
-          if q
-            | #{num(coincidencias)} avisos con “#{q}”
-          if organo && grupos.length
-            | #{q ? ' en ' : ''}#{grupos[0].nombre}
-          a(href=`/fecha/${iso}`) Quitar filtro
-        if truncado
-          p.active-filter Se muestran los primeros #{num(maxAvisos)}. Afiná el filtro para ver el resto.
-
-      if mostrarAvisos
-        each g in grupos
-          section.grupo
-            h3
-              a(href=`/fecha/${iso}?organo=${g.slug}`)= g.nombre
-              span.grupo-n= num(g.total || g.rows.length)
-            +avisosDia(g.rows)
-        if !grupos.length
-          p Sin avisos que coincidan.
-      else
-        ul.organos
+        if mostrarAvisos
           each g in grupos
-            li
-              a(href=`/fecha/${iso}?organo=${g.slug}`)= g.nombre
-              span.grupo-n= num(g.rows.length)
+            section.grupo
+              h3
+                a(href=`/fecha/${iso}?organo=${g.slug}`)= g.nombre
+                span.grupo-n= num(g.total || g.rows.length)
+              +avisosDia(g.rows)
+          if !grupos.length
+            p Sin avisos que coincidan.
+        else
+          ul.organos
+            each g in grupos
+              li
+                a(href=`/fecha/${iso}?organo=${g.slug}`)= g.nombre
+                span.grupo-n= num(g.rows.length)
 
   +siteFooter()

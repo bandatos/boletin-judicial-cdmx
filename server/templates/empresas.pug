@@ -8,61 +8,62 @@ include mixins.pug
   +siteHeader('empresas')
 
   +breadcrumbs([[siteTitle, '/'], ['Empresas']])
+  main#contenido
 
-  .container.empresas-view
-    h1.titulo-seccion Empresas
-    p.nota.
-      Empresas que aparecen como actora o demandada en el Boletín Judicial del
-      Poder Judicial de la Ciudad de México desde octubre de 2016: tipos de
-      juicio, juzgados, expedientes y la liga a cada publicación oficial.
+    .container.empresas-view
+      h1.titulo-seccion Empresas
+      p.nota.
+        Empresas que aparecen como actora o demandada en el Boletín Judicial del
+        Poder Judicial de la Ciudad de México desde octubre de 2016: tipos de
+        juicio, juzgados, expedientes y la liga a cada publicación oficial.
 
-    form.buscador-simple(method="GET" action="/empresas")
-      input(type="search" name="q" value=q placeholder="Busca una empresa por nombre..." autocomplete="off" aria-label="Nombre de la empresa")
-      if orden === 'nombre'
-        input(type="hidden" name="orden" value="nombre")
-      button(type="submit") Buscar
-
-    .bloque#empresas
-      p.orden
-        | #{num(lista.total)} empresas · ordenar por
-        = ' '
+      form.buscador-simple(method="GET" action="/empresas")
+        input(type="search" name="q" value=q placeholder="Busca una empresa por nombre..." autocomplete="off" aria-label="Nombre de la empresa")
         if orden === 'nombre'
-          a(href=`/empresas?${new URLSearchParams(q ? { q } : {})}`) cantidad de avisos
-          |  ·
-          strong  nombre
-        else
-          strong cantidad de avisos
-          |  ·
+          input(type="hidden" name="orden" value="nombre")
+        button(type="submit") Buscar
+
+      .bloque#empresas
+        p.orden
+          | #{num(lista.total)} empresas · ordenar por
           = ' '
-          a(href=`/empresas?${new URLSearchParams(Object.assign(q ? { q } : {}, { orden: 'nombre' }))}`) nombre
+          if orden === 'nombre'
+            a(href=`/empresas?${new URLSearchParams(q ? { q } : {})}`) cantidad de avisos
+            |  ·
+            strong  nombre
+          else
+            strong cantidad de avisos
+            |  ·
+            = ' '
+            a(href=`/empresas?${new URLSearchParams(Object.assign(q ? { q } : {}, { orden: 'nombre' }))}`) nombre
 
-      table.empresas-tabla
-        thead
-          tr
-            th Empresa
-            th.num Avisos
-            th.num Como actora
-            th.num Como demandada
-            th.num Expedientes
-            th Período
-        tbody
-          each e in lista.rows
+        table.empresas-tabla
+          thead
             tr
-              td
-                a(href=`/empresas/${e.slug}`)= e.nombre
-              td.num= num(e.avisos)
-              td.num= num(e.como_actora)
-              td.num= num(e.como_demandada)
-              td.num= num(e.expedientes || 0)
-              td.periodo= `${fechaCorta(e.primer_boletin)} a ${fechaCorta(e.ultimo_boletin)}`
-      if !lista.rows.length
-        p Sin empresas que coincidan.
+              th Empresa
+              th.num Avisos
+              th.num Como actora
+              th.num Como demandada
+              th.num Expedientes
+              th Período
+          tbody
+            each e in lista.rows
+              tr
+                td
+                  a(href=`/empresas/${e.slug}`)= e.nombre
+                td.num= num(e.avisos)
+                td.num= num(e.como_actora)
+                td.num= num(e.como_demandada)
+                td.num= num(e.expedientes || 0)
+                td.periodo= `${fechaCorta(e.primer_boletin)} a ${fechaCorta(e.ultimo_boletin)}`
+        if !lista.rows.length
+          p Sin empresas que coincidan.
 
-      +paginacion(lista.pagina, lista.paginas, p => `/empresas?${new URLSearchParams(Object.assign({}, baseParams, { p }))}`)
+        +paginacion(lista.pagina, lista.paginas, p => `/empresas?${new URLSearchParams(Object.assign({}, baseParams, { p }))}`)
 
-    p.nota.
-      La empresa se reconoce por el nombre publicado en el boletín (no incluye
-      RFC), así que variantes muy distintas de un mismo nombre pueden figurar por
-      separado. Solo se listan empresas: las personas físicas no se nombran.
+      p.nota.
+        La empresa se reconoce por el nombre publicado en el boletín (no incluye
+        RFC), así que variantes muy distintas de un mismo nombre pueden figurar por
+        separado. Solo se listan empresas: las personas físicas no se nombran.
 
   +siteFooter()

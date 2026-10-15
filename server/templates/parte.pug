@@ -14,72 +14,73 @@ include mixins.pug
 +head(titulo, descripcion, !esEmpresa)
   +siteHeader(esEmpresa ? 'empresas' : 'personas')
   +breadcrumbs([[siteTitle, '/'], seccion, [parte.nombre]])
+  main#contenido
 
-  .container.empresa-view
-    h1= parte.nombre
+    .container.empresa-view
+      h1= parte.nombre
 
-    .stats-grid
-      .stat
-        strong= totalExpedientes == null ? `${num(expedientes.pagina * 50)}+` : num(totalExpedientes)
-        span expedientes
-      .stat
-        strong= num(parte.avisos)
-        span avisos
-      .stat
-        strong= num(parte.como_actora)
-        span como actora
-      .stat
-        strong= num(parte.como_demandada)
-        span como demandada
-    if parte.primer_boletin
-      p.nota
-        | Del #{fechaLarga(parte.primer_boletin)} al #{fechaLarga(parte.ultimo_boletin)}.
-        = ' '
-        if esEmpresa
-          | Solo juicios del Poder Judicial de la Ciudad de México publicados en su Boletín Judicial.
-        else
-          | Puede incluir juicios de otras personas con el mismo nombre.
+      .stats-grid
+        .stat
+          strong= totalExpedientes == null ? `${num(expedientes.pagina * 50)}+` : num(totalExpedientes)
+          span expedientes
+        .stat
+          strong= num(parte.avisos)
+          span avisos
+        .stat
+          strong= num(parte.como_actora)
+          span como actora
+        .stat
+          strong= num(parte.como_demandada)
+          span como demandada
+      if parte.primer_boletin
+        p.nota
+          | Del #{fechaLarga(parte.primer_boletin)} al #{fechaLarga(parte.ultimo_boletin)}.
+          = ' '
+          if esEmpresa
+            | Solo juicios del Poder Judicial de la Ciudad de México publicados en su Boletín Judicial.
+          else
+            | Puede incluir juicios de otras personas con el mismo nombre.
 
-    if chart || (tipos && tipos.length)
-      +tarjeta('📊', 'Resumen')
-        - const pestanasResumen = [chart && { id: 'resumen-anios', titulo: 'Avisos por año' }, tipos && tipos.length && { id: 'resumen-tipos', titulo: 'Tipos de juicio' }].filter(Boolean)
-        +pestanas('resumen', pestanasResumen)
-        if chart
-          #resumen-anios(role="tabpanel" aria-labelledby="tab-resumen-anios")
-            +graficoAnios(chart)
-            p.nota Avisos publicados en el boletín cada año.
-        if tipos && tipos.length
-          #resumen-tipos(role="tabpanel" aria-labelledby="tab-resumen-tipos" hidden=Boolean(chart))
-            table.empresas-tabla
-              thead
-                tr
-                  th Tipo de juicio
-                  th.num Avisos
-              tbody
-                each t in tipos
+      if chart || (tipos && tipos.length)
+        +tarjeta('📊', 'Resumen')
+          - const pestanasResumen = [chart && { id: 'resumen-anios', titulo: 'Avisos por año' }, tipos && tipos.length && { id: 'resumen-tipos', titulo: 'Tipos de juicio' }].filter(Boolean)
+          +pestanas('resumen', pestanasResumen)
+          if chart
+            #resumen-anios(role="tabpanel" aria-labelledby="tab-resumen-anios")
+              +graficoAnios(chart)
+              p.nota Avisos publicados en el boletín cada año.
+          if tipos && tipos.length
+            #resumen-tipos(role="tabpanel" aria-labelledby="tab-resumen-tipos" hidden=Boolean(chart))
+              table.empresas-tabla
+                thead
                   tr
-                    td= t.tipo
-                    td.num= num(t.n)
-    else if !esEmpresa
-      p.nota Este nombre tiene demasiados avisos para resumirlos por año y tipo de juicio.
+                    th Tipo de juicio
+                    th.num Avisos
+                tbody
+                  each t in tipos
+                    tr
+                      td= t.tipo
+                      td.num= num(t.n)
+      else if !esEmpresa
+        p.nota Este nombre tiene demasiados avisos para resumirlos por año y tipo de juicio.
 
-    +tarjeta('📁', 'Expedientes')
-      p.nota
-        | Del más reciente al más viejo.
+      +tarjeta('📁', 'Expedientes')
+        p.nota
+          | Del más reciente al más viejo.
+          if esEmpresa
+            |  La otra parte se muestra solo si es una empresa. Las personas físicas no se nombran.
         if esEmpresa
-          |  La otra parte se muestra solo si es una empresa. Las personas físicas no se nombran.
-      if esEmpresa
-        if !expedientes.filas.length
-          p Sin expedientes.
-        ol.expedientes-empresa
-          each x in expedientes.filas
-            +expedienteEmpresa(x)
-      else
-        if !expedientes.grupos.length
-          p Sin avisos encontrados.
-        #result-list
-          each g in expedientes.grupos
-            +resultCard(g)
-      +paginacion(expedientes.pagina, expedientes.paginas, n => `${base}?p=${n}`, expedientes.hayMas)
+          if !expedientes.filas.length
+            p Sin expedientes.
+          ol.expedientes-empresa
+            each x in expedientes.filas
+              +expedienteEmpresa(x)
+        else
+          if !expedientes.grupos.length
+            p Sin avisos encontrados.
+          #result-list
+            each g in expedientes.grupos
+              +resultCard(g, parte.nombre)
+        +paginacion(expedientes.pagina, expedientes.paginas, n => `${base}?p=${n}`, expedientes.hayMas)
 
   +siteFooter()

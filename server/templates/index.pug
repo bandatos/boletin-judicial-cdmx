@@ -4,41 +4,52 @@ include mixins.pug
 
 +head(heading ? `${heading} — ${siteTitle}` : siteTitle, tagline, Boolean(heading || searched))
   +siteHeader('buscar')
+  main#contenido
 
-  if heading
-    .container.page-heading
-      h2= heading
-      p
-        a(href="/buscar") ← Buscar en todos los juzgados
+    if heading
+      .container.page-heading
+        h1= heading
+        p
+          a(href="/buscar") ← Buscar en todos los juzgados
 
-  form#search-box(method="GET" action=formAction)
-    .search-row
-      input#q(type="search" name="q" placeholder="Nombre de persona o empresa..." value=q autocomplete="off")
-      select#tipo(name="tipo" onchange="this.form.submit()")
-        option(value="") Todos los tipos de juicio
-        each t in tipos
-          option(value=t selected=(t === tipo))= t
-      select#anio(name="anio" onchange="this.form.submit()")
-        option(value="") Todos los años
-        each a in anios
-          option(value=a selected=(String(a) === String(anio)))= a
-      button#search-btn(type="submit") Buscar
+    if !heading
+      h1.visualmente-oculto Buscar avisos
+    form#search-box(method="GET" action=formAction role="search")
+      .search-row
+        input#q(type="search" name="q" placeholder="Nombre de persona o empresa, o número de expediente..." value=q autocomplete="off" aria-label="Buscar en los avisos")
+        select#tipo(name="tipo" aria-label="Tipo de juicio")
+          option(value="") Todos los tipos de juicio
+          each t in tipos
+            option(value=t selected=(t === tipo))= t
+        select#anio(name="anio" aria-label="Año del expediente")
+          option(value="") Todos los años
+          each a in anios
+            option(value=a selected=(String(a) === String(anio)))= a
+        button#search-btn(type="submit") Buscar
 
-  +graficoAnios(chart, 'Avisos por año del expediente')
+    //- El gráfico general solo sin búsqueda: con resultados empujaba la lista
+    //- abajo y no hablaba de lo buscado.
+    if !searched
+      +graficoAnios(chart, 'Avisos por año del expediente')
 
-  #results
-    if searched
-      #result-count
-        if resultado.totalExpedientes != null
-          = `${num(resultado.totalExpedientes)} expediente${resultado.totalExpedientes !== 1 ? 's' : ''} (${num(resultado.totalAvisos)} avisos)`
-        else
-          = `Más de ${num(candidatos)} avisos`
-        |  · del más reciente al más viejo
-      if !groups.length
-        p Sin resultados.
-      #result-list
-        each g in groups
-          +resultCard(g)
-      +paginacion(resultado.pagina, resultado.totalExpedientes == null ? null : Math.ceil(resultado.totalExpedientes / porPagina), hrefPagina, resultado.hayMas)
+    #results
+      if searched
+        #result-count
+          if resultado.totalExpedientes != null
+            = `${num(resultado.totalExpedientes)} expediente${resultado.totalExpedientes !== 1 ? 's' : ''} (${num(resultado.totalAvisos)} avisos)`
+          else
+            = `Más de ${num(candidatos)} avisos`
+          |  · del más reciente al más viejo
+        if !groups.length
+          .sin-resultados
+            p #[strong Sin resultados.] Algunas ideas:
+            ul
+              li Busca solo un apellido o dos palabras del nombre (el boletín suele publicar "Apellido Apellido Nombre").
+              li Prueba sin el tipo de juicio o el año, si los elegiste.
+              li Para una empresa, revisa el #[a(href=`/empresas?${new URLSearchParams({ q })}`) listado de empresas].
+        #result-list
+          each g in groups
+            +resultCard(g, q)
+        +paginacion(resultado.pagina, resultado.totalExpedientes == null ? null : Math.ceil(resultado.totalExpedientes / porPagina), hrefPagina, resultado.hayMas)
 
   +siteFooter()
