@@ -1,6 +1,6 @@
 # Detección de empresas: cómo funciona y problemas conocidos
 
-Código: `scraper/empresas.py`. Lo usan `build_db.py --empresas` / `--solo-empresas` (tablas `empresas`, `entradas_empresas`, `entradas_partes` para `/empresas` en juicios-cdmx.sociedad.info) y `cruces/cruce_qqw.py`.
+Código: `scraper/empresas.py`. Lo usan `build_db.py --empresas` / `--solo-empresas` (tablas `empresas`, `entradas_empresas`, `entradas_partes` para `/empresas` del server) y `cruces/cruce_qqw.py`.
 
 ## Regla de producto
 
