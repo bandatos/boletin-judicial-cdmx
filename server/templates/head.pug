@@ -1,0 +1,32 @@
+//- noindex: fichas, juzgados y resultados de búsqueda listan nombres de
+//- personas en juicios (muchos familiares). El boletín es público, pero que
+//- un buscador los indexe hace que buscar a alguien devuelva sus juicios.
+mixin head(title, description, noindex)
+  doctype html
+  html(lang="es")
+    head
+      meta(charset="UTF-8")
+      meta(name="viewport" content="width=device-width, initial-scale=1.0")
+      title= title
+      if description
+        meta(name="description" content=description)
+      if noindex
+        meta(name="robots" content="noindex")
+      link(rel="icon" type="image/webp" href="/static/img/favicon-32.webp")
+      link(rel="apple-touch-icon" href="/static/img/favicon-180.webp")
+      style
+        include ../static/css/headStyle.css
+      //- ?v=: cambia en cada arranque, para que el navegador no use un CSS viejo.
+      link(rel="preload" href=`/static/css/main.css?v=${staticVersion}` as="style")
+      link(rel="stylesheet" href=`/static/css/main.css?v=${staticVersion}` media="print" onload="this.media='all'")
+      noscript
+        link(rel="stylesheet" href=`/static/css/main.css?v=${staticVersion}`)
+      if gaId
+        script(async src=`https://www.googletagmanager.com/gtag/js?id=${gaId}`)
+        script.
+          window.dataLayer = window.dataLayer || [];
+          function gtag(){ dataLayer.push(arguments); }
+          gtag('js', new Date());
+          gtag('config', '#{gaId}');
+    body
+      block

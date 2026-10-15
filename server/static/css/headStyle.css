@@ -1,0 +1,77 @@
+/* Estilos críticos (inline en <head>). Paleta de Bandatos, la misma de
+   bandatos.github.io/assets/css/custom.css: verde #2c5a2a, rojo #a62c2c,
+   negro #1a1a1a, crema #f6f2eb y crema oscuro #e8e2d8. Tipografía del
+   sistema, como el tema minima de bandatos.org. */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --verde: #2c5a2a;
+  --verde-claro: #3d7a3a;
+  --rojo: #a62c2c;
+  --rojo-oscuro: #8a2222;
+  --negro: #1a1a1a;
+  --crema: #f6f2eb;
+  --crema-oscuro: #e8e2d8;
+  --fg: var(--negro);
+  --fg-muted: #5e5a52;
+  --border: #d9d1c3;
+  --bg: var(--crema);
+  --bg-card: #fffdf9;
+  --bg-soft: var(--crema-oscuro);
+  --accent: var(--verde);
+  --accent-hover: var(--verde-claro);
+  --link: var(--verde);
+  --radius: 8px;
+  --radius-lg: 1rem;
+  --max: 1100px;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif,
+    "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--fg);
+  background: var(--bg);
+}
+
+a { color: var(--link); }
+a:hover { color: var(--rojo); }
+h1, h2, h3 { color: var(--negro); font-weight: bold; }
+
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: var(--crema);
+  border-top: 5px solid var(--verde);
+  border-bottom: 1px solid var(--crema-oscuro);
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: .6rem 2rem;
+  min-height: 72px;
+  flex-wrap: wrap;
+}
+.brand { display: flex; align-items: center; gap: .85rem; text-decoration: none; }
+.brand .logo { width: 110px; height: 52px; }
+.brand .producto {
+  color: var(--negro);
+  font-weight: bold;
+  font-size: 1.05rem;
+  border-left: 2px solid var(--border);
+  padding-left: .85rem;
+  white-space: nowrap;
+}
+.site-header .menu { margin-left: auto; display: flex; gap: 1.4rem; flex-wrap: wrap; }
+.site-header .menu a { color: var(--negro); text-decoration: none; font-size: .95rem; }
+.site-header .menu a:hover { color: var(--rojo); }
+.site-header .menu a.activo { color: var(--verde); font-weight: bold; }
+
+.container { max-width: var(--max); margin: 0 auto; padding: 1.5rem; }
+
+@media (max-width: 700px) {
+  .site-header { padding: .5rem 1rem; }
+  .brand .logo { width: 85px; height: 40px; }
+  .site-header .menu { margin-left: 0; gap: 1rem; width: 100%; }
+}

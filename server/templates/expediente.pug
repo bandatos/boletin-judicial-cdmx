@@ -1,0 +1,75 @@
+include head.pug
+include chrome.pug
+include mixins.pug
+
+- var titulo = expediente.demandada ? `${expediente.actora} vs. ${expediente.demandada}` : expediente.actora
+- var ultimoPdf = expediente.avisos.find(a => a.pdf_url)
+
++head(`${titulo} — ${siteTitle}`, `Expediente ${expediente.expediente} — ${siteTitle}`, true)
+  +siteHeader()
+
+  .container
+    p
+      a(href="/buscar") ← Volver al buscador
+
+    h2= titulo
+
+    .card-meta
+      if expediente.tipo_juicio
+        span.tag= expediente.tipo_juicio
+      span Exp. #{expediente.expediente}
+      span= expediente.juzgado || '—'
+      if expediente.sala
+        span= expediente.sala
+      if expediente.secretaria
+        span= expediente.secretaria
+      if expediente.anio
+        span Año #{expediente.anio}
+
+    if ultimoPdf
+      h3 Boletín más reciente
+      .pdf-embed
+        embed(src=(ultimoPdf.pagina ? `${ultimoPdf.pdf_url}#page=${ultimoPdf.pagina}&toolbar=0` : `${ultimoPdf.pdf_url}#toolbar=0`) type="application/pdf" width="100%" height="600")
+      p.pdf-fallback
+        a(href=pdfHref(ultimoPdf) target="_blank" rel="noopener") Abrir el PDF en otra pestaña
+
+    if textoOriginal
+      h3 Texto original del boletín
+      p.raw-text-note (extracto aproximado, tal como lo extrajo pdftotext del PDF)
+      pre.raw-text= textoOriginal
+
+    h3 Avisos (#{num(expediente.avisos.length)})
+    ul.avisos-list
+      each a in expediente.avisos
+        li
+          strong
+            if a.fecha_iso
+              a(href=`/fecha/${a.fecha_iso}`)= fechaCorta(a.fecha_iso)
+            else
+              = a.fecha || '—'
+          if a.tipo_juicio
+            |  — #{a.tipo_juicio}
+          if a.num_acdos
+            |  (#{a.num_acdos} acdo#{a.num_acdos != 1 ? 's' : ''})
+          if a.pdf_url
+            |  —
+            = ' '
+            +pdfLink(a, a.pagina ? `Ver PDF del boletín (p. ${a.pagina})` : 'Ver PDF del boletín')
+
+    h3 Ver más
+    ul.related-links
+      each e in empresasDelCaso || []
+        li
+          a(href=`/empresas/${e.slug}`)= `Todos los juicios de ${e.nombre}`
+      if expediente.tipo_juicio_norm
+        li
+          a(href=`/buscar?tipo=${encodeURIComponent(expediente.tipo_juicio_norm)}`)
+            = `Otros casos de tipo ${expediente.tipo_juicio_norm}`
+          |  (#{num(expediente.mismoTipo)})
+      if expediente.juzgado
+        li
+          a(href=juzgadoHref(expediente.juzgado))
+            = `Otros casos de ${expediente.juzgado}`
+          |  (#{num(expediente.mismoJuzgado)})
+
+  +siteFooter()

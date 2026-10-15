@@ -1,0 +1,41 @@
+include head.pug
+include chrome.pug
+include mixins.pug
+
+//- noindex siempre: la ficha lista los juicios de una persona.
++head(`${persona.nombre} — ${siteTitle}`, null, true)
+  +siteHeader('personas')
+  +breadcrumbs([[siteTitle, '/'], ['Personas', '/personas'], [persona.nombre]])
+
+  .container.empresa-view
+    h1= persona.nombre
+
+    .stats-grid
+      .stat
+        strong= num(totalExpedientes)
+        span expedientes
+      .stat
+        strong= num(persona.avisos)
+        span avisos
+      .stat
+        strong= num(persona.como_actora)
+        span como actora
+      .stat
+        strong= num(persona.como_demandada)
+        span como demandada
+    if persona.primer_boletin
+      p.nota Del #{fechaLarga(persona.primer_boletin)} al #{fechaLarga(persona.ultimo_boletin)}. Puede incluir juicios de otras personas con el mismo nombre.
+    if truncado
+      p.nota Este nombre aparece en muchos avisos: se muestran solo los primeros encontrados.
+
+    .bloque
+      h3 Expedientes
+      if !grupos.length
+        p Sin avisos encontrados.
+      #result-list
+        each g in grupos
+          +resultCard(g)
+
+    +paginacion(pagina, paginas, n => `/personas/${persona.slug}?p=${n}`)
+
+  +siteFooter()

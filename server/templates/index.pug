@@ -1,0 +1,56 @@
+include head.pug
+include chrome.pug
+include mixins.pug
+
++head(heading ? `${heading} — ${siteTitle}` : siteTitle, tagline, Boolean(heading || searched))
+  +siteHeader('buscar')
+
+  if heading
+    .container.page-heading
+      h2= heading
+      p
+        a(href="/buscar") ← Buscar en todos los juzgados
+
+  form#search-box(method="GET" action=formAction)
+    .search-row
+      input#q(type="search" name="q" placeholder="Nombre de persona o empresa..." value=q autocomplete="off")
+      select#tipo(name="tipo" onchange="this.form.submit()")
+        option(value="") Todos los tipos de juicio
+        each t in tipos
+          option(value=t selected=(t === tipo))= t
+      select#anio(name="anio" onchange="this.form.submit()")
+        option(value="") Todos los años
+        each a in anios
+          option(value=a selected=(String(a) === String(anio)))= a
+      button#search-btn(type="submit") Buscar
+
+  #chart-box
+    h2#chart-title Avisos por año
+    #chart
+      each y in chart.years
+        .chart-col(style=`height:${(y.total / chart.maxTotal) * 100}%` title=`${y.anio}: ${num(y.total)} avisos`)
+          each seg, i in y.segments
+            if seg.n
+              .chart-col-segment(style=`height:${(seg.n / y.total) * 100}%;background:${chart.colors[i]}`)
+    .chart-labels
+      each y in chart.years
+        .chart-col-label= y.anio
+    #chart-legend
+      each b, i in chart.buckets
+        span.chart-legend-item
+          span.chart-legend-swatch(style=`background:${chart.colors[i]}`)
+          = b
+
+  #results
+    if searched
+      #result-count
+        = num(groups.length) + ' expediente' + (groups.length !== 1 ? 's' : '')
+        if totalAvisos > groups.length
+          = ` (${totalAvisos >= maxRows ? num(maxRows) + '+' : num(totalAvisos)} avisos)`
+      if !groups.length
+        p Sin resultados.
+      #result-list
+        each g in groups
+          +resultCard(g)
+
+  +siteFooter()

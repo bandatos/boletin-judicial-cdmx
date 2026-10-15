@@ -1,0 +1,45 @@
+//- chrome.pug — encabezado y pie compartidos. El sitio es un proyecto de
+//- Todo Derecho Vecino, dentro de Bandatos.
+
+mixin siteHeader(activo)
+  header.site-header
+    a.brand(href="/")
+      img.logo(src="/static/img/bandatos-logo.webp" alt="Bandatos" width="110" height="52")
+      span.producto= siteTitle
+    nav.menu
+      a(href="/" class=(activo === 'empresas' ? 'activo' : '')) Empresas
+      a(href="/personas" class=(activo === 'personas' ? 'activo' : '')) Personas
+      a(href="/buscar" class=(activo === 'buscar' ? 'activo' : '')) Buscar avisos
+      a(href="/fecha" class=(activo === 'fecha' ? 'activo' : '')) Por fecha
+      a(href="/sources" class=(activo === 'fuentes' ? 'activo' : '')) Fuentes
+
+//- Barra de migas. items: [[texto, href], ..., [texto]]
+mixin breadcrumbs(items)
+  nav.breadcrumbs(aria-label="Ubicación")
+    each item, i in items
+      if i
+        span.sep ›
+      if item[1]
+        a(href=item[1])= item[0]
+      else
+        span.actual= item[0]
+
+mixin siteFooter()
+  footer.site-footer
+    .container
+      a(href="https://bandatos.org" target="_blank" rel="noopener")
+        img(src="/static/img/bandatos-logo.webp" alt="Bandatos" width="110" height="52" loading="lazy")
+      p.
+        #[strong= siteTitle] es un proyecto de Todo Derecho Vecino, dentro de
+        #[a(href="https://bandatos.org" target="_blank" rel="noopener") Bandatos],
+        con datos del Boletín Judicial del Poder Judicial de la Ciudad de México ·
+        #[a(href="/sources") de dónde vienen los datos]
+
+  aside#pdf-panel(aria-label="PDF del boletín" hidden)
+    .pdf-panel-bar
+      span#pdf-panel-title
+      a#pdf-panel-open(href="#" target="_blank" rel="noopener") Abrir en pestaña nueva
+      button#pdf-panel-close(type="button" aria-label="Cerrar PDF") ✕
+    iframe#pdf-frame(title="PDF del boletín")
+
+  script(src=`/static/js/behavior.js?v=${staticVersion}`)

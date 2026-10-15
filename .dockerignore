@@ -1,0 +1,6 @@
+# Solo hace falta server/ (sin node_modules: se instalan en la imagen).
+*
+!server/
+server/node_modules
+server/test
+server/static/**/*.min.*

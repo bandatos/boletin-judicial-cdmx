@@ -27,6 +27,7 @@ from pathlib import Path
 
 from normalize_tipo import normalize
 import empresas as emp
+import personas as pers
 
 # normalize() es una cascada de regex y era ~80% del tiempo de carga, pero
 # hay pocos cientos de tipo_juicio distintos en millones de filas.
@@ -575,6 +576,140 @@ def recalcular_empresas(output, log, workers=None):
     conn.close()
 
 
+MIN_AVISOS_PERSONA = 2
+
+
+def _init_personas_worker(db_path):
+    _W["db"] = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+
+
+def _personas_de_rango(bounds):
+    """Agrega por (núcleo, nombre) las personas de un rango de avisos:
+    [avisos, como actora, como demandada, primer boletín, último boletín].
+    Se agrega acá y no aviso por aviso en el proceso principal: así viajan
+    y se escriben cientos de miles de filas en vez de ~60M."""
+    desde, hasta = bounds
+    acum = {}
+    for actora, demandada, fecha in _W["db"].execute("""
+            SELECT e.actora, e.demandada, b.fecha_iso
+            FROM entradas e JOIN boletines b ON b.id = e.boletin_id
+            WHERE e.id BETWEEN ? AND ?""", (desde, hasta)):
+        for i, campo in ((1, actora), (2, demandada)):
+            # Una misma persona dos veces en el mismo campo cuenta una vez.
+            for clave in set(pers.personas(campo)):
+                a = acum.get(clave)
+                if a is None:
+                    a = acum[clave] = [0, 0, 0, fecha, fecha]
+                a[0] += 1
+                a[i] += 1
+                a[3] = min(filter(None, (a[3], fecha)), default=None)
+                a[4] = max(filter(None, (a[4], fecha)), default=None)
+    return [(n, nombre, *a) for (n, nombre), a in acum.items()]
+
+
+def build_personas(output, log, workers=None):
+    """Tablas personas / personas_fts para /personas del server (noindex).
+
+    A diferencia de empresas no hay tabla de unión aviso-persona (serían
+    ~60M filas): la ficha de una persona busca sus avisos en vivo en
+    entradas_fts y filtra por el nombre exacto. Solo entran los nombres con
+    al menos MIN_AVISOS_PERSONA avisos: los restos de parseo casi siempre
+    aparecen una sola vez. El nombre visible es la variante más frecuente."""
+    conn = sqlite3.connect(output)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=OFF")
+    conn.execute("PRAGMA cache_size=-2000000")
+    conn.executescript("""
+        DROP TABLE IF EXISTS personas_fts;
+        DROP TABLE IF EXISTS personas;
+        DROP TABLE IF EXISTS personas_stage;
+        CREATE TABLE personas_stage (nucleo TEXT, nombre TEXT, n INTEGER, act INTEGER, dem INTEGER,
+                                     desde TEXT, hasta TEXT);
+    """)
+    max_id = conn.execute("SELECT MAX(id) FROM entradas").fetchone()[0] or 0
+    paso = 200_000
+    rangos = [(a, min(a + paso - 1, max_id)) for a in range(1, max_id + 1, paso)]
+    workers = workers or max(1, (os.cpu_count() or 2) - 1)
+    log(f"Personas de {max_id:,} avisos en {len(rangos)} rangos...")
+    hechos = 0
+    with Pool(workers, initializer=_init_personas_worker, initargs=(str(output),)) as pool:
+        for filas in pool.imap_unordered(_personas_de_rango, rangos):
+            conn.executemany("INSERT INTO personas_stage VALUES (?, ?, ?, ?, ?, ?, ?)", filas)
+            conn.commit()
+            hechos += 1
+            if hechos % 20 == 0:
+                log(f"  {hechos}/{len(rangos)} rangos")
+
+    conn.executescript("""
+        CREATE TABLE personas (
+            id             INTEGER PRIMARY KEY,
+            nucleo         TEXT UNIQUE NOT NULL,
+            nombre         TEXT NOT NULL,
+            slug           TEXT UNIQUE NOT NULL,
+            avisos         INTEGER NOT NULL,
+            como_actora    INTEGER NOT NULL,
+            como_demandada INTEGER NOT NULL,
+            primer_boletin TEXT,
+            ultimo_boletin TEXT
+        );
+        CREATE TEMP TABLE variantes AS
+            SELECT nucleo, nombre, SUM(n) AS n, SUM(act) AS act, SUM(dem) AS dem,
+                   MIN(desde) AS desde, MAX(hasta) AS hasta
+            FROM personas_stage GROUP BY nucleo, nombre;
+        DROP TABLE personas_stage;
+    """)
+
+    def por_nucleo():
+        actual, fila = None, None
+        for nucleo, nombre, n, act, dem, desde, hasta in conn.execute(
+                "SELECT * FROM variantes ORDER BY nucleo, n DESC, nombre"):
+            if nucleo != actual:
+                if fila:
+                    yield fila
+                # La primera variante (la más frecuente) da el nombre visible.
+                actual, fila = nucleo, [nucleo, nombre, 0, 0, 0, desde, hasta]
+            fila[2] += n
+            fila[3] += act
+            fila[4] += dem
+            fila[5] = min(filter(None, (fila[5], desde)), default=None)
+            fila[6] = max(filter(None, (fila[6], hasta)), default=None)
+        if fila:
+            yield fila
+
+    slugs = set()
+    lote = []
+    total = 0
+    for nucleo, nombre, avisos, act, dem, desde, hasta in por_nucleo():
+        if avisos < MIN_AVISOS_PERSONA:
+            continue
+        base = pers.slugify(nucleo)
+        slug, k = base, 2
+        while slug in slugs:
+            slug, k = f"{base}-{k}", k + 1
+        slugs.add(slug)
+        lote.append((nucleo, nombre, slug, avisos, act, dem, desde, hasta))
+        if len(lote) >= 50_000:
+            conn.executemany("INSERT INTO personas (nucleo, nombre, slug, avisos, como_actora, como_demandada, "
+                             "primer_boletin, ultimo_boletin) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", lote)
+            total += len(lote)
+            lote = []
+    conn.executemany("INSERT INTO personas (nucleo, nombre, slug, avisos, como_actora, como_demandada, "
+                     "primer_boletin, ultimo_boletin) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", lote)
+    total += len(lote)
+    conn.executescript("""
+        DROP TABLE variantes;
+        CREATE INDEX idx_personas_avisos ON personas (avisos DESC);
+        CREATE VIRTUAL TABLE personas_fts USING fts5(
+            nombre, content='personas', content_rowid='id', detail=none
+        );
+        INSERT INTO personas_fts(rowid, nombre) SELECT id, nombre FROM personas;
+    """)
+    conn.commit()
+    conn.execute("PRAGMA journal_mode=DELETE")
+    conn.close()
+    log(f"  {total:,} personas con al menos {MIN_AVISOS_PERSONA} avisos")
+
+
 def find_runs(data_dir, since=None, exclude=()):
     """Devuelve lista de (run_dir) ordenados por fecha."""
     runs = sorted(data_dir.glob("*/entradas.csv"))
@@ -602,6 +737,10 @@ def main():
                         help="Rearmar solo las tablas de empresas de una base ya armada (--output)")
     parser.add_argument("--empresas", action="store_true",
                         help="Tablas de empresas que son parte (sección /empresas del server)")
+    parser.add_argument("--personas", action="store_true",
+                        help="Tabla de personas físicas que son parte (sección /personas del server, noindex)")
+    parser.add_argument("--solo-personas", action="store_true",
+                        help="Rearmar solo la tabla de personas de una base ya armada (--output)")
     parser.add_argument("--web", action="store_true",
                         help="Base para el sitio estático: sin el índice (juzgado, expediente)")
     parser.add_argument("--hasta-fecha",
@@ -627,8 +766,12 @@ def main():
         recalcular_empresas(output, log)
         log(f"Listo: {output}")
         return
+    if args.solo_personas:
+        build_personas(output, log)
+        log(f"Listo: {output}")
+        return
     if not args.dir:
-        parser.error("--dir es obligatorio (salvo con --solo-empresas)")
+        parser.error("--dir es obligatorio (salvo con --solo-empresas / --solo-personas / --agregados-empresas)")
     data_dir = Path(args.dir)
 
     runs = find_runs(data_dir, args.since, args.exclude)
@@ -708,6 +851,9 @@ def main():
         log("Compactando...")
         conn.execute("VACUUM")
     conn.close()
+    if args.personas:
+        # Después de cerrar: los procesos leen la base mientras se escribe.
+        build_personas(output, log)
 
     size_mb = output.stat().st_size / 1e6
     log(f"\nListo: {output} ({size_mb:.1f} MB)")

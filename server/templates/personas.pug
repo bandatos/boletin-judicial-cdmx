@@ -1,0 +1,48 @@
+include head.pug
+include chrome.pug
+include mixins.pug
+
+//- noindex siempre: este listado nombra personas en juicios.
+- const titulo = q ? `Personas: “${q}”` : 'Personas en juicios en la Ciudad de México'
++head(`${titulo} — ${siteTitle}`, null, true)
+  +siteHeader('personas')
+  +breadcrumbs([[siteTitle, '/'], ['Personas']])
+
+  .container.empresas-view
+    h1.titulo-seccion Personas
+    p.nota.
+      Personas físicas que aparecen como actora o demandada en el Boletín
+      Judicial. El nombre es el publicado en el boletín (no incluye CURP): dos
+      personas con el mismo nombre figuran juntas y una misma persona publicada
+      con el nombre en otro orden figura por separado. Estas páginas no se
+      ofrecen a los buscadores de internet.
+
+    form.buscador-simple(method="GET" action="/personas")
+      input(type="search" name="q" value=q placeholder="Busca a una persona por nombre o apellidos..." autocomplete="off" aria-label="Nombre de la persona")
+      button(type="submit") Buscar
+
+    .bloque
+      p.orden #{num(lista.total)} personas · ordenadas por cantidad de avisos
+      table.empresas-tabla
+        thead
+          tr
+            th Persona
+            th.num Avisos
+            th.num Como actora
+            th.num Como demandada
+            th Período
+        tbody
+          each p in lista.rows
+            tr
+              td
+                a(href=`/personas/${p.slug}` rel="nofollow")= p.nombre
+              td.num= num(p.avisos)
+              td.num= num(p.como_actora)
+              td.num= num(p.como_demandada)
+              td.periodo= `${fechaCorta(p.primer_boletin)} a ${fechaCorta(p.ultimo_boletin)}`
+      if !lista.rows.length
+        p Sin personas que coincidan.
+
+      +paginacion(lista.pagina, lista.paginas, n => `/personas?${new URLSearchParams(Object.assign(q ? { q } : {}, { p: n }))}`)
+
+  +siteFooter()

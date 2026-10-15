@@ -1,0 +1,97 @@
+mixin resultCard(g)
+  .card
+    .card-partes
+      if g.demandada
+        b= g.actora
+        span.card-vs &nbsp;vs.&nbsp;
+        b= g.demandada
+      else
+        b= g.actora
+    .card-meta
+      if g.tipo_juicio
+        span.tag= g.tipo_juicio
+      span Exp. #{g.expediente || '—'}
+      span= g.juzgado || '—'
+      if g.sala
+        span= g.sala
+      if g.fecha_iso
+        a(href=`/fecha/${g.fecha_iso}`)= fechaCorta(g.fecha_iso)
+      else
+        span= g.fecha || '—'
+    if g.avisos.length > 1
+      details.card-avisos
+        summary= num(g.avisos.length) + ' avisos'
+        ul
+          each a in g.avisos.slice().sort((x, y) => (y.boletin_id || 0) - (x.boletin_id || 0))
+            li
+              if a.fecha_iso
+                a(href=`/fecha/${a.fecha_iso}`)= fechaCorta(a.fecha_iso)
+              else
+                = a.fecha || '—'
+              if a.tipo_juicio
+                |  — #{a.tipo_juicio}
+              if a.pdf_url
+                |  —
+                = ' '
+                +pdfLink(a, 'PDF')
+    .card-links
+      a.card-detail-link(href=expedienteHref(g)) Ver expediente completo
+      if g.pdf_url
+        +pdfLink(g, 'Ver PDF del boletín')
+
+//- Link al PDF del boletín en la página del aviso. behavior.js lo abre en el
+//- panel lateral; con Ctrl o clic del medio sigue siendo un link común.
+mixin pdfLink(r, texto)
+  a.ver-pdf(href=pdfHref(r) target="_blank" rel="noopener"
+    data-pdf=r.pdf_url data-pagina=r.pagina || ''
+    data-titulo=[r.fecha_iso && fechaCorta(r.fecha_iso), r.pagina && `p. ${r.pagina}`].filter(Boolean).join(' · '))= texto
+
+//- Avisos de un día (vista /fecha), en el orden del PDF.
+mixin avisosDia(rows)
+  ol.avisos-dia
+    - let secretaria = null
+    each r in rows
+      if r.secretaria && r.secretaria !== secretaria
+        - secretaria = r.secretaria
+        li.secretaria= r.secretaria
+      li
+        div
+          b= r.actora
+          if r.demandada
+            |  vs. #{r.demandada}
+        .aviso-meta
+          = [r.tipo_juicio, r.expediente && `Exp. ${r.expediente}`, r.num_acdos && `${r.num_acdos} acdo${r.num_acdos > 1 ? 's' : ''}.`].filter(Boolean).join(' · ')
+          if r.pdf_url
+            |  ·
+            = ' '
+            +pdfLink(r, r.pagina ? `ver en PDF (p. ${r.pagina})` : 'ver PDF')
+
+//- Paginador con el formato del de sociedad-web-front (templates/buscador.pug):
+//- flechas, primera y última página, una ventana de 4 páginas alrededor de
+//- la actual y "..." cuando se saltean páginas.
+mixin paginacion(actual, total, href)
+  if total > 1
+    - const VENTANA = 4
+    - let desde = Math.max(1, actual - 1)
+    - let hasta = Math.min(total, desde + VENTANA - 1)
+    - desde = Math.max(1, hasta - VENTANA + 1)
+    nav.pagesContainer.pagesContainer-center(role="navigation" aria-label="Paginación")
+      if actual > 1
+        a.page.arrow(href=href(actual - 1) aria-label="Página anterior" rel="prev")
+          span(aria-hidden="true") ←
+      if desde > 1
+        a.page(href=href(1) aria-label="Primera página") 1
+        if desde > 2
+          span.page-ellipsis(aria-hidden="true") …
+      - for (let n = desde; n <= hasta; n++)
+        if n === actual
+          a.page.current(href=href(n) aria-current="page" aria-label=`Página actual, ${num(n)}`)= num(n)
+        else
+          a.page(href=href(n) aria-label=`Ir a la página ${num(n)}`)= num(n)
+      if hasta < total
+        if hasta < total - 1
+          span.page-ellipsis(aria-hidden="true") …
+        a.page(href=href(total) aria-label=`Última página, ${num(total)}`)= num(total)
+      if actual < total
+        a.page.arrow(href=href(actual + 1) aria-label="Página siguiente" rel="next")
+          span(aria-hidden="true") →

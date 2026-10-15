@@ -1,0 +1,21 @@
+{
+  "name": "litigios-cdmx",
+  "version": "1.0.0",
+  "description": "Buscador server-side (Node + Pug + SQLite) del Boletín Judicial CDMX",
+  "main": "litigios-cdmx.js",
+  "scripts": {
+    "dev": "NODE_ENV=development node --watch litigios-cdmx.js",
+    "start": "NODE_ENV=production node litigios-cdmx.js",
+    "test": "node --test test/*.test.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "better-sqlite3": "^12.11.1",
+    "chokidar": "^5.0.0",
+    "minify": "^15.3.1",
+    "pug": "^3.0.4"
+  }
+}

@@ -1,0 +1,82 @@
+include head.pug
+include chrome.pug
+include mixins.pug
+
++head(`${empresa.nombre}: juicios en la CDMX — ${siteTitle}`, `${num(empresa.expedientes || 0)} expedientes y ${num(empresa.avisos)} avisos de ${empresa.nombre} en el Boletín Judicial de la Ciudad de México.`)
+  +siteHeader('empresas')
+  +breadcrumbs([[siteTitle, '/'], ['Empresas', '/'], [empresa.nombre]])
+
+  .container.empresa-view
+    h1= empresa.nombre
+
+    .stats-grid
+      .stat
+        strong= num(empresa.expedientes || 0)
+        span expedientes
+      .stat
+        strong= num(empresa.avisos)
+        span avisos
+      .stat
+        strong= num(empresa.como_actora)
+        span como actora
+      .stat
+        strong= num(empresa.como_demandada)
+        span como demandada
+    if empresa.primer_boletin
+      p.nota Del #{fechaLarga(empresa.primer_boletin)} al #{fechaLarga(empresa.ultimo_boletin)}. Solo juicios del Poder Judicial de la Ciudad de México publicados en su Boletín Judicial.
+
+    if empresa.porAnio.length > 1
+      .bloque
+        h3 Avisos por año
+        .mini-chart
+          each r in empresa.porAnio
+            .mini-col(title=`${r.anio}: ${num(r.n)} avisos`)
+              .mini-bar(style=`height:${(r.n / empresa.maxAnio) * 100}%`)
+              span= r.anio
+
+    .bloque
+      h3 Tipos de juicio más frecuentes
+      ul.tipos
+        each t in empresa.tipos
+          li
+            span= t.tipo
+            span.grupo-n= num(t.n)
+
+    .bloque
+     h3 Expedientes
+     p.nota La otra parte se muestra solo si es una empresa. Las personas físicas no se nombran.
+     ol.expedientes-empresa
+      each x in expedientes.rows
+        li
+          div
+            b= x.rol === 'actora' ? 'Actora' : 'Demandada'
+            |  en #{x.organo || 'órgano no identificado'} · Exp. #{x.expediente || '—'}
+          .aviso-meta
+            | #{x.rol === 'actora' ? 'contra' : 'demandada por'}
+            = ' '
+            if x.contraEmpresas.length
+              each c, i in x.contraEmpresas
+                if i
+                  | ,
+                  = ' '
+                a(href=`/empresas/${c.slug}`)= c.nombre
+              if x.contraPersonas
+                |  y persona(s) física(s)
+            else if x.contraPersonas
+              | persona(s) física(s)
+            else
+              | (sin contraparte en el aviso)
+          .aviso-meta
+            = [x.tipo_juicio, `${num(x.avisos)} aviso${x.avisos > 1 ? 's' : ''}`].filter(Boolean).join(' · ')
+            |  · último:
+            = ' '
+            if x.fecha_iso
+              a(href=`/fecha/${x.fecha_iso}`)= fechaCorta(x.fecha_iso)
+            if x.pdf_url
+              |  ·
+              = ' '
+              +pdfLink(x, x.pagina ? `PDF (p. ${x.pagina})` : 'PDF')
+
+    +paginacion(expedientes.pagina, expedientes.paginas, p => `/empresas/${empresa.slug}?p=${p}`)
+
+  +siteFooter()
