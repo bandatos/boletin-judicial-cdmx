@@ -355,9 +355,10 @@ test('el paginador muestra primera, ventana, "…" y última, con la actual marc
 
 test('el paginador sin total conocido muestra la siguiente pero no la última', () => {
   const { renderTemplate } = require('../lib/views');
-  const html = renderTemplate('persona', {
-    req: {}, persona: { nombre: 'X', slug: 'x', avisos: 1, como_actora: 1, como_demandada: 0 },
-    resultado: { grupos: [], pagina: 3, hayMas: true, totalExpedientes: null, totalAvisos: null },
+  const html = renderTemplate('parte', {
+    req: {}, clase: 'persona', parte: { nombre: 'X', slug: 'x', avisos: 1, como_actora: 1, como_demandada: 0 },
+    totalExpedientes: null, chart: null, tipos: null,
+    expedientes: { grupos: [], pagina: 3, hayMas: true, paginas: null },
   });
   const nav = html.match(/<nav class="pagesContainer[^]*?<\/nav>/)[0];
   assert.match(nav, /href="\/personas\/x\?p=4"[^>]*rel="next"/);
@@ -382,4 +383,18 @@ test('el conteo de una búsqueda grande dice "más de 5,000" y pagina sin NaN', 
 test('GET /buscar con resultados no muestra NaN', async () => {
   const { body } = await get('/buscar?q=thebart');
   assert.doesNotMatch(body, /NaN/);
+});
+
+test('empresa y persona usan la misma ficha: resumen con pestañas y expedientes', async () => {
+  const empresa = (await get('/empresas/constructora-ejemplo')).body;
+  const persona = (await get('/personas/esquivel-thebart-alejandro')).body;
+  for (const body of [empresa, persona]) {
+    assert.match(body, /class="tarjeta-titulo"/);
+    assert.match(body, /Expedientes/);
+    assert.match(body, /Del más reciente al más viejo/);
+  }
+  assert.match(persona, /id="tab-resumen-tipos"/);
+  assert.match(persona, /<meta name="robots" content="noindex">/);
+  assert.doesNotMatch(empresa, /<meta name="robots" content="noindex">/);
+  assert.doesNotMatch(empresa, PERSONAS_FIXTURE);
 });

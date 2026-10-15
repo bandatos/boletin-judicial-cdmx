@@ -6,24 +6,6 @@ include mixins.pug
 //- de país de sociedad.info (tarjeta con título, pestañas, tabla y "ver
 //- todos"). Se indexa: no lleva nombres de personas.
 
-//- Tarjeta: título con ícono, contenido (block) y link a la sección.
-mixin tarjeta(icono, titulo, verTodos, verTodosTexto)
-  section.tarjeta
-    h2.tarjeta-titulo
-      span.tarjeta-icono(aria-hidden="true")= icono
-      = titulo
-    block
-    if verTodos
-      p.tarjeta-pie
-        a.boton-borde(href=verTodos)= verTodosTexto
-
-//- Pestañas: [{ id, titulo }]. Cada una muestra el tabpanel con ese id
-//- (behavior.js). Sin JS se ve la primera.
-mixin pestanas(grupo, pestanas)
-  .pestanas(role="tablist")
-    each p, i in pestanas
-      button.pestana(type="button" role="tab" id=`tab-${p.id}` aria-controls=p.id aria-selected=(i === 0 ? 'true' : 'false') data-grupo=grupo)= p.titulo
-
 +head(`${siteTitle}: juicios en la Ciudad de México`, 'Busca en el Boletín Judicial del Poder Judicial de la Ciudad de México desde 2016: juicios civiles, mercantiles y familiares de empresas y personas, por nombre, expediente, juzgado o fecha.')
   +siteHeader('')
 

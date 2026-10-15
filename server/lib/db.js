@@ -103,8 +103,8 @@ function findJuzgadoBySlug(slug) {
   return getResumen().slugs.get(slug) || null;
 }
 
-const COLS_AVISO = `e.id, e.boletin_id, e.actora, e.demandada, e.tipo_juicio, e.expediente,
-             e.juzgado, e.sala, e.pagina, b.fecha, b.fecha_iso, b.pdf_url`;
+const COLS_AVISO = `e.id, e.boletin_id, e.actora, e.demandada, e.tipo_juicio, e.tipo_juicio_norm,
+             e.expediente, e.juzgado, e.sala, e.pagina, b.fecha, b.fecha_iso, b.pdf_url`;
 
 // Tramos de ids en los que el orden de los ids es el de las fechas, del más
 // nuevo al más viejo. Los ids no son cronológicos (las corridas del scraper
@@ -227,6 +227,7 @@ function paginaExpedientes({ from, where, params, colId = 'e.id', pagina, filtro
       grupos: grupos.slice(desde, desde + EXPEDIENTES_POR_PAGINA), pagina: p,
       hayMas: grupos.length > desde + EXPEDIENTES_POR_PAGINA,
       totalExpedientes: grupos.length, totalAvisos: rows.length,
+      todos: rows, // todos los avisos (pocos): para resumir por año y tipo
     };
   }
 

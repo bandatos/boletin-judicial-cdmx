@@ -1,0 +1,85 @@
+include head.pug
+include chrome.pug
+include mixins.pug
+
+//- Ficha de una parte: empresa (/empresas/:slug, se indexa, no nombra
+//- personas) o persona (/personas/:slug, noindex). Mismo armado que la
+//- portada: cifras, tarjetas con pestañas y expedientes de a 50 del más
+//- reciente al más viejo.
+- const esEmpresa = clase === 'empresa'
+- const seccion = esEmpresa ? ['Empresas', '/empresas'] : ['Personas', '/personas']
+- const base = `${seccion[1]}/${parte.slug}`
+- const titulo = esEmpresa ? `${parte.nombre}: juicios en la CDMX — ${siteTitle}` : `${parte.nombre} — ${siteTitle}`
+- const descripcion = esEmpresa ? `${num(parte.expedientes || 0)} expedientes y ${num(parte.avisos)} avisos de ${parte.nombre} en el Boletín Judicial de la Ciudad de México.` : null
++head(titulo, descripcion, !esEmpresa)
+  +siteHeader(esEmpresa ? 'empresas' : 'personas')
+  +breadcrumbs([[siteTitle, '/'], seccion, [parte.nombre]])
+
+  .container.empresa-view
+    h1= parte.nombre
+
+    .stats-grid
+      .stat
+        strong= totalExpedientes == null ? `${num(expedientes.pagina * 50)}+` : num(totalExpedientes)
+        span expedientes
+      .stat
+        strong= num(parte.avisos)
+        span avisos
+      .stat
+        strong= num(parte.como_actora)
+        span como actora
+      .stat
+        strong= num(parte.como_demandada)
+        span como demandada
+    if parte.primer_boletin
+      p.nota
+        | Del #{fechaLarga(parte.primer_boletin)} al #{fechaLarga(parte.ultimo_boletin)}.
+        = ' '
+        if esEmpresa
+          | Solo juicios del Poder Judicial de la Ciudad de México publicados en su Boletín Judicial.
+        else
+          | Puede incluir juicios de otras personas con el mismo nombre.
+
+    if chart || (tipos && tipos.length)
+      +tarjeta('📊', 'Resumen')
+        - const pestanasResumen = [chart && { id: 'resumen-anios', titulo: 'Avisos por año' }, tipos && tipos.length && { id: 'resumen-tipos', titulo: 'Tipos de juicio' }].filter(Boolean)
+        +pestanas('resumen', pestanasResumen)
+        if chart
+          #resumen-anios(role="tabpanel" aria-labelledby="tab-resumen-anios")
+            +graficoAnios(chart)
+            p.nota Avisos publicados en el boletín cada año.
+        if tipos && tipos.length
+          #resumen-tipos(role="tabpanel" aria-labelledby="tab-resumen-tipos" hidden=Boolean(chart))
+            table.empresas-tabla
+              thead
+                tr
+                  th Tipo de juicio
+                  th.num Avisos
+              tbody
+                each t in tipos
+                  tr
+                    td= t.tipo
+                    td.num= num(t.n)
+    else if !esEmpresa
+      p.nota Este nombre tiene demasiados avisos para resumirlos por año y tipo de juicio.
+
+    +tarjeta('📁', 'Expedientes')
+      p.nota
+        | Del más reciente al más viejo.
+        if esEmpresa
+          |  La otra parte se muestra solo si es una empresa. Las personas físicas no se nombran.
+      if esEmpresa
+        if !expedientes.filas.length
+          p Sin expedientes.
+        ol.expedientes-empresa
+          each x in expedientes.filas
+            +expedienteEmpresa(x)
+      else
+        if !expedientes.grupos.length
+          p Sin avisos encontrados.
+        #result-list
+          each g in expedientes.grupos
+            +resultCard(g)
+      +paginacion(expedientes.pagina, expedientes.paginas, n => `${base}?p=${n}`, expedientes.hayMas)
+
+  +siteFooter()

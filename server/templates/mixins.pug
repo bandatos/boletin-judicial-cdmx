@@ -120,3 +120,54 @@ mixin graficoAnios(chart, titulo)
         span.chart-legend-item
           span.chart-legend-swatch(style=`background:${chart.colors[i]}`)
           = b
+
+//- Tarjeta: título con ícono, contenido (block) y link a la sección.
+mixin tarjeta(icono, titulo, verTodos, verTodosTexto)
+  section.tarjeta
+    h2.tarjeta-titulo
+      span.tarjeta-icono(aria-hidden="true")= icono
+      = titulo
+    block
+    if verTodos
+      p.tarjeta-pie
+        a.boton-borde(href=verTodos)= verTodosTexto
+
+//- Pestañas: [{ id, titulo }]. Cada una muestra el tabpanel con ese id
+//- (behavior.js). Sin JS se ve la primera.
+mixin pestanas(grupo, pestanas)
+  .pestanas(role="tablist")
+    each p, i in pestanas
+      button.pestana(type="button" role="tab" id=`tab-${p.id}` aria-controls=p.id aria-selected=(i === 0 ? 'true' : 'false') data-grupo=grupo)= p.titulo
+
+//- Expediente de una empresa: la otra parte solo como empresas o "persona(s)
+//- física(s)" (estas páginas se indexan y no nombran personas).
+mixin expedienteEmpresa(x)
+  li
+    div
+      b= x.rol === 'actora' ? 'Actora' : 'Demandada'
+      |  en #{x.organo || 'órgano no identificado'} · Exp. #{x.expediente || '—'}
+    .aviso-meta
+      | #{x.rol === 'actora' ? 'contra' : 'demandada por'}
+      = ' '
+      if x.contraEmpresas.length
+        each c, i in x.contraEmpresas
+          if i
+            | ,
+            = ' '
+          a(href=`/empresas/${c.slug}`)= c.nombre
+        if x.contraPersonas
+          |  y persona(s) física(s)
+      else if x.contraPersonas
+        | persona(s) física(s)
+      else
+        | (sin contraparte en el aviso)
+    .aviso-meta
+      = [x.tipo_juicio, `${num(x.avisos)} aviso${x.avisos > 1 ? 's' : ''}`].filter(Boolean).join(' · ')
+      |  · último:
+      = ' '
+      if x.fecha_iso
+        a(href=`/fecha/${x.fecha_iso}`)= fechaCorta(x.fecha_iso)
+      if x.pdf_url
+        |  ·
+        = ' '
+        +pdfLink(x, x.pagina ? `PDF (p. ${x.pagina})` : 'PDF')

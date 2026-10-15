@@ -239,13 +239,48 @@ function portada(req) {
   };
 }
 
+// Ficha de una parte (empresa o persona): mismo template (parte.pug).
+// Gráfico de avisos por año de publicación con una sola serie, en el mismo
+// formato que db.getYearChart() para usar el mixin graficoAnios.
+function chartPorAnio(porAnio) {
+  const years = porAnio.map(r => ({
+    anio: Number(r.anio), total: r.n, segments: [{ bucket: 'Avisos', n: r.n }],
+  }));
+  return { buckets: ['Avisos'], colors: [db.CHART_COLORS[0]], years, maxTotal: Math.max(1, ...years.map(y => y.total)) };
+}
+
+// Avisos por año de publicación y tipos más frecuentes, a partir de todos
+// los avisos de una persona (solo cuando son pocos y se trajeron todos).
+function resumirAvisos(rows) {
+  const anios = new Map();
+  const tipos = new Map();
+  for (const r of rows) {
+    const a = (r.fecha_iso || '').slice(0, 4);
+    if (a) anios.set(a, (anios.get(a) || 0) + 1);
+    const t = r.tipo_juicio_norm || 'Sin tipo reconocido';
+    tipos.set(t, (tipos.get(t) || 0) + 1);
+  }
+  return {
+    porAnio: [...anios.entries()].sort().map(([anio, n]) => ({ anio, n })),
+    tipos: [...tipos.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([tipo, n]) => ({ tipo, n })),
+  };
+}
+
 function empresa(req, params) {
   const e = db.hayEmpresas() ? db.getEmpresa(params.slug) : null;
   if (!e) return { status: 404, html: renderTemplate('404', { req }) };
-  const expedientes = db.getExpedientesEmpresa(e, req.query.p);
-  return { status: 200, html: renderTemplate('empresa', { req, empresa: e, expedientes }) };
+  const exp = db.getExpedientesEmpresa(e, req.query.p);
+  return {
+    status: 200,
+    html: renderTemplate('parte', {
+      req, clase: 'empresa', parte: e,
+      totalExpedientes: e.expedientes || 0,
+      chart: e.porAnio.length > 1 ? chartPorAnio(e.porAnio) : null,
+      tipos: e.tipos,
+      expedientes: { filas: exp.rows, pagina: exp.pagina, paginas: exp.paginas, hayMas: exp.pagina < exp.paginas },
+    }),
+  };
 }
-
 // /personas y /personas/:slug: noindex (ver la sección Personas de lib/db.js).
 function personas(req) {
   if (!db.hayPersonas()) return { status: 404, html: renderTemplate('404', { req }) };
@@ -257,12 +292,22 @@ function personas(req) {
 function persona(req, params) {
   const p = db.hayPersonas() ? db.getPersona(params.slug) : null;
   if (!p) return { status: 404, html: renderTemplate('404', { req }) };
+  const res = db.getExpedientesPersona(p, req.query.p);
+  const resumen = res.todos ? resumirAvisos(res.todos) : null;
   return {
     status: 200,
-    html: renderTemplate('persona', { req, persona: p, resultado: db.getExpedientesPersona(p, req.query.p) }),
+    html: renderTemplate('parte', {
+      req, clase: 'persona', parte: p,
+      totalExpedientes: res.totalExpedientes,
+      chart: resumen && resumen.porAnio.length > 1 ? chartPorAnio(resumen.porAnio) : null,
+      tipos: resumen ? resumen.tipos : null,
+      expedientes: {
+        grupos: res.grupos, pagina: res.pagina, hayMas: res.hayMas,
+        paginas: res.totalExpedientes == null ? null : Math.max(1, Math.ceil(res.totalExpedientes / db.EXPEDIENTES_POR_PAGINA)),
+      },
+    }),
   };
 }
-
 function sources(req) {
   return { status: 200, html: renderTemplate('sources', { req, stats: db.getStats() }) };
 }
