@@ -94,46 +94,101 @@ autotransportes administraciones sociales electronica camionero
 # lo que va delante de una empresa ("Fulano, BBVA Bancomer, S.A.") es una
 # persona: no es un nombre de persona en particular, es un diccionario.
 NOMBRES_PILA = set("""
-abigail abraham abril adelaida adelina adolfo adrian adriana agripina agustin aide aidee alberta
-alberto aldair alejandra alejandrina alejandro alexander alexandra alexis alfonso alfredo alicia
-aline alma alondra altagracia alvaro amairani amalia amelia ana anabel anahi anai anaid anayeli
-andrea andres anel angel angelica angelina antonia antonieta antonio araceli aracely arcelia areli
-arely argelia ariadna ariana ariel arlette armando arturo astrid asuncion augusto aurelia aurelio
-aurora avelina axel azael azucena beatriz belem belen benito benjamin berenice betsabe betzabe
-bibiana blanca brenda camila candelaria caridad carina carlo carlos carlota carmen carmina carolina
-catalina cecilia celeste celina cesar citlali citlalli claudia clemencia clotilde columba concepcion
-consuelo corina cristian cristina cristobal dalila damaris danae daniel daniela dario david dayana
-delfina delia denise denisse deyanira diana diego dinorah dolores dominga domitila donaji edelmira
-edgar edith eduardo efrain elena elisa eliseo eliud elizabeth elodia eloisa elpidio elsa elvira
-emanuel emelia emilia emilio emmanuel enedina engracia enrique enriqueta epifania erendira erica
-erick erika ernestina ernesto esmeralda esperanza esteban estefani estefania estefany estela esthela
-esther eugenia eugenio eulalia eunice eustolia evangelina evelia evelyn ezequiel fabiola fabricio
-fausto federico felicitas felipa felipe felisa fernanda fernando fidel filiberto florentina
-francisca francisco froylan gabina gabriel gabriela gamaliel genoveva georgina geovanni geraldine
-gerardo gibran gilberto giovanna giovanni gisela giselle gloria gonzalo graciela gregoria gregorio
-grisel griselda guadalupe gudelia guillermina guillermo gustavo haydee hector heriberto herlinda
-hermelinda hermila herminia hilaria hilario hortencia hortensia hugo humberto ibeth idalia ignacia
-ignacio ileana iliana imelda ines inocencia irais irasema irene irma isaac isabel isai isaura isela
-isidra ismael israel itzel ivan ivet iveth ivette ivon ivone ivonne ixchel jacobo jacqueline jael
-jaime jair janet janeth janette jaquelin jaqueline javier jazmin jessica jesus jimena joana joaquin
-joaquina jocelyn johana jonathan jorge josafat jose josefa josefina joselin joselyn josue jovita
-juan judith julian juliana julieta julio karen karina karla laura leonardo leonila leonor leopoldo
-leticia lidia lilia lilian liliana lisbeth lisset lizbeth lizet lizeth lorena lorenzo lourdes lucero
-lucia lucila lucrecia luis luisa mabel magali magaly magdalena manuel manuela marcela marco marcos
-margarita maria mariana maribel maricarmen maricruz mariel mariela marilu mario marisa marisela
-marisol marlen marlene marta martha martin martina matilde mauricio maximiliano mayela mayte melina
-melissa micaela michelle miguel milagros minerva mireya miroslava misael moises monica monserrat
-montserrat nalleli nallely nancy natali natalia nataly natividad nayeli nayely neftali nicolas
-nicolasa noemi nohemi norma obdulia obed octavio odette ofelia olivia omar oralia orlando oscar
-osiris otilia pablo paloma pamela paola pascual patricia patricio paula paulina pedro penelope pilar
-porfirio priscila rafael rafaela ramiro ramon raquel raul rebeca refugio regina remedios reynalda
-reynaldo ricarda ricardo rigoberto roberta roberto rocio rodrigo rogelio rolando rosa rosalia
-rosalva rosario ruben rufina ruth sabina sagrario salvador samanta samantha samuel sandra santiago
-sara sarahi sarai saul sebastian selene sergio silvestre silvia simon socorro sofia soledad
-stephanie susana tamara tatiana teodora teodoro teresa thalia tiburcio tomas ulises uriel valentin
-valentina valeria vanesa vanessa veronica vianey vicente victor viridiana viviana vladimir xavier
-ximena xochitl yadira yael yair yanet yaneth yareli yasmin yazmin yesenia yesica yolanda yoselin
-yuliana yuridia zenaida zulema
+abdiel abelina abigail abimael abisai abraham abril adair adalberta adali adareli adelaida adelfa
+adelina adelita adilene adolfo adoracion adrian adriana agapita aglae agripina agustin agusto
+ahtziri aide aidee ailed aime aimee aislinn aketzali alberta albertina alberto albina aldahir aldair
+aldegunda aleida alejandra alejandrina alejandro alejanro aleli alessandra alessandro alethia alexa
+alexander alexandra alexei alexia alexis alfonsa alfonsina alfonso alfredo alheli alicia alida alim
+alin aline alinne alitzel alma alondra altagracia alvaro amadeo amairani amairany amalia amando
+amaranta amaury amayrani amed amelia ameyali ana anabel anabell anahi anahid anahy anai anaid anais
+anakaren anali analleli anallely analy anay anayansi anayeli anayelli anayely ancelmo andrea andrei
+andreina andres anel anette angel angelica angelina angelo anilu annel anotnio anselma antonia
+antonieta antonina antonio antono apolonia aquileo aquilina aquilino araceli aracelly aracely aramis
+arantza aranzazu arath arceli arcelia areceli areli arely aremi argelia argenis ariadna ariadne
+ariana arianna aridai ariel ariosto arisbet arisbeth arizbeth arlen arlene arlet arleth arlett
+arlette armando arminda arsenio artemia artemisa arturo asael astrid asucena asuncion atocha atzimba
+atzin atziri atziry audelia audrey augusto aurelia aurelio aurora austreberta austreberto
+auxiliadora avelina axel ayde aydee ayerim aylin azael azalea azeneth azucena baruch basilisa
+baudelio beatriz belem belen benito benjamin berenice bernardita berta betariz betsabe betzabe
+betzabel betzabet betzabeth bibiana bladimir blanca braulia brenda brigitte briseida camerina camila
+candelaria caren caridad carina caritina carlo carlos carlota carmelina carmen carmina carola
+carolina casandra casimira cassandra catalina cecilia celene celerina celeste celestina celina
+cenobia cesar chantal cirenia citlali citlalli citlally citlaly clarisa clarissa claudia clemencia
+cliserio clotilde columba concepcion consepcion constantina consuelo corina cornelia crisanta
+cristel cristell cristian cristina cristobal cupertino dalila damaris danae danahe daniel daniela
+daniella daphne daria darinka dario david dayana dayanara dayanira dejanira delcarmen delfina delia
+demetria deni denice denise deniss denisse dennis dennise dennys denys desire desiree deyanira diana
+diego dinora dinorah dionisia dolores dominga dominique domitila donaciano donaji donaldo edelmira
+edgar edilia edit edith eduardo eduviges eduwiges eduwigis efigenia efrain elaine elena eleonor
+eleonora eleuteria elfego eliazar eliceo elide elideth elidia eliel eliezer elihu elisa elisabeth
+eliseo eliu eliud eliuth elizaberth elizabet elizabeth elizbeth elizeth elodia eloina eloisa elpidia
+elpidio elsa elvira emanuel emelia emilia emiliana emilio emmanuel emmanuelle emperatriz enedina
+enedino eneyda engracia enid enoc enrique enriqueta epifania erandi erendira erica erick erika
+ernestina ernesto esmeralda esmirna esperanza esteban estefana estefani estefania estefanie estefany
+estela estephani estephania estephanie estephany ester esthela esther estuardo etelvina eucario
+eufemio eufracia eufrocina eufrosina eugenia eugenio eulalia eulises eulogia eunice euridice eusebia
+eustolia eustolio eustorgio evangelina evelia evelina evelyn evencio evodia evodio ezequiel fabiana
+fabiola fabricio faustina fausto favian faviola febe federico feliciana felicitas felipa felipe
+felisa fernado fernanda fernando fidel fidela filiberta filiberto florentina floriberta fortunata
+francelia francisca francisco frine froylan gabina gabriel gabriela gael galdina gamaliel garciela
+gardenia gaudalupe gaudencia genoveva genovevo georgette georgina geovana geovani geovanni geovanny
+geovany geraldine gerarda gerardo gertrudis getsemani getzemani giancarlo gibran gicela gilberta
+gilberto giovana giovanna giovanni giovanny giovany gisel gisela gisele gisell giselle gissel
+gisselle gloria godofredo gonzala gonzalo graciana graciela gregoria gregorio gricel gricelda grisel
+griselda grisell grissel guadalupe guadlaupe guadlupe gualberto gudalupe gudelia guillermina
+guillermo gustavo haide haidee harumi hayde haydee hazael hazel hector helena heleodoro heriberta
+heriberto herlinda hermelinda hermenegilda hermila hermilia herminia higinia hilaria hilario
+hildeberto hipolita honoria hortencia hortensia hugo humberto ibet ibeth icela idali idalia idalid
+ignacia ignacio ilda ileana ilian iliana imanol imelda ines inez inocencia iracema irais iraiz iram
+iran irasema irazema irazu irene ireri iridian irma isaac isabel isabela isadora isael isai isaid
+isamar isarel isaura isay isela isidora isidra ismael isolina israel issac itandehui itzayana itze
+itzel ivan ivana ivet iveth ivett ivette ivon ivone ivonn ivonne ixchel ixel izamar izchel jaciel
+jacinta jackeline jacoba jacobo jacquelin jacqueline jacquelinne jael jafet jahaziel jahel jahir
+jaime jair janet janete janeth janett janette janine jannet jannete janneth jannette jaquelin
+jaqueline jared jaret jasmin jatziri javier jazmin jeanett jeanette jeannette jenifer jeniffer
+jennyfer jeronima jessica jesus jetzabel jezabel jhoana jhonathan jhovana jhovanny jhovany jimena
+joana joanna joaquin joaquina jocabed jocelin joceline jocelyn jocelyne johana johanna johnatan
+jonathan jorge josafat josafath jose josefa josefina joselin joseline joselyn joshua josimar
+josselin josseline josselyn josue jovan jovana jovani jovanna jovanni jovanny jovany jovita joyce
+juan judit judith julian juliana julieta julio julisa julissa julita juventina kalid karely karen
+karim karime karina karla kassandra keren korina kristel larissa lariza laura laurencia leilani
+leobarda leocadia leonardo leonila leonor leopoldo leticia lidia liduvina lilia lilian liliana
+lilibeth lillian lily lisbet lisbeth liset liseth lisette lisset lissete lisseth lissette livier
+lizbet lizbeth lizet lizete lizeth lizett lizette lizzet lizzete lizzeth lizzette lorely lorena
+lorenzo lourdes lucero lucia lucila lucrecia ludivina luis luisa mabel macarena maclovia madai
+magadalena magali magalli magally magaly magdalena magdiel magnolia maleni manuel manuela marcela
+marco marcos marely margarita margot maria mariana mariano maribel maricarmen maricruz mariel
+mariela marilu mario marisa marisela marisol marlem marlen marlene marlenne marta martha martin
+martina marycarmen marycruz marysol massiel matilde mauricio maximiliano mayanin mayela mayeli mayte
+maythe medardo melania melany melida melina melisa melissa merari mercedes micaela michele michell
+michelle midori migdalia miguel miguelina milagros milena minerva mirel mirella mirelle mireya
+mirian miroslava misael mishel missael mizael mizraim moises moncerrat monica monserrat monserrath
+monsserrat montserrat montserrath monzerrat nahiely nahomi nain nalleli nallely nanci nancy naomi
+napoleon narcisa natali natalia natalie nataly natanael nathali nathalia nathalie nathaly nathanael
+natividad nayeli nayelli nayelly nayely nazaret nazareth nazaria neftali neli nemorio nereida
+nereyda nicolas nicolasa nicole nicte noelia noemi nohemi norma nury obdulia obed octavio odet odeth
+odette odilia odin ofelia olivia olmo omar oralia orlando orquidea ortencia osbelia oscar osiel
+osiris osvelia otilia oyuki oziel pablo paloma pamela paola pascual patricia patricio patrocinio
+paula paulette paulina pedro penelope petrona petronila pilar placida polet pompeyo porfiria
+porfirio prisca priscila prisciliana priscilla procoro pueblito quetzalli radames rafael rafaela
+ramiro ramon ramses raquel raul raymunda raziel rebeca refugio regina remedios reynalda reynaldo
+ricarda ricardo rigoberto rivelino roberta roberto rocio rodrigo rogelio rolando romina romualda
+rosa rosalia rosalva rosario roselia rosio ruben rubicelia ruby rufina ruth sabina sabrina sacnite
+sadot sagrario sahid sajid salvador samanta samantha samara samira samuel sandra santiago sara
+sarahi sarahy sarai saraid saray saul sayuri scarlett sebastian sebastiana selena selene senen
+senorina serafina sergio severa shantal sherlyn silvana silvestre silvia silvina simon sinai sinue
+sinuhe sirenia sixta socorro sofia soledad soraya stefania stefanie stefany stephani stephania
+stephanie stephany steve sugey sujey suriel susana talia tamara tatiana taurino teodora teodoro
+teresa thalia tiburcio tomas tonathiu tonatiuh tonatzin tulio ulices ulises uriel usiel uziel uzziel
+valentin valentina valeria valery vanesa vanessa vannesa verenice veronica vianey vianney vicenta
+vicente victor victorina vinicio violeta virgina virginia viridiana viviana vladimir wendolin
+wendoline wendolyn wendolyne xavier ximena xiomara xochilt xochiquetzal xochitl yadira yael yahaira
+yahel yahir yair yamel yamil yamile yamilet yamileth yaneli yanelli yanelly yanely yanet yaneth
+yanett yanin yanina yanira yannet yaquelin yaqueline yared yareli yarely yareni yaret yareth yasmin
+yatziri yazmin yeli yeni yenifer yenny yeraldin yered yesenia yesica yessenia yisel yoali yocelin
+yocelyn yolanda yolotzin yoloxochitl yoselin yoseline yoselyn yosselin yovana yovani ysabel yudith
+yuliana yulissa yunuen yuriana yuridia yuridiana yuriko yuritzi yvette yvonne zaid zeferina zeltzin
+zenaida zoe zoraida zuleica zuleima zulema zuleyma zuriel zurisadai
 """.split())
 
 def normalizar(nombre):

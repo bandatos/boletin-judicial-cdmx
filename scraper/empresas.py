@@ -144,6 +144,8 @@ RE_SEPARADOR_ROL = re.compile(
     r"[\s,(]+(?:y\s+)?(?:como\s+|en\s+su\s+car[aá]cter\s+(?:de|como)\s+|a\s*tra\W?v[eé][sz]\s+de\s+)?(?:su\s+)?"
     + ROLES + r"(?:\s+de\s+los\s+derechos\s+\w+)?(?:\s+(?:del?|de\s+la))?[\s,]+"
     r"|[\s,(]+(?:anteri?o?r?mente|antes\s+denominad[oa]|tambi[eé]n\s+identificad[oa]\s+como)[\s,]+"
+    # "(Antes)Santander" pegado y la errata "Ntes"
+    r"|\s*\(\s*(?:antes|anteri?o?r?mente|hoy)\s*\)\s*|[\s,(]+ntes[\s,)]+"
     r"|\s+y/o\s+|[\s,]+quien\s+(?:tambi[eé]n\s+)?se\s+ostenta\s+como[\s,]+"
     r"|[\s,]+quien\s+opera\s+bajo\s+la\s+raz[oó]n\s+social[\s,]+"
     r"|[\s,]+por\s+(?:su\s+)?(?:propio\s+derecho|derecho\s+propio)(?:\s+y)?(?:\s+como\s+(?:\w+\s+){0,3}?del?)?[\s,]+"

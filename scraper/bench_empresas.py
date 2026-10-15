@@ -160,6 +160,10 @@ CASOS = [
     ("Inmobiliaria Lm y 3p S.A. de C.V. y Ruiz Soto Florencio", ["Inmobiliaria Lm y 3p S.A. de C.V."], True),
     ("Lara Soto Sergio y el Responsable Médico del Hospital Ángeles Quien Opera Bajo la Razon Social Operadora de Hospitales Ángeles S.A. de C.V.",
      ["Operadora de Hospitales Ángeles S.A. de C.V."], True),
+    ("Lara Rivas Fiona Ntes Santander Hipotecario Sociedad Anónima de Capital Variable",
+     ["Santander Hipotecario Sociedad Anónima de Capital Variable"], True),
+    ("Rodríguez Díaz Mitzy (Antes)Santander Hipotecario S.A. de C.V. Sociedad Financiera de Objeto Múltiple Entidad Regulada",
+     ["Santander Hipotecario S.A. de C.V. Sociedad Financiera de Objeto Múltiple Entidad Regulada"], True),
     # No perder: nombres de persona dentro de un nombre de negocio
     ("Industrias Vinícolas Pedro Domecq, S.A. de C.V", ["Industrias Vinícolas Pedro Domecq, S.A. de C.V"], False),
     ("Centro Pedagógico María Montessori de Ecatepec S.C", ["Centro Pedagógico María Montessori de Ecatepec S.C"], False),
