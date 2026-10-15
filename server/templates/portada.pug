@@ -54,8 +54,14 @@ mixin pestanas(grupo, pestanas)
       a(href="/fecha") Lo publicado cada día
       a(href="/sources") De dónde vienen los datos
 
-    section.tarjeta
-      +graficoAnios(chart)
+    +tarjeta('📊', 'Avisos por año')
+      +pestanas('grafico', [{ id: 'grafico-publicacion', titulo: 'Por fecha de publicación' }, { id: 'grafico-expediente', titulo: 'Por año del expediente' }])
+      #grafico-publicacion(role="tabpanel" aria-labelledby="tab-grafico-publicacion")
+        +graficoAnios(chartPublicacion)
+        p.nota Lo que publicó el boletín cada año. 2016 empieza en octubre, el primer boletín disponible.
+      #grafico-expediente(role="tabpanel" aria-labelledby="tab-grafico-expediente" hidden)
+        +graficoAnios(chart)
+        p.nota Avisos según el año del número de expediente ("184/2019" es 2019): de qué época son los juicios con acuerdos publicados. Los años recientes tienen menos porque esos juicios son nuevos.
 
     if datos.empresas
       +tarjeta('🏢', 'Empresas con más juicios', '/empresas', 'Ver todas las empresas')

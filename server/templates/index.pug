@@ -24,14 +24,16 @@ include mixins.pug
           option(value=a selected=(String(a) === String(anio)))= a
       button#search-btn(type="submit") Buscar
 
-  +graficoAnios(chart)
+  +graficoAnios(chart, 'Avisos por año del expediente')
 
   #results
     if searched
       #result-count
         = num(groups.length) + ' expediente' + (groups.length !== 1 ? 's' : '')
-        if totalAvisos > groups.length
-          = ` (${totalAvisos >= maxRows ? num(maxRows) + '+' : num(totalAvisos)} avisos)`
+        if totalAvisos === null || totalAvisos > avisosMostrados
+          = ` · ${totalAvisos === null ? 'más de ' + num(candidatos) : num(totalAvisos)} avisos, se muestran los ${num(avisosMostrados)} más recientes`
+        else if totalAvisos > groups.length
+          = ` (${num(totalAvisos)} avisos)`
       if !groups.length
         p Sin resultados.
       #result-list

@@ -120,7 +120,7 @@ test('GET /sources explica el origen de los datos y las limitaciones', async () 
 test('GET /static/css/main.css sirve el CSS', async () => {
   const { status, body } = await get('/static/css/main.css');
   assert.equal(status, 200);
-  assert.match(body, /#chart/);
+  assert.match(body, /\.chart-box/);
 });
 
 test('GET a una ruta desconocida devuelve 404', async () => {

@@ -17,6 +17,7 @@ server.listen(PORT, HOST, () => {
   // se calculan al arrancar para que no los pague el primer request.
   const t0 = Date.now();
   db.getResumen();
+  db.getPublicacionChart();
   console.log(`Resumen de la DB listo en ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 });
 

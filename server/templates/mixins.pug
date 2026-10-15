@@ -97,10 +97,12 @@ mixin paginacion(actual, total, href)
           span(aria-hidden="true") →
 
 //- Avisos por año, apilados por tipo de juicio (colores en db.CHART_COLORS).
-mixin graficoAnios(chart)
-  #chart-box
-    h2#chart-title Avisos por año del expediente
-    #chart
+//- chart: db.getYearChart() (año del expediente) o db.getPublicacionChart().
+mixin graficoAnios(chart, titulo)
+  .chart-box
+    if titulo
+      h2.chart-title= titulo
+    .chart
       each y in chart.years
         .chart-col(style=`height:${(y.total / chart.maxTotal) * 100}%` title=`${y.anio}: ${num(y.total)} avisos`)
           each seg, i in y.segments
@@ -109,7 +111,7 @@ mixin graficoAnios(chart)
     .chart-labels
       each y in chart.years
         .chart-col-label= y.anio
-    #chart-legend
+    .chart-legend
       each b, i in chart.buckets
         span.chart-legend-item
           span.chart-legend-swatch(style=`background:${chart.colors[i]}`)

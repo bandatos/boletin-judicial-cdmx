@@ -52,9 +52,9 @@
 }
 #search-btn:hover { background: var(--accent-hover); }
 
-#chart-box { max-width: var(--max); margin: 1.5rem auto; padding: 0 1.5rem; }
+.chart-box { max-width: var(--max); margin: 1.5rem auto; padding: 0 1.5rem; }
 
-#chart-title {
+.chart-title {
   font-size: .85rem;
   font-weight: 600;
   color: var(--fg-muted);
@@ -63,7 +63,7 @@
   margin-bottom: .75rem;
 }
 
-#chart {
+.chart {
   display: flex;
   align-items: flex-end;
   gap: .35rem;
@@ -79,7 +79,7 @@
 .chart-labels { display: flex; gap: .35rem; margin-top: .3rem; }
 .chart-col-label { flex: 1; min-width: 6px; text-align: center; font-size: .65rem; color: var(--fg-muted); }
 
-#chart-legend { display: flex; flex-wrap: wrap; gap: .4rem 1rem; margin-top: .6rem; font-size: .78rem; color: var(--fg-muted); }
+.chart-legend { display: flex; flex-wrap: wrap; gap: .4rem 1rem; margin-top: .6rem; font-size: .78rem; color: var(--fg-muted); }
 .chart-legend-item { display: flex; align-items: center; gap: .35rem; }
 .chart-legend-swatch { width: .7rem; height: .7rem; border-radius: 2px; flex-shrink: 0; }
 
@@ -300,7 +300,7 @@ body.pdf-open { margin-right: var(--pdf-w); }
 .pestana[aria-selected="true"] { background: var(--verde); color: #fff; }
 .pestana:focus-visible { outline: 3px solid var(--rojo); outline-offset: 2px; }
 .tarjeta-pie { text-align: right; margin-top: .75rem; }
-.tarjeta #chart-box { margin: 0; padding: 0; }
+.tarjeta .chart-box { margin: 0; padding: 0; }
 
 /* ── Empresas ── */
 .empresas-view, .empresa-view { margin-top: 1.5rem; margin-bottom: 3rem; }

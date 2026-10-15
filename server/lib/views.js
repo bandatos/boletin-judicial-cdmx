@@ -65,17 +65,20 @@ function buscar(req, { juzgado, formAction, heading } = {}) {
   const searched = Boolean(q || tipo || anio || juzgado);
   let groups = [];
   let totalAvisos = 0;
+  let avisosMostrados = 0;
 
   if (searched) {
-    const rows = db.searchEntradas({ q, tipo, anio, juzgado });
-    totalAvisos = rows.length;
+    // Del más reciente al más viejo. total es null si hay más de db.CANDIDATOS.
+    const { rows, total } = db.searchEntradas({ q, tipo, anio, juzgado });
+    totalAvisos = total;
+    avisosMostrados = rows.length;
     groups = db.groupByExpediente(rows).slice(0, db.MAX_RESULTS);
   }
 
   return renderTemplate('index', {
     req, q, tipo, anio, tipos, anios, chart,
-    groups, totalAvisos, searched,
-    maxResults: db.MAX_RESULTS, maxRows: db.MAX_ROWS,
+    groups, totalAvisos, avisosMostrados, searched,
+    maxResults: db.MAX_RESULTS, candidatos: db.CANDIDATOS,
     formAction: formAction || '/buscar',
     heading: heading || null,
   });
@@ -238,6 +241,7 @@ function portada(req) {
       resumen: db.hayEmpresas() ? db.getResumenEmpresas() : null,
       personas: db.hayPersonas() ? db.getResumenPersonas().personas : null,
       chart: db.getYearChart(),
+      chartPublicacion: db.getPublicacionChart(),
     }),
   };
 }

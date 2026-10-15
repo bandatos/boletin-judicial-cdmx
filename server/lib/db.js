@@ -105,6 +105,59 @@ function findJuzgadoBySlug(slug) {
   return getResumen().slugs.get(slug) || null;
 }
 
+const COLS_AVISO = `e.id, e.boletin_id, e.actora, e.demandada, e.tipo_juicio, e.expediente,
+             e.juzgado, e.sala, e.pagina, b.fecha, b.fecha_iso, b.pdf_url`;
+
+// Tramos de ids en los que el orden de los ids es el de las fechas, del más
+// nuevo al más viejo. Los ids no son cronológicos (las corridas del scraper
+// se cargan de la más nueva a la más vieja, ver build_db.py), pero los avisos
+// de cada boletín son contiguos y, dentro de una corrida, crecen con la fecha.
+function getTramos() {
+  const r = getResumen();
+  if (r.tramos) return r.tramos;
+  const tramos = [];
+  for (const iso of [...r.fechas].reverse()) {
+    for (const b of [...r.boletinesPorFecha.get(iso)].reverse()) {
+      if (b.desde == null) continue;
+      const t = tramos[tramos.length - 1];
+      if (t && b.hasta === t.lo - 1) t.lo = b.desde;
+      else tramos.push({ lo: b.desde, hi: b.hasta });
+    }
+  }
+  r.tramos = tramos;
+  return tramos;
+}
+
+// Avisos que cumplen `where`, del más reciente al más viejo, hasta `limite`.
+// Si hay pocos (menos de CANDIDATOS) se traen todos y se ordenan acá; si son
+// muchos (un apellido común, un tipo de juicio) se recorren los tramos del
+// más nuevo al más viejo con ORDER BY id DESC, que no ordena todo.
+// `colId`: la columna por la que se acota el rango (f.rowid si hay FTS, así
+// el índice FTS recibe el rango).
+const CANDIDATOS = 5000;
+// CROSS JOIN fija el orden: primero el índice FTS (con el rango de ids) y
+// después la tabla. Con JOIN, SQLite a veces arranca por un índice de la
+// tabla (tipo de juicio) y consulta el FTS fila por fila: 5 s en vez de 50 ms.
+const FROM_FTS = 'entradas_fts f CROSS JOIN entradas e ON e.id = f.rowid';
+function avisosRecientes({ from, where, params, limite, colId = 'e.id' }) {
+  const d = getDb();
+  const base = `SELECT ${COLS_AVISO} FROM ${from} LEFT JOIN boletines b ON e.boletin_id = b.id WHERE ${where}`;
+  const candidatos = d.prepare(`${base} LIMIT ${CANDIDATOS}`).all(...params);
+  const porFecha = (a, b) => String(b.fecha_iso || '').localeCompare(String(a.fecha_iso || '')) || b.id - a.id;
+  if (candidatos.length < CANDIDATOS) {
+    return { rows: candidatos.sort(porFecha).slice(0, limite), total: candidatos.length };
+  }
+  const stmt = d.prepare(`${base} AND ${colId} BETWEEN ? AND ? ORDER BY ${colId} DESC LIMIT ?`);
+  const rows = [];
+  for (const t of getTramos()) {
+    rows.push(...stmt.all(...params, t.lo, t.hi, limite - rows.length));
+    if (rows.length >= limite) break;
+  }
+  return { rows: rows.sort(porFecha), total: null };
+}
+
+// Avisos por nombre, expediente o filtros, del más reciente al más viejo.
+// Devuelve hasta MAX_ROWS; `total` es null si hay más de CANDIDATOS.
 function searchEntradas({ q, tipo, anio, juzgado }) {
   const filtros = [];
   const params = [];
@@ -112,7 +165,6 @@ function searchEntradas({ q, tipo, anio, juzgado }) {
   if (anio) { filtros.push('e.anio = ?'); params.push(Number(anio)); }
   if (juzgado) { filtros.push('e.juzgado = ?'); params.push(juzgado); }
 
-  let sql;
   // Número de expediente ("1201/2017"): no está en el índice FTS (y la "/"
   // lo rompe), se busca por prefijo en la columna. GLOB y no LIKE: es
   // sensible a mayúsculas y así SQLite puede usar idx_expediente_num.
@@ -120,44 +172,24 @@ function searchEntradas({ q, tipo, anio, juzgado }) {
   if (expedienteQ) {
     filtros.unshift('e.expediente GLOB ?');
     params.unshift(`${expedienteQ[1]}/${expedienteQ[2]}*`);
-    sql = `
-      SELECT e.id, e.boletin_id, e.actora, e.demandada, e.tipo_juicio, e.expediente,
-             e.juzgado, e.sala, e.pagina, b.fecha, b.fecha_iso, b.pdf_url
-      FROM entradas e
-      LEFT JOIN boletines b ON e.boletin_id = b.id
-      WHERE ${filtros.join(' AND ')}
-      LIMIT ${MAX_ROWS}
-    `;
-  } else if (q) {
+    return avisosRecientes({ from: 'entradas e', where: filtros.join(' AND '), params, limite: MAX_ROWS });
+  }
+  if (q) {
     // FTS5 (detail=none) no soporta frases ni caracteres especiales ("/",
     // "-", "(", ":"...) fuera de un bareword: se sanean a espacios y se busca
     // cada palabra (AND implícito). Mismo criterio que search.js.
     const ftsQ = q.replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
-    if (!ftsQ) return [];
-    sql = `
-      SELECT e.id, e.boletin_id, e.actora, e.demandada, e.tipo_juicio, e.expediente,
-             e.juzgado, e.sala, e.pagina, b.fecha, b.fecha_iso, b.pdf_url
-      FROM entradas e
-      JOIN entradas_fts f ON e.id = f.rowid
-      LEFT JOIN boletines b ON e.boletin_id = b.id
-      WHERE entradas_fts MATCH ?
-      ${filtros.map(f => 'AND ' + f).join(' ')}
-      LIMIT ${MAX_ROWS}
-    `;
-    params.unshift(ftsQ);
-  } else if (filtros.length) {
-    sql = `
-      SELECT e.id, e.boletin_id, e.actora, e.demandada, e.tipo_juicio, e.expediente,
-             e.juzgado, e.sala, e.pagina, b.fecha, b.fecha_iso, b.pdf_url
-      FROM entradas e
-      LEFT JOIN boletines b ON e.boletin_id = b.id
-      WHERE ${filtros.join(' AND ')}
-      LIMIT ${MAX_ROWS}
-    `;
-  } else {
-    return [];
+    if (!ftsQ) return { rows: [], total: 0 };
+    return avisosRecientes({
+      from: FROM_FTS,
+      where: ['entradas_fts MATCH ?', ...filtros].join(' AND '),
+      params: [ftsQ, ...params], limite: MAX_ROWS, colId: 'f.rowid',
+    });
   }
-  return getDb().prepare(sql).all(...params);
+  if (filtros.length) {
+    return avisosRecientes({ from: 'entradas e', where: filtros.join(' AND '), params, limite: MAX_ROWS });
+  }
+  return { rows: [], total: 0 };
 }
 
 // Un mismo expediente acumula un aviso por cada acuerdo publicado. El
@@ -245,6 +277,50 @@ function getYearChart() {
 
   const maxTotal = Math.max(...years.map(y => y.total), 1);
   return { buckets, years, maxTotal, colors: CHART_COLORS };
+}
+
+// Avisos por año de PUBLICACIÓN (getYearChart agrupa por año del
+// expediente). El total por año sale de boletines.n_entradas; el desglose
+// por tipo, de contar en idx_tipo_juicio_norm dentro de los rangos de ids de
+// cada año (los avisos de un boletín son contiguos): ~1 s con la base
+// completa, sin recorrer la tabla. "Otro" es el resto.
+function getPublicacionChart() {
+  const r = getResumen();
+  if (r.publicacionChart) return r.publicacionChart;
+  const d = getDb();
+  const top5 = getTipos().slice(0, 5);
+  const buckets = [...top5, 'Otro'];
+  const rangos = [];
+  const totales = new Map();
+  for (const b of d.prepare(`
+    SELECT entrada_desde AS lo, entrada_hasta AS hi, n_entradas AS n, CAST(substr(fecha_iso, 1, 4) AS INTEGER) AS anio
+    FROM boletines WHERE n_entradas > 0 AND entrada_desde IS NOT NULL AND fecha_iso IS NOT NULL
+    ORDER BY entrada_desde
+  `).all()) {
+    totales.set(b.anio, (totales.get(b.anio) || 0) + b.n);
+    const t = rangos[rangos.length - 1];
+    if (t && t.anio === b.anio && b.lo === t.hi + 1) t.hi = b.hi;
+    else rangos.push({ lo: b.lo, hi: b.hi, anio: b.anio });
+  }
+  const contar = d.prepare('SELECT COUNT(*) AS n FROM entradas WHERE tipo_juicio_norm = ? AND id BETWEEN ? AND ?');
+  const porAnio = new Map([...totales.keys()].map(a => [a, {}]));
+  for (const tipo of top5) {
+    for (const g of rangos) porAnio.get(g.anio)[tipo] = (porAnio.get(g.anio)[tipo] || 0) + contar.get(tipo, g.lo, g.hi).n;
+  }
+  const years = [...totales.keys()].sort((a, b) => a - b).slice(-CHART_YEARS).map(anio => {
+    const datos = porAnio.get(anio);
+    const total = totales.get(anio);
+    const otro = total - top5.reduce((s, t) => s + (datos[t] || 0), 0);
+    return {
+      anio, total,
+      segments: buckets.map(b => ({ bucket: b, n: b === 'Otro' ? Math.max(otro, 0) : datos[b] || 0 })),
+    };
+  });
+  r.publicacionChart = {
+    buckets, years, colors: CHART_COLORS,
+    maxTotal: Math.max(...years.map(y => y.total), 1),
+  };
+  return r.publicacionChart;
 }
 
 function normTxt(str) {
@@ -528,21 +604,17 @@ function normNombre(str) {
 function getAvisosPersona(persona) {
   const palabras = persona.nucleo.split(' ').filter(w => w.length >= 3 && !['del', 'las', 'los'].includes(w));
   if (!palabras.length) return { grupos: [], truncado: false };
-  const rows = getDb().prepare(`
-    SELECT e.id, e.boletin_id, e.actora, e.demandada, e.tipo_juicio, e.expediente,
-           e.juzgado, e.sala, e.pagina, b.fecha, b.fecha_iso, b.pdf_url
-    FROM entradas e
-    JOIN entradas_fts f ON e.id = f.rowid
-    LEFT JOIN boletines b ON e.boletin_id = b.id
-    WHERE entradas_fts MATCH ?
-    LIMIT ${MAX_AVISOS_PERSONA}
-  `).all(palabras.join(' '));
+  const { rows, total } = avisosRecientes({
+    from: FROM_FTS,
+    where: 'entradas_fts MATCH ?', params: [palabras.join(' ')],
+    limite: MAX_AVISOS_PERSONA, colId: 'f.rowid',
+  });
   const buscado = ` ${persona.nucleo} `;
   const propios = rows.filter(r => normNombre(r.actora).includes(buscado) || normNombre(r.demandada).includes(buscado))
     .map(r => ({ ...r, rol: normNombre(r.actora).includes(buscado) ? 'actora' : 'demandada' }));
   const grupos = groupByExpediente(propios)
     .sort((a, b) => String(b.fecha_iso || '').localeCompare(String(a.fecha_iso || '')));
-  return { grupos, truncado: rows.length >= MAX_AVISOS_PERSONA };
+  return { grupos, truncado: total === null || total > MAX_AVISOS_PERSONA };
 }
 
 function getStats() {
@@ -569,7 +641,7 @@ function ping() {
 
 module.exports = {
   ping, getTipos, getAnios, findJuzgadoBySlug, searchEntradas, groupByExpediente, getExpedienteById,
-  getYearChart, getStats, getResumen, getDia, getFechas, reloadDb,
+  getYearChart, getPublicacionChart, getStats, getResumen, getDia, getFechas, reloadDb,
   getPortada, hayPersonas, getPersonas, getPersona, getResumenPersonas, getAvisosPersona, PERSONAS_POR_PAGINA,
-  hayEmpresas, getEmpresas, getEmpresa, getExpedientesEmpresa, getEmpresasDeEntradas, getResumenEmpresas, MAX_RESULTS, MAX_ROWS, CHART_COLORS, DB_PATH,
+  hayEmpresas, getEmpresas, getEmpresa, getExpedientesEmpresa, getEmpresasDeEntradas, getResumenEmpresas, MAX_RESULTS, MAX_ROWS, CANDIDATOS, CHART_COLORS, DB_PATH,
 };

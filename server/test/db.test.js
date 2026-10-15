@@ -20,35 +20,35 @@ test('getAnios ordena descendente', () => {
 });
 
 test('searchEntradas por texto encuentra por nombre (FTS)', () => {
-  const rows = db.searchEntradas({ q: 'thebart' });
+  const rows = db.searchEntradas({ q: 'thebart' }).rows;
   // 3 filas: 2 avisos de Esquivel Thebart como actora + 1 como demandada.
   assert.equal(rows.length, 3);
 });
 
 test('searchEntradas por tipo filtra exacto', () => {
-  const rows = db.searchEntradas({ tipo: 'Ordinario Civil' });
+  const rows = db.searchEntradas({ tipo: 'Ordinario Civil' }).rows;
   assert.equal(rows.length, 1);
   assert.equal(rows[0].expediente, '722/2016');
 });
 
 test('searchEntradas por año filtra exacto', () => {
-  const rows = db.searchEntradas({ anio: 2024 });
+  const rows = db.searchEntradas({ anio: 2024 }).rows;
   assert.equal(rows.length, 1);
   assert.equal(rows[0].actora, 'García Pérez Juan');
 });
 
 test('searchEntradas combina texto + tipo + año', () => {
-  const rows = db.searchEntradas({ q: 'thebart', tipo: 'Sucesorio Familiar', anio: 2025 });
+  const rows = db.searchEntradas({ q: 'thebart', tipo: 'Sucesorio Familiar', anio: 2025 }).rows;
   assert.equal(rows.length, 2);
 });
 
 test('searchEntradas sin ningún filtro devuelve vacío', () => {
-  const rows = db.searchEntradas({});
+  const rows = db.searchEntradas({}).rows;
   assert.equal(rows.length, 0);
 });
 
 test('groupByExpediente agrupa avisos del mismo caso (juzgado+expediente)', () => {
-  const rows = db.searchEntradas({ q: 'thebart' });
+  const rows = db.searchEntradas({ q: 'thebart' }).rows;
   const groups = db.groupByExpediente(rows);
   // Debe haber 2 expedientes: 184/2025 (2 avisos fusionados) y 722/2016 (1 aviso).
   assert.equal(groups.length, 2);
@@ -90,7 +90,7 @@ test('getExpedienteById cuenta cuántos avisos comparten tipo y juzgado', () => 
 });
 
 test('searchEntradas también filtra por juzgado', () => {
-  const rows = db.searchEntradas({ juzgado: 'CUADRAGÉSIMO DE LO CIVIL' });
+  const rows = db.searchEntradas({ juzgado: 'CUADRAGÉSIMO DE LO CIVIL' }).rows;
   assert.equal(rows.length, 1);
   assert.equal(rows[0].expediente, '722/2016');
 });
@@ -111,8 +111,8 @@ test('getStats cuenta el total de entradas', () => {
 
 test('searchEntradas con caracteres especiales de FTS5 no rompe', () => {
   assert.doesNotThrow(() => db.searchEntradas({ q: 'thebart/2025 (sucesión): "x"' }));
-  assert.equal(db.searchEntradas({ q: '///' }).length, 0);
-  assert.equal(db.searchEntradas({ q: 'Esquivel-Thebart' }).length, 3);
+  assert.equal(db.searchEntradas({ q: '///' }).rows.length, 0);
+  assert.equal(db.searchEntradas({ q: 'Esquivel-Thebart' }).rows.length, 3);
 });
 
 test('getStats usa fecha_iso para el rango de fechas', () => {
@@ -123,11 +123,11 @@ test('getStats usa fecha_iso para el rango de fechas', () => {
 });
 
 test('searchEntradas por número de expediente busca por prefijo en la columna', () => {
-  const rows = db.searchEntradas({ q: '184/2025' });
+  const rows = db.searchEntradas({ q: '184/2025' }).rows;
   assert.equal(rows.length, 2);
   assert.ok(rows.every(r => r.expediente === '184/2025'));
-  assert.equal(db.searchEntradas({ q: ' 722 / 2016 ' }).length, 1);
-  assert.equal(db.searchEntradas({ q: '184/2025', tipo: 'Ordinario Civil' }).length, 0);
+  assert.equal(db.searchEntradas({ q: ' 722 / 2016 ' }).rows.length, 1);
+  assert.equal(db.searchEntradas({ q: '184/2025', tipo: 'Ordinario Civil' }).rows.length, 0);
 });
 
 test('getDia agrupa por juzgado en orden y filtra con q', () => {
@@ -163,4 +163,11 @@ test('getExpedientesEmpresa: contraparte solo como empresa o "persona física"',
   assert.equal(conPersona.contraPersonas, true); // García Pérez Juan, sin nombrarlo
   assert.ok(!('actora' in conPersona) && !('demandada' in conPersona));
   assert.equal(db.getEmpresa('no-existe'), null);
+});
+
+test('searchEntradas devuelve del aviso más reciente al más viejo, con el total', () => {
+  const { rows, total } = db.searchEntradas({ q: 'thebart' });
+  assert.equal(total, rows.length);
+  const fechas = rows.map(r => r.fecha_iso);
+  assert.deepEqual(fechas, [...fechas].sort().reverse());
 });
