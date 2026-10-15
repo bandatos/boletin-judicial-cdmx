@@ -84,6 +84,9 @@ abogados asociados consultores constructores arquitectos ingenieros contadores h
 sucesores socios despacho bufete editores autos seguros inmobiliarios
 centro sanatorio consorcio corredor pasaje producciones promociones industrias transportes
 autotransportes administraciones sociales electronica camionero
+fundacion fondo fondos sistema transporte colectivo confederacion camaras camara nacionales
+financiamiento bancario montepio patronato medical center the operacion operaciones vivienda
+cooperativa telecomunicaciones recursos construcciones concretos reconoc controv otro div
 """.split())
 
 
@@ -224,7 +227,16 @@ def es_nombre(t):
             propias += 1
     if propias < 2:
         return False
-    return not (set(normalizar(t).split()) & NO_PERSONA)
+    palabras = [w for w in normalizar(t).split() if w not in PARTICULAS]
+    if set(palabras) & NO_PERSONA:
+        return False
+    # Solo nombres de pila ("José Luis", "María del Carmen") es un resto de
+    # parseo; sin ningún nombre de pila conocido se piden al menos tres
+    # palabras ("Azul Concretos", "Petróleos Mexicanos" no son personas).
+    pila = [w for w in palabras if w in NOMBRES_PILA]
+    if pila and len(pila) == len(palabras):
+        return False
+    return bool(pila) or len(palabras) >= 3
 
 
 def personas(campo):

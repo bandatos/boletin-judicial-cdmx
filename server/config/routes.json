@@ -1,11 +1,11 @@
 {
-  "/": { "viewType": "function", "handler": "empresas" },
+  "/": { "viewType": "function", "handler": "portada" },
   "/buscar": { "viewType": "function", "handler": "home" },
   "/expediente/:idslug": { "viewType": "function", "handler": "expediente" },
   "/juzgado/:slug": { "viewType": "function", "handler": "juzgado" },
   "/fecha": { "viewType": "function", "handler": "fecha" },
   "/fecha/:iso": { "viewType": "function", "handler": "fecha" },
-  "/empresas": { "viewType": "function", "handler": "empresasRedirect" },
+  "/empresas": { "viewType": "function", "handler": "empresas" },
   "/empresas/:slug": { "viewType": "function", "handler": "empresa" },
   "/personas": { "viewType": "function", "handler": "personas" },
   "/personas/:slug": { "viewType": "function", "handler": "persona" },

@@ -271,22 +271,18 @@ test('la ficha lee el texto original también de .txt.gz', async () => {
   assert.match(body, /class="raw-text"/);
 });
 
-test('GET / es la portada de empresas con descripción y cifras', async () => {
+test('GET / es la portada: buscador general, tablas y sin nombres de personas', async () => {
   const { status, body } = await get('/');
   assert.equal(status, 200);
-  assert.match(body, /<h1>Juicios de empresas en la Ciudad de México<\/h1>/);
-  assert.match(body, /class="infobanner"/);
-  assert.match(body, /empresas con juicios/);
+  assert.match(body, /<h1>Explora el Boletín Judicial de la Ciudad de México<\/h1>/);
+  assert.match(body, /<form method="GET" action="\/buscar"/);
   assert.match(body, /href="\/empresas\/constructora-ejemplo"/);
+  assert.match(body, /href="\/fecha\/2026-06-05"/);
+  assert.match(body, /href="\/juzgado\/decimo-de-lo-civil"/);
+  assert.match(body, /role="tablist"/);
+  assert.doesNotMatch(body, /<meta name="robots" content="noindex">/);
   assert.doesNotMatch(body, PERSONAS_FIXTURE);
 });
-
-test('GET /empresas redirige a la portada conservando la búsqueda', async () => {
-  const res = await fetch(base + '/empresas?q=banco', { redirect: 'manual' });
-  assert.equal(res.status, 301);
-  assert.equal(res.headers.get('location'), '/?q=banco');
-});
-
 test('todas las páginas llevan la marca de Bandatos y ninguna la de Sociedad.info', async () => {
   for (const path of ['/', '/buscar', '/buscar?q=thebart', '/fecha', '/sources', '/expediente/2', '/empresas/constructora-ejemplo', '/personas']) {
     const { body } = await get(path);
@@ -296,21 +292,18 @@ test('todas las páginas llevan la marca de Bandatos y ninguna la de Sociedad.in
   }
 });
 
-test('la portada tiene los botones a las secciones y las cifras al final', async () => {
+test('la portada tiene las cifras como links en la caja del buscador y los botones afuera', async () => {
   const { body } = await get('/');
-  const botones = body.match(/<nav class="acciones-portada"[^]*?<\/nav>/)[0];
-  for (const href of ['/buscar', '/personas', '/fecha', '/sources']) {
-    assert.match(botones, new RegExp(`href="${href}"`));
-  }
-  assert.ok(body.indexOf('empresas con juicios') > body.indexOf('class="empresas-tabla"'));
-  // Cifras como links dentro de la caja del buscador; los botones, afuera.
   const caja = body.match(/<section class="infobanner">[^]*?<\/section>/)[0];
-  assert.match(caja, /<a href="\/#empresas">2 empresas<\/a>/);
+  assert.match(caja, /<a href="\/empresas">2 empresas<\/a>/);
   assert.match(caja, /<a href="\/personas">2 personas<\/a>/);
   assert.match(caja, /<a href="\/fecha">boletines de 2025 a 2026<\/a>/);
   assert.doesNotMatch(caja, /acciones-portada/);
+  const botones = body.match(/<nav class="acciones-portada"[^]*?<\/nav>/)[0];
+  for (const href of ['/empresas', '/personas', '/fecha', '/sources']) {
+    assert.match(botones, new RegExp(`href="${href}"`));
+  }
 });
-
 test('GET /personas lista personas, siempre con noindex', async () => {
   const { status, body } = await get('/personas');
   assert.equal(status, 200);

@@ -95,3 +95,22 @@ mixin paginacion(actual, total, href)
       if actual < total
         a.page.arrow(href=href(actual + 1) aria-label="Página siguiente" rel="next")
           span(aria-hidden="true") →
+
+//- Avisos por año, apilados por tipo de juicio (colores en db.CHART_COLORS).
+mixin graficoAnios(chart)
+  #chart-box
+    h2#chart-title Avisos por año
+    #chart
+      each y in chart.years
+        .chart-col(style=`height:${(y.total / chart.maxTotal) * 100}%` title=`${y.anio}: ${num(y.total)} avisos`)
+          each seg, i in y.segments
+            if seg.n
+              .chart-col-segment(style=`height:${(seg.n / y.total) * 100}%;background:${chart.colors[i]}`)
+    .chart-labels
+      each y in chart.years
+        .chart-col-label= y.anio
+    #chart-legend
+      each b, i in chart.buckets
+        span.chart-legend-item
+          span.chart-legend-swatch(style=`background:${chart.colors[i]}`)
+          = b

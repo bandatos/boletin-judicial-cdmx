@@ -4,52 +4,37 @@ include mixins.pug
 
 - const titulo = q ? `Empresas: “${q}”` : 'Juicios de empresas en la Ciudad de México'
 - const baseParams = Object.assign(q ? { q } : {}, orden === 'nombre' ? { orden } : {})
-+head(q ? `${titulo} — ${siteTitle}` : `${siteTitle}: juicios de empresas en la Ciudad de México`, 'Qué empresas tienen juicios civiles, mercantiles y familiares en la Ciudad de México, como actora o demandada, según el Boletín Judicial del PJCDMX desde 2016.')
++head(q ? `${titulo} — ${siteTitle}` : `Empresas con juicios en la Ciudad de México — ${siteTitle}`, 'Qué empresas tienen juicios civiles, mercantiles y familiares en la Ciudad de México, como actora o demandada, según el Boletín Judicial del PJCDMX desde 2016.')
   +siteHeader('empresas')
 
-  .container.empresas-view
-    section.infobanner
-      h1 Juicios de empresas en la Ciudad de México
-      p.
-        Consulta en qué juicios aparece una empresa como actora o demandada:
-        tipos de juicio, juzgados, expedientes y la liga a cada publicación
-        oficial. Los datos salen del Boletín Judicial del Poder Judicial de la
-        Ciudad de México, que se publica cada día hábil, desde octubre de 2016.
-      form(method="GET" action="/")
-        input(type="search" name="q" value=q placeholder="Busca una empresa por nombre..." autocomplete="off" aria-label="Nombre de la empresa")
-        if orden === 'nombre'
-          input(type="hidden" name="orden" value="nombre")
-        button(type="submit") Buscar
-      if resumen
-        p.cifras-portada
-          a(href="/#empresas")= `${num(resumen.empresas)} empresas`
-          if personas
-            span(aria-hidden="true") ·
-            a(href="/personas")= `${num(personas)} personas`
-          if resumen.desde
-            - const [a1, a2] = [resumen.desde.slice(0, 4), (resumen.hasta || resumen.desde).slice(0, 4)]
-            span(aria-hidden="true") ·
-            a(href="/fecha")= a1 === a2 ? `boletines de ${a1}` : `boletines de ${a1} a ${a2}`
+  +breadcrumbs([[siteTitle, '/'], ['Empresas']])
 
-    nav.acciones-portada(aria-label="Otras formas de consultar")
-      a(href="/buscar") Buscar avisos por nombre o expediente
-      a(href="/personas") Personas
-      a(href="/fecha") Lo publicado cada día
-      a(href="/sources") De dónde vienen los datos
+  .container.empresas-view
+    h1.titulo-seccion Empresas
+    p.nota.
+      Empresas que aparecen como actora o demandada en el Boletín Judicial del
+      Poder Judicial de la Ciudad de México desde octubre de 2016: tipos de
+      juicio, juzgados, expedientes y la liga a cada publicación oficial.
+
+    form.buscador-simple(method="GET" action="/empresas")
+      input(type="search" name="q" value=q placeholder="Busca una empresa por nombre..." autocomplete="off" aria-label="Nombre de la empresa")
+      if orden === 'nombre'
+        input(type="hidden" name="orden" value="nombre")
+      button(type="submit") Buscar
 
     .bloque#empresas
       p.orden
         | #{num(lista.total)} empresas · ordenar por
         = ' '
         if orden === 'nombre'
-          a(href=`/?${new URLSearchParams(q ? { q } : {})}`) cantidad de avisos
+          a(href=`/empresas?${new URLSearchParams(q ? { q } : {})}`) cantidad de avisos
           |  ·
           strong  nombre
         else
           strong cantidad de avisos
           |  ·
           = ' '
-          a(href=`/?${new URLSearchParams(Object.assign(q ? { q } : {}, { orden: 'nombre' }))}`) nombre
+          a(href=`/empresas?${new URLSearchParams(Object.assign(q ? { q } : {}, { orden: 'nombre' }))}`) nombre
 
       table.empresas-tabla
         thead
@@ -73,25 +58,11 @@ include mixins.pug
       if !lista.rows.length
         p Sin empresas que coincidan.
 
-      +paginacion(lista.pagina, lista.paginas, p => `/?${new URLSearchParams(Object.assign({}, baseParams, { p }))}`)
+      +paginacion(lista.pagina, lista.paginas, p => `/empresas?${new URLSearchParams(Object.assign({}, baseParams, { p }))}`)
 
     p.nota.
       La empresa se reconoce por el nombre publicado en el boletín (no incluye
       RFC), así que variantes muy distintas de un mismo nombre pueden figurar por
       separado. Solo se listan empresas: las personas físicas no se nombran.
-    if !q && resumen
-      .stats-grid
-        .stat
-          strong= num(resumen.empresas)
-          span empresas con juicios
-        .stat
-          strong= num(resumen.expedientes || 0)
-          span expedientes
-        .stat
-          strong= num(resumen.avisos || 0)
-          span avisos publicados
-        .stat
-          strong= `${(resumen.desde || '').slice(0, 4)} a ${(resumen.hasta || '').slice(0, 4)}`
-          span boletines cubiertos
 
   +siteFooter()

@@ -4,7 +4,7 @@ include mixins.pug
 
 +head(`${empresa.nombre}: juicios en la CDMX — ${siteTitle}`, `${num(empresa.expedientes || 0)} expedientes y ${num(empresa.avisos)} avisos de ${empresa.nombre} en el Boletín Judicial de la Ciudad de México.`)
   +siteHeader('empresas')
-  +breadcrumbs([[siteTitle, '/'], ['Empresas', '/'], [empresa.nombre]])
+  +breadcrumbs([[siteTitle, '/'], ['Empresas', '/empresas'], [empresa.nombre]])
 
   .container.empresa-view
     h1= empresa.nombre

@@ -226,10 +226,20 @@ function empresas(req) {
   };
 }
 
-// /empresas era el listado antes de que fuera la portada: se redirige a /.
-function empresasRedirect(req) {
-  const qs = new URLSearchParams(req.query).toString();
-  return { status: 301, headers: { Location: qs ? `/?${qs}` : '/' }, html: '' };
+// Portada: buscador general y tablas (empresas, boletines, juzgados, tipos),
+// al estilo de la portada de país de sociedad.info. Se indexa: no nombra
+// personas.
+function portada(req) {
+  return {
+    status: 200,
+    html: renderTemplate('portada', {
+      req,
+      datos: db.getPortada(),
+      resumen: db.hayEmpresas() ? db.getResumenEmpresas() : null,
+      personas: db.hayPersonas() ? db.getResumenPersonas().personas : null,
+      chart: db.getYearChart(),
+    }),
+  };
 }
 
 function empresa(req, params) {
@@ -274,5 +284,5 @@ function health() {
 }
 
 module.exports = {
-  health, home, personas, persona, juzgado, expediente, fecha, empresas, empresasRedirect, empresa, sources, renderTemplate, pugLocals,
+  health, home, portada, personas, persona, juzgado, expediente, fecha, empresas, empresa, sources, renderTemplate, pugLocals,
 };

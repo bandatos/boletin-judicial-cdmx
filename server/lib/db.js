@@ -28,6 +28,7 @@ function reloadDb() {
   resumen = null;
   resumenEmpresas = null;
   resumenPersonas = null;
+  portada = null;
   getDb();
 }
 
@@ -439,6 +440,41 @@ function getEmpresasDeEntradas(ids) {
   `).all(...ids);
 }
 
+// ── Portada ───────────────────────────────────────────────────────────────
+// Tablas de la portada (indexable, sin nombres de personas): empresas con
+// más avisos y expedientes, últimos boletines, días con más avisos,
+// juzgados y tipos de juicio. Se arman una vez por apertura de la DB.
+const TOP_PORTADA = 10;
+let portada = null;
+
+function getPortada() {
+  if (portada) return portada;
+  const { boletinesPorFecha, fechas, porJuzgado, porTipo } = getResumen();
+  const dias = fechas.map(iso => ({
+    iso,
+    avisos: boletinesPorFecha.get(iso).reduce((s, b) => s + b.n, 0),
+  }));
+  const top = (mapa, n) => [...mapa.entries()].sort((a, b) => b[1] - a[1]).slice(0, n);
+  let empresas = null;
+  if (hayEmpresas()) {
+    const cols = 'nombre, slug, avisos, expedientes, primer_boletin, ultimo_boletin';
+    empresas = {
+      porAvisos: getDb().prepare(`SELECT ${cols} FROM empresas ORDER BY avisos DESC LIMIT ${TOP_PORTADA}`).all(),
+      porExpedientes: getDb().prepare(
+        `SELECT ${cols} FROM empresas ORDER BY expedientes DESC LIMIT ${TOP_PORTADA}`
+      ).all(),
+    };
+  }
+  portada = {
+    empresas,
+    ultimosDias: dias.slice(-TOP_PORTADA).reverse(),
+    diasConMasAvisos: [...dias].sort((a, b) => b.avisos - a.avisos).slice(0, TOP_PORTADA),
+    juzgados: top(porJuzgado, TOP_PORTADA).map(([nombre, avisos]) => ({ nombre, slug: slugify(nombre), avisos })),
+    tipos: top(porTipo, TOP_PORTADA).map(([tipo, avisos]) => ({ tipo, avisos })),
+  };
+  return portada;
+}
+
 // ── Personas ──────────────────────────────────────────────────────────────
 // Tabla armada por build_db.py --personas (scraper/personas.py). Estas
 // páginas llevan noindex: nombran personas en juicios, muchos familiares.
@@ -534,6 +570,6 @@ function ping() {
 module.exports = {
   ping, getTipos, getAnios, findJuzgadoBySlug, searchEntradas, groupByExpediente, getExpedienteById,
   getYearChart, getStats, getResumen, getDia, getFechas, reloadDb,
-  hayPersonas, getPersonas, getPersona, getResumenPersonas, getAvisosPersona, PERSONAS_POR_PAGINA,
+  getPortada, hayPersonas, getPersonas, getPersona, getResumenPersonas, getAvisosPersona, PERSONAS_POR_PAGINA,
   hayEmpresas, getEmpresas, getEmpresa, getExpedientesEmpresa, getEmpresasDeEntradas, getResumenEmpresas, MAX_RESULTS, MAX_ROWS, CHART_COLORS, DB_PATH,
 };

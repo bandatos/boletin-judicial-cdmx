@@ -281,8 +281,30 @@ body.pdf-open { margin-right: var(--pdf-w); }
   body.pdf-open { margin-right: 0; }
 }
 
+/* ── Portada: tarjetas con pestañas (como la portada de país de sociedad.info) ── */
+.portada-view { margin-top: 1.5rem; margin-bottom: 3rem; }
+.tarjeta {
+  border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-card);
+  padding: 1.5rem; margin-bottom: 1.5rem;
+}
+.tarjeta-titulo { display: flex; align-items: center; justify-content: center; gap: .75rem; font-size: 1.4rem; margin-bottom: 1rem; }
+.tarjeta-icono {
+  display: inline-flex; align-items: center; justify-content: center; width: 2.6rem; height: 2.6rem;
+  border-radius: var(--radius); background: var(--crema-oscuro); font-size: 1.3rem;
+}
+.pestanas { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: .75rem; }
+.pestana {
+  border: 2px solid var(--verde); border-radius: var(--radius); background: var(--bg-card); color: var(--verde);
+  padding: .45em 1em; font: inherit; font-size: .9rem; font-weight: bold; cursor: pointer;
+}
+.pestana[aria-selected="true"] { background: var(--verde); color: #fff; }
+.pestana:focus-visible { outline: 3px solid var(--rojo); outline-offset: 2px; }
+.tarjeta-pie { text-align: right; margin-top: .75rem; }
+.tarjeta #chart-box { margin: 0; padding: 0; }
+
 /* ── Empresas ── */
 .empresas-view, .empresa-view { margin-top: 1.5rem; margin-bottom: 3rem; }
+.empresas-view .bloque { margin-top: .5rem; }
 .nota { font-size: .85rem; color: var(--fg-muted); margin: .4rem 0 1rem; }
 .orden { font-size: .85rem; color: var(--fg-muted); margin-bottom: .5rem; }
 .orden a { color: var(--accent); }

@@ -24,22 +24,7 @@ include mixins.pug
           option(value=a selected=(String(a) === String(anio)))= a
       button#search-btn(type="submit") Buscar
 
-  #chart-box
-    h2#chart-title Avisos por año
-    #chart
-      each y in chart.years
-        .chart-col(style=`height:${(y.total / chart.maxTotal) * 100}%` title=`${y.anio}: ${num(y.total)} avisos`)
-          each seg, i in y.segments
-            if seg.n
-              .chart-col-segment(style=`height:${(seg.n / y.total) * 100}%;background:${chart.colors[i]}`)
-    .chart-labels
-      each y in chart.years
-        .chart-col-label= y.anio
-    #chart-legend
-      each b, i in chart.buckets
-        span.chart-legend-item
-          span.chart-legend-swatch(style=`background:${chart.colors[i]}`)
-          = b
+  +graficoAnios(chart)
 
   #results
     if searched

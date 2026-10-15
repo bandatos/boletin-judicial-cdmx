@@ -1,0 +1,130 @@
+include head.pug
+include chrome.pug
+include mixins.pug
+
+//- Portada: buscador general y tablas por tema, con el orden de la portada
+//- de país de sociedad.info (tarjeta con título, pestañas, tabla y "ver
+//- todos"). Se indexa: no lleva nombres de personas.
+
+//- Tarjeta: título con ícono, contenido (block) y link a la sección.
+mixin tarjeta(icono, titulo, verTodos, verTodosTexto)
+  section.tarjeta
+    h2.tarjeta-titulo
+      span.tarjeta-icono(aria-hidden="true")= icono
+      = titulo
+    block
+    if verTodos
+      p.tarjeta-pie
+        a.boton-borde(href=verTodos)= verTodosTexto
+
+//- Pestañas: [{ id, titulo }]. Cada una muestra el tabpanel con ese id
+//- (behavior.js). Sin JS se ve la primera.
+mixin pestanas(grupo, pestanas)
+  .pestanas(role="tablist")
+    each p, i in pestanas
+      button.pestana(type="button" role="tab" id=`tab-${p.id}` aria-controls=p.id aria-selected=(i === 0 ? 'true' : 'false') data-grupo=grupo)= p.titulo
+
++head(`${siteTitle}: juicios en la Ciudad de México`, 'Busca en el Boletín Judicial del Poder Judicial de la Ciudad de México desde 2016: juicios civiles, mercantiles y familiares de empresas y personas, por nombre, expediente, juzgado o fecha.')
+  +siteHeader('')
+
+  .container.portada-view
+    section.infobanner
+      h1 Explora el Boletín Judicial de la Ciudad de México
+      p.
+        Los avisos que el Poder Judicial de la Ciudad de México publica cada día
+        hábil desde octubre de 2016: quiénes son las partes, el tipo de juicio,
+        el juzgado, el expediente y la liga a cada publicación oficial.
+      form(method="GET" action="/buscar")
+        input(type="search" name="q" placeholder="Nombre de persona o empresa, o número de expediente..." autocomplete="off" aria-label="Buscar en los avisos")
+        button(type="submit") Buscar
+      if resumen
+        p.cifras-portada
+          a(href="/empresas")= `${num(resumen.empresas)} empresas`
+          if personas
+            span(aria-hidden="true") ·
+            a(href="/personas")= `${num(personas)} personas`
+          if resumen.desde
+            - const [a1, a2] = [resumen.desde.slice(0, 4), (resumen.hasta || resumen.desde).slice(0, 4)]
+            span(aria-hidden="true") ·
+            a(href="/fecha")= a1 === a2 ? `boletines de ${a1}` : `boletines de ${a1} a ${a2}`
+
+    nav.acciones-portada(aria-label="Secciones")
+      a(href="/empresas") Empresas
+      a(href="/personas") Personas
+      a(href="/fecha") Lo publicado cada día
+      a(href="/sources") De dónde vienen los datos
+
+    if datos.empresas
+      +tarjeta('🏢', 'Empresas con más juicios', '/empresas', 'Ver todas las empresas')
+        +pestanas('empresas', [{ id: 'empresas-avisos', titulo: 'Con más avisos' }, { id: 'empresas-expedientes', titulo: 'Con más expedientes' }])
+        each grupo in [['empresas-avisos', datos.empresas.porAvisos], ['empresas-expedientes', datos.empresas.porExpedientes]]
+          div(id=grupo[0] role="tabpanel" aria-labelledby=`tab-${grupo[0]}` hidden=(grupo[0] !== 'empresas-avisos'))
+            table.empresas-tabla
+              thead
+                tr
+                  th Empresa
+                  th.num Avisos
+                  th.num Expedientes
+                  th Período
+              tbody
+                each e in grupo[1]
+                  tr
+                    td
+                      a(href=`/empresas/${e.slug}`)= e.nombre
+                    td.num= num(e.avisos)
+                    td.num= num(e.expedientes || 0)
+                    td.periodo= `${fechaCorta(e.primer_boletin)} a ${fechaCorta(e.ultimo_boletin)}`
+
+    +tarjeta('📅', 'Boletines publicados', '/fecha', 'Ver el calendario')
+      +pestanas('boletines', [{ id: 'boletines-recientes', titulo: 'Más recientes' }, { id: 'boletines-mas', titulo: 'Con más avisos' }])
+      each grupo in [['boletines-recientes', datos.ultimosDias], ['boletines-mas', datos.diasConMasAvisos]]
+        div(id=grupo[0] role="tabpanel" aria-labelledby=`tab-${grupo[0]}` hidden=(grupo[0] !== 'boletines-recientes'))
+          table.empresas-tabla
+            thead
+              tr
+                th Fecha
+                th.num Avisos
+            tbody
+              each d in grupo[1]
+                tr
+                  td
+                    a(href=`/fecha/${d.iso}`)= fechaLarga(d.iso)
+                  td.num= num(d.avisos)
+
+    +tarjeta('⚖️', 'Juzgados y tipos de juicio', '/buscar', 'Buscar avisos')
+      +pestanas('juzgados', [{ id: 'juzgados-avisos', titulo: 'Juzgados con más avisos' }, { id: 'tipos-avisos', titulo: 'Tipos de juicio más frecuentes' }])
+      div#juzgados-avisos(role="tabpanel" aria-labelledby="tab-juzgados-avisos")
+        table.empresas-tabla
+          thead
+            tr
+              th Juzgado
+              th.num Avisos
+          tbody
+            each j in datos.juzgados
+              tr
+                td
+                  a(href=`/juzgado/${j.slug}`)= j.nombre
+                td.num= num(j.avisos)
+      div#tipos-avisos(role="tabpanel" aria-labelledby="tab-tipos-avisos" hidden)
+        table.empresas-tabla
+          thead
+            tr
+              th Tipo de juicio
+              th.num Avisos
+          tbody
+            each t in datos.tipos
+              tr
+                td
+                  a(href=`/buscar?${new URLSearchParams({ tipo: t.tipo })}`)= t.tipo
+                td.num= num(t.avisos)
+
+    section.tarjeta
+      +graficoAnios(chart)
+
+    +tarjeta('🗄️', 'Fuentes de datos', '/sources', 'De dónde vienen los datos')
+      p.
+        Boletín Judicial del Poder Judicial de la Ciudad de México. Cada aviso
+        lleva a la página exacta del PDF oficial donde se publicó, para
+        verificarlo contra el original.
+
+  +siteFooter()

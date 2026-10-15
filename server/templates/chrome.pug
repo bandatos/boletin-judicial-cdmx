@@ -7,7 +7,7 @@ mixin siteHeader(activo)
       img.logo(src="/static/img/bandatos-logo.webp" alt="Bandatos" width="110" height="52")
       span.producto= siteTitle
     nav.menu
-      a(href="/" class=(activo === 'empresas' ? 'activo' : '')) Empresas
+      a(href="/empresas" class=(activo === 'empresas' ? 'activo' : '')) Empresas
       a(href="/personas" class=(activo === 'personas' ? 'activo' : '')) Personas
       a(href="/buscar" class=(activo === 'buscar' ? 'activo' : '')) Buscar avisos
       a(href="/fecha" class=(activo === 'fecha' ? 'activo' : '')) Por fecha

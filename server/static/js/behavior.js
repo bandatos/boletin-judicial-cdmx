@@ -49,3 +49,19 @@
     if (e.key === 'Escape' && !panel.hidden) cerrar();
   });
 })();
+
+// Pestañas de la portada: cada botón muestra su tabpanel y oculta los otros
+// del mismo grupo.
+(function () {
+  document.addEventListener('click', function (e) {
+    var tab = e.target.closest && e.target.closest('button.pestana');
+    if (!tab) return;
+    var grupo = tab.getAttribute('data-grupo');
+    var tabs = document.querySelectorAll('button.pestana[data-grupo="' + grupo + '"]');
+    for (var i = 0; i < tabs.length; i++) {
+      var activa = tabs[i] === tab;
+      tabs[i].setAttribute('aria-selected', activa ? 'true' : 'false');
+      document.getElementById(tabs[i].getAttribute('aria-controls')).hidden = !activa;
+    }
+  });
+})();
