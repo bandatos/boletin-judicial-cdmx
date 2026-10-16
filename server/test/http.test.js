@@ -426,7 +426,7 @@ test('el HTML lleva ETag y responde 304 si no cambió', async () => {
   const res = await fetch(base + '/sources');
   const etag = res.headers.get('etag');
   assert.ok(etag);
-  assert.equal(res.headers.get('cache-control'), 'public, max-age=300');
+  assert.equal(res.headers.get('cache-control'), 'no-cache');
   const again = await fetch(base + '/sources', { headers: { 'If-None-Match': etag } });
   assert.equal(again.status, 304);
 });

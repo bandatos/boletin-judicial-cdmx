@@ -34,9 +34,10 @@ function aCache(clave, r) {
   if (cacheHtml.size > CACHE_HTML_MAX) cacheHtml.delete(cacheHtml.keys().next().value);
 }
 
-// HTML: cache corta en el navegador (los datos cambian una vez por día) y
-// ETag para responder 304 sin mandar la página otra vez.
-const CACHE_CONTROL_HTML = 'public, max-age=300';
+// HTML: el navegador lo guarda pero revalida cada vez con el ETag (304 sin
+// cuerpo si no cambió). Con max-age, después de un deploy se mezclaban
+// páginas viejas y nuevas (menús distintos) durante unos minutos.
+const CACHE_CONTROL_HTML = 'no-cache';
 function etagDe(html) {
   return `"${crypto.createHash('md5').update(html).digest('hex').slice(0, 20)}"`;
 }
