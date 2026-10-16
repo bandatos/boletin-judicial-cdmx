@@ -75,7 +75,12 @@ def create_schema(conn):
             expediente  TEXT,
             num_acdos   INTEGER,
             anio        INTEGER,
-            pagina      INTEGER  -- página del PDF del boletín (1 = primera)
+            pagina      INTEGER, -- página del PDF del boletín (1 = primera)
+            -- acuerdo, sentencia_definitiva, sentencia_interlocutoria,
+            -- sentencia (sin calificar: las de sala) o audiencia
+            tipo_actuacion TEXT,
+            ponencia    INTEGER, -- sentencias de sala: "Sent. Pon 2"
+            fecha_acuerdo TEXT   -- "ACUERDOS DEL ..." del órgano, ISO
         );
 
 
@@ -240,8 +245,21 @@ def populate_boletin_ranges(conn, log):
 FIELDS = [
     "boletin_id", "juzgado", "sala", "secretaria",
     "actora", "demandada", "tipo_juicio", "expediente", "num_acdos", "pagina",
+    "tipo_actuacion", "ponencia",
 ]
-COLS_CARGA = FIELDS + ["tipo_juicio_norm", "anio"]
+COLS_CARGA = FIELDS + ["tipo_juicio_norm", "anio", "fecha_acuerdo"]
+
+MESES_LARGOS = {"ENERO": 1, "FEBRERO": 2, "MARZO": 3, "ABRIL": 4, "MAYO": 5, "JUNIO": 6, "JULIO": 7,
+                "AGOSTO": 8, "SEPTIEMBRE": 9, "SETIEMBRE": 9, "OCTUBRE": 10, "NOVIEMBRE": 11, "DICIEMBRE": 12}
+RE_FECHA_ACUERDO = re.compile(r"(\d{1,2})\s+DE\s+([A-ZÁÉÍÓÚ]+)\s+DEL?\s+(\d{4})")
+
+
+def fecha_acuerdo_iso(texto):
+    """'21 DE SEPTIEMBRE DEL 2026' -> '2026-09-21'."""
+    m = RE_FECHA_ACUERDO.search((texto or "").upper())
+    if not m or m.group(2) not in MESES_LARGOS:
+        return None
+    return f"{m.group(3)}-{MESES_LARGOS[m.group(2)]:02d}-{int(m.group(1)):02d}"
 BLOQUE = 64 * 1024 * 1024  # bytes de CSV por tarea
 
 # Estado de cada proceso de la carga paralela (lo fija _init_worker).
@@ -261,6 +279,7 @@ def _parse_bloque(bounds):
     col, loaded, en_rango = _W["col"], _W["loaded"], _W["en_rango"]
     idx = [col.get(k) for k in FIELDS]
     i_bol, i_tipo, i_exp = col["boletin_id"], col["tipo_juicio"], col["expediente"]
+    i_facdo = col.get("fecha_acuerdo")
 
     lineas = []
     with open(_W["path"], "rb") as f:
@@ -299,7 +318,8 @@ def _parse_bloque(bounds):
                 filas_partes.append((fila, int(otras_a), int(otras_d)))
         filas.append(
             tuple((row[i] or None) if i is not None else None for i in idx)
-            + (normalize_tipo(row[i_tipo] or None), int(m_anio.group(1)) if m_anio else None)
+            + (normalize_tipo(row[i_tipo] or None), int(m_anio.group(1)) if m_anio else None,
+               fecha_acuerdo_iso(row[i_facdo]) if i_facdo is not None else None)
         )
 
     # El bloque se escribe en un SQLite propio en vez de devolver las filas:
@@ -494,6 +514,14 @@ SQL_AGREGADOS_EMPRESAS = """
         -- entradas (año del expediente) y SQLite agruparía por esa.
         GROUP BY ee.empresa_id, substr(b.fecha_iso, 1, 4);
     CREATE INDEX idx_empresas_anios ON empresas_anios (empresa_id, anio);
+    DROP TABLE IF EXISTS empresas_meses;
+    CREATE TABLE empresas_meses AS
+        SELECT ee.empresa_id, substr(b.fecha_iso, 1, 7) AS mes, COUNT(*) AS n
+        FROM entradas_empresas ee
+        JOIN entradas en ON en.id = ee.entrada_id
+        JOIN boletines b ON b.id = en.boletin_id
+        GROUP BY ee.empresa_id, substr(b.fecha_iso, 1, 7);
+    CREATE INDEX idx_empresas_meses ON empresas_meses (empresa_id, mes);
     -- Un renglón por (empresa, órgano, expediente, rol) con su último aviso
     -- por FECHA: los ids no son cronológicos (los runs se cargan del más
     -- nuevo al más viejo). ultimo_id sale de la fila con la fecha máxima
@@ -507,6 +535,132 @@ SQL_AGREGADOS_EMPRESAS = """
         GROUP BY ee.empresa_id, COALESCE(en.sala, en.juzgado), en.expediente, ee.rol;
     CREATE INDEX idx_empresas_expedientes ON empresas_expedientes (empresa_id, ultima_fecha DESC);
 """
+
+
+# Desempeño por órgano y estadísticas por tipo de juicio (/salas,
+# /juzgados, pestaña de desempeño de /juzgado/:slug y /tipos). Todo por mes
+# de publicación: los gráficos se ven por año o por mes. Mide lo que publica
+# el boletín, no la carga de trabajo (no hay ingresos ni personal).
+SQL_ESTADISTICAS = """
+    DROP TABLE IF EXISTS organo_mes;
+    DROP TABLE IF EXISTS ponencia_mes;
+    DROP TABLE IF EXISTS organo_duracion;
+    DROP TABLE IF EXISTS tipo_duracion;
+    DROP TABLE IF EXISTS tipo_mes;
+    DROP TABLE IF EXISTS tipo_organo;
+
+    -- Demora de publicación: días entre la fecha del acuerdo ("ACUERDOS
+    -- DEL ...") y la del boletín. Fuera de 0 a 60 días se descarta: son
+    -- errores de lectura de la fecha.
+    CREATE TABLE organo_mes AS
+        SELECT COALESCE(e.sala, e.juzgado) AS organo,
+               CASE WHEN e.sala IS NOT NULL THEN 'sala' ELSE 'juzgado' END AS tipo_organo,
+               substr(b.fecha_iso, 1, 7) AS mes,
+               COUNT(*) AS avisos,
+               SUM(e.tipo_actuacion = 'acuerdo') AS acuerdos,
+               SUM(e.tipo_actuacion IN ('sentencia_definitiva', 'sentencia')) AS sentencias,
+               SUM(e.tipo_actuacion = 'sentencia_interlocutoria') AS interlocutorias,
+               SUM(e.tipo_actuacion = 'audiencia') AS audiencias,
+               COUNT(DISTINCT e.expediente) AS expedientes,
+               SUM(CASE WHEN julianday(b.fecha_iso) - julianday(e.fecha_acuerdo) BETWEEN 0 AND 60
+                        THEN julianday(b.fecha_iso) - julianday(e.fecha_acuerdo) END) AS demora_suma,
+               SUM(CASE WHEN julianday(b.fecha_iso) - julianday(e.fecha_acuerdo) BETWEEN 0 AND 60
+                        THEN 1 ELSE 0 END) AS demora_n
+        FROM entradas e JOIN boletines b ON b.id = e.boletin_id
+        WHERE COALESCE(e.sala, e.juzgado) IS NOT NULL AND b.fecha_iso IS NOT NULL
+        GROUP BY 1, 2, 3;
+    CREATE INDEX idx_organo_mes ON organo_mes (organo, mes);
+    CREATE INDEX idx_organo_mes_tipo ON organo_mes (tipo_organo, mes);
+
+    CREATE TABLE ponencia_mes AS
+        SELECT e.sala, e.ponencia, substr(b.fecha_iso, 1, 7) AS mes, COUNT(*) AS sentencias
+        FROM entradas e JOIN boletines b ON b.id = e.boletin_id
+        WHERE e.sala IS NOT NULL AND e.ponencia IS NOT NULL AND b.fecha_iso IS NOT NULL
+        GROUP BY 1, 2, 3;
+    CREATE INDEX idx_ponencia_mes ON ponencia_mes (sala, mes);
+
+    -- Tiempo hasta sentencia, por expediente: del primer aviso publicado a
+    -- la primera sentencia (definitiva, o de sala). Solo expedientes de
+    -- 2017 en adelante: los anteriores empezaron antes del primer boletín
+    -- disponible (octubre de 2016) y su primer aviso no es el real.
+    CREATE TEMP TABLE exp_fechas AS
+        SELECT COALESCE(e.sala, e.juzgado) AS organo, e.expediente,
+               MAX(e.tipo_juicio_norm) AS tipo,
+               MIN(b.fecha_iso) AS primero,
+               MIN(CASE WHEN e.tipo_actuacion IN ('sentencia_definitiva', 'sentencia')
+                        THEN b.fecha_iso END) AS sentencia
+        FROM entradas e JOIN boletines b ON b.id = e.boletin_id
+        WHERE e.anio >= 2017 AND e.expediente IS NOT NULL AND b.fecha_iso IS NOT NULL
+              AND COALESCE(e.sala, e.juzgado) IS NOT NULL
+        GROUP BY 1, 2;
+    CREATE TEMP TABLE exp_dias AS
+        SELECT organo, tipo, CAST(substr(sentencia, 1, 4) AS INTEGER) AS anio,
+               julianday(sentencia) - julianday(primero) AS dias
+        -- Si la sentencia es el primer aviso publicado no hay un tiempo que
+        -- medir (el expediente empezó antes de lo que se ve, o el boletín
+        -- no publicó sus acuerdos previos).
+        FROM exp_fechas WHERE sentencia IS NOT NULL AND sentencia > primero;
+    CREATE TABLE organo_duracion AS
+        SELECT organo, anio, COUNT(*) AS n,
+               MAX(CASE WHEN rn = (n + 1) / 2 THEN dias END) AS mediana,
+               MAX(CASE WHEN rn = (n + 3) / 4 THEN dias END) AS p25,
+               MAX(CASE WHEN rn = (3 * n + 3) / 4 THEN dias END) AS p75
+        FROM (SELECT organo, anio, dias,
+                     ROW_NUMBER() OVER (PARTITION BY organo, anio ORDER BY dias) AS rn,
+                     COUNT(*) OVER (PARTITION BY organo, anio) AS n
+              FROM exp_dias)
+        GROUP BY organo, anio;
+    CREATE INDEX idx_organo_duracion ON organo_duracion (organo, anio);
+    CREATE TABLE tipo_duracion AS
+        SELECT tipo, anio, COUNT(*) AS n,
+               MAX(CASE WHEN rn = (n + 1) / 2 THEN dias END) AS mediana,
+               MAX(CASE WHEN rn = (n + 3) / 4 THEN dias END) AS p25,
+               MAX(CASE WHEN rn = (3 * n + 3) / 4 THEN dias END) AS p75
+        FROM (SELECT tipo, anio, dias,
+                     ROW_NUMBER() OVER (PARTITION BY tipo, anio ORDER BY dias) AS rn,
+                     COUNT(*) OVER (PARTITION BY tipo, anio) AS n
+              FROM exp_dias WHERE tipo IS NOT NULL)
+        GROUP BY tipo, anio;
+    CREATE INDEX idx_tipo_duracion ON tipo_duracion (tipo, anio);
+    DROP TABLE exp_fechas;
+    DROP TABLE exp_dias;
+
+    CREATE TABLE tipo_mes AS
+        SELECT e.tipo_juicio_norm AS tipo, substr(b.fecha_iso, 1, 7) AS mes, COUNT(*) AS avisos,
+               SUM(e.tipo_actuacion IN ('sentencia_definitiva', 'sentencia')) AS sentencias
+        FROM entradas e JOIN boletines b ON b.id = e.boletin_id
+        WHERE e.tipo_juicio_norm IS NOT NULL AND b.fecha_iso IS NOT NULL
+        GROUP BY 1, 2;
+    CREATE INDEX idx_tipo_mes ON tipo_mes (tipo, mes);
+    CREATE INDEX idx_tipo_mes_mes ON tipo_mes (mes);
+
+    CREATE TABLE tipo_organo AS
+        SELECT tipo_juicio_norm AS tipo, COALESCE(sala, juzgado) AS organo, COUNT(*) AS avisos
+        FROM entradas
+        WHERE tipo_juicio_norm IS NOT NULL AND COALESCE(sala, juzgado) IS NOT NULL
+        GROUP BY 1, 2;
+    CREATE INDEX idx_tipo_organo ON tipo_organo (tipo, avisos DESC);
+"""
+
+# Con las tablas de empresas: quiénes litigan cada tipo de juicio.
+SQL_ESTADISTICAS_EMPRESAS = """
+    DROP TABLE IF EXISTS tipo_empresa;
+    CREATE TABLE tipo_empresa AS
+        SELECT en.tipo_juicio_norm AS tipo, ee.empresa_id, ee.rol, COUNT(*) AS avisos
+        FROM entradas_empresas ee JOIN entradas en ON en.id = ee.entrada_id
+        WHERE en.tipo_juicio_norm IS NOT NULL
+        GROUP BY 1, 2, 3;
+    CREATE INDEX idx_tipo_empresa ON tipo_empresa (tipo, rol, avisos DESC);
+"""
+
+
+def build_estadisticas(conn, log):
+    log("Estadísticas de órganos y tipos de juicio...")
+    conn.execute("PRAGMA temp_store=FILE")
+    conn.executescript(SQL_ESTADISTICAS)
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'entradas_empresas'").fetchone():
+        conn.executescript(SQL_ESTADISTICAS_EMPRESAS)
+    conn.commit()
 
 
 def build_agregados_empresas(conn, log):
@@ -777,6 +931,12 @@ def main():
                         help="Tabla de personas físicas que son parte (sección /personas del server, noindex)")
     parser.add_argument("--solo-personas", action="store_true",
                         help="Rearmar solo la tabla de personas de una base ya armada (--output)")
+    parser.add_argument("--workers", type=int,
+                        help="Procesos para la carga y las personas (por defecto, todos los núcleos menos uno)")
+    parser.add_argument("--estadisticas", action="store_true",
+                        help="Tablas de desempeño por órgano y de tipos de juicio (/salas, /juzgados, /tipos)")
+    parser.add_argument("--solo-estadisticas", action="store_true",
+                        help="Rearmar solo las estadísticas de una base ya armada (--output)")
     parser.add_argument("--solo-vocabulario", action="store_true",
                         help="Rearmar solo el vocabulario de sugerencias de una base ya armada (--output)")
     parser.add_argument("--web", action="store_true",
@@ -801,11 +961,18 @@ def main():
         log(f"Listo: {output}")
         return
     if args.solo_empresas:
-        recalcular_empresas(output, log)
+        recalcular_empresas(output, log, workers=args.workers)
         log(f"Listo: {output}")
         return
     if args.solo_personas:
-        build_personas(output, log)
+        build_personas(output, log, workers=args.workers)
+        log(f"Listo: {output}")
+        return
+    if args.solo_estadisticas:
+        conn = sqlite3.connect(output)
+        conn.execute("PRAGMA cache_size=-2000000")
+        build_estadisticas(conn, log)
+        conn.close()
         log(f"Listo: {output}")
         return
     if args.solo_vocabulario:
@@ -813,7 +980,8 @@ def main():
         log(f"Listo: {output}")
         return
     if not args.dir:
-        parser.error("--dir es obligatorio (salvo con --solo-empresas / --solo-personas / --solo-vocabulario / --agregados-empresas)")
+        parser.error("--dir es obligatorio (salvo con --solo-empresas / --solo-personas / --solo-vocabulario / "
+                     "--solo-estadisticas / --agregados-empresas)")
     data_dir = Path(args.dir)
 
     runs = find_runs(data_dir, args.since, args.exclude)
@@ -868,7 +1036,7 @@ def main():
         run_dir = csv_path.parent
         log(f"  {run_dir.name}...")
 
-        n = load_entradas(conn, csv_path, loaded, log, en_rango, tmp_dir=str(output.parent),
+        n = load_entradas(conn, csv_path, loaded, log, en_rango, workers=args.workers, tmp_dir=str(output.parent),
                           con_empresas=args.empresas)
         total += n
         log(f"    {n} entradas")
@@ -878,6 +1046,8 @@ def main():
     populate_boletin_ranges(conn, log)
     if args.empresas:
         build_empresas(conn, log)
+    if args.estadisticas:
+        build_estadisticas(conn, log)
     populate_meta(conn)
     conn.commit()
 
@@ -895,7 +1065,7 @@ def main():
     conn.close()
     if args.personas:
         # Después de cerrar: los procesos leen la base mientras se escribe.
-        build_personas(output, log)
+        build_personas(output, log, workers=args.workers)
     if args.empresas or args.personas:
         build_vocabulario(output, log)
 

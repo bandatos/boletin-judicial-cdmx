@@ -4,42 +4,74 @@ include mixins.pug
 
 - var titulo = expediente.demandada ? `${expediente.actora} vs. ${expediente.demandada}` : expediente.actora
 - var ultimoPdf = expediente.avisos.find(a => a.pdf_url)
+- var ultimo = expediente.avisos[0]
+- var organo = expediente.sala || expediente.juzgado
+- var referencia = [organo, `${expediente.sala ? 'toca' : 'expediente'} ${expediente.expediente}`].filter(Boolean).join(', ')
 
-+head(`${titulo} — ${siteTitle}`, `Expediente ${expediente.expediente} — ${siteTitle}`, true)
++head(`${titulo}: ${siteTitle}`, `Expediente ${expediente.expediente}: ${siteTitle}`, true)
   +siteHeader()
   main#contenido
 
-    .container
+    .container.expediente-view
       p
         a(href="/buscar") ← Volver al buscador
 
-      h2= titulo
+      h1.expediente-titulo= titulo
 
-      .card-meta
-        if expediente.tipo_juicio
-          span.tag= expediente.tipo_juicio
-        span Exp. #{expediente.expediente}
-        span= expediente.juzgado || '—'
-        if expediente.sala
-          span= expediente.sala
-        if expediente.secretaria
-          span= expediente.secretaria
-        if expediente.anio
-          span Año #{expediente.anio}
+      //- Lo que la persona no sabía: el número y el órgano, para copiar.
+      section.expediente-numero(aria-labelledby="titulo-numero")
+        h2#titulo-numero.visualmente-oculto Número de expediente
+        .expediente-numero-dato
+          span.expediente-numero-etiqueta= expediente.sala ? 'Sala' : 'Juzgado'
+          strong= organo || '—'
+        .expediente-numero-dato
+          span.expediente-numero-etiqueta= expediente.sala ? 'Toca' : 'Expediente'
+          strong= expediente.expediente
+        button.boton-copiar(type="button" data-copiar=referencia) Copiar
+        .card-meta
+          if expediente.tipo_juicio
+            span.tag= expediente.tipo_juicio
+          if expediente.secretaria
+            span= expediente.secretaria
+          if expediente.anio
+            span Año #{expediente.anio}
 
-      if ultimoPdf
-        h3 Boletín más reciente
-        .pdf-embed
-          embed(src=(ultimoPdf.pagina ? `${ultimoPdf.pdf_url}#page=${ultimoPdf.pagina}&toolbar=0` : `${ultimoPdf.pdf_url}#toolbar=0`) type="application/pdf" width="100%" height="600")
-        p.pdf-fallback
-          a(href=pdfHref(ultimoPdf) target="_blank" rel="noopener") Abrir el PDF en otra pestaña
+      .expediente-acciones
+        button.boton-guardar(type="button" hidden
+          data-id=expediente.id data-titulo=titulo data-expediente=expediente.expediente
+          data-organo=organo data-ultima=(ultimo && ultimo.fecha_iso) || '') Guardar en Mis expedientes
+        details.alerta-maqueta
+          summary Recibir avisos por correo
+          //- Maqueta: el campo de correo no tiene name, así que nunca se
+          //- envía. El botón lleva a la vista previa del correo.
+          form(action="/alertas/ejemplo" method="GET")
+            input(type="hidden" name="id" value=expediente.id)
+            label(for="alerta-correo") Tu correo
+            .alerta-fila
+              input#alerta-correo(type="email" autocomplete="email" placeholder="nombre@correo.com")
+              button(type="submit") Avisarme
+            p.nota Vista previa: este servicio todavía no funciona y no guardamos tu correo. Al enviar verás cómo sería el aviso.
 
-      if textoOriginal
-        h3 Texto original del boletín
-        p.raw-text-note (extracto aproximado, tal como lo extrajo pdftotext del PDF)
-        pre.raw-text= textoOriginal
+      p.actualizacion
+        if ultimo && ultimo.fecha_iso
+          | Último aviso: #[strong= fechaLarga(ultimo.fecha_iso)].
+        if datosHasta
+          |  Revisamos hasta el boletín del #{fechaLarga(datosHasta)}.
 
-      h3 Avisos (#{num(expediente.avisos.length)})
+      .aclaracion
+        p #[strong El boletín publica que hubo movimiento, no qué se decidió.] Cada aviso dice cuántos acuerdos hubo o si se dictó una sentencia, pero no su contenido. Para leerlo completo, consulta el expediente en Mi Tribunal si eres parte del juicio, o acude al #{expediente.sala ? 'tribunal' : 'juzgado'}.
+
+      section.que-hacer(aria-labelledby="titulo-que-hacer")
+        h2#titulo-que-hacer Qué hacer con este número
+        ul
+          li #[strong Si eres parte del juicio]: consulta el expediente digital en #[a(href="https://www.poderjudicialcdmx.gob.mx/wp-content/uploads/mi-tribunal-pjcdmx-cnpcyf-info.pdf" target="_blank" rel="noopener") Mi Tribunal], la plataforma del Poder Judicial de la Ciudad de México.
+          li #[strong En persona]: acude al #{expediente.sala ? 'tribunal' : 'juzgado'} con estos datos: #{referencia}.
+          li #[strong Si necesitas orientación]: #[a(href=TDV_URL target="_blank" rel="noopener") pregúntale a Todo Derecho Vecino], el asistente de Bandatos sobre derechos vecinales en la Ciudad de México. También puedes llevarle este número a una abogada o abogado.
+        if hayEstadisticas && organo
+          p.nota
+            a(href=organoHref(organo, expediente.sala ? 'sala' : 'juzgado')) Cómo trabaja #{expediente.sala ? 'esta sala' : 'este juzgado'}: sentencias y tiempos
+
+      h2 Avisos (#{num(expediente.avisos.length)})
       ul.avisos-list
         each a in expediente.avisos
           li
@@ -48,25 +80,38 @@ include mixins.pug
                 a(href=`/fecha/${a.fecha_iso}`)= fechaCorta(a.fecha_iso)
               else
                 = a.fecha || '—'
+            if actuacion(a)
+              = ' '
+              span.actuacion(class=(a.tipo_actuacion && a.tipo_actuacion.startsWith('sentencia') ? 'actuacion-sentencia' : null))= actuacion(a)
             if a.tipo_juicio
-              |  — #{a.tipo_juicio}
-            if a.num_acdos
-              |  (#{a.num_acdos} acdo#{a.num_acdos != 1 ? 's' : ''})
+              |  · #{a.tipo_juicio}
             if a.pdf_url
-              |  —
+              |  ·
               = ' '
               +pdfLink(a, a.pagina ? `Ver PDF del boletín (p. ${a.pagina})` : 'Ver PDF del boletín')
 
-      h3 Ver más
+      if ultimoPdf
+        h2 Boletín más reciente
+        .pdf-embed
+          embed(src=(ultimoPdf.pagina ? `${ultimoPdf.pdf_url}#page=${ultimoPdf.pagina}&toolbar=0` : `${ultimoPdf.pdf_url}#toolbar=0`) type="application/pdf" width="100%" height="600")
+        p.pdf-fallback
+          a(href=pdfHref(ultimoPdf) target="_blank" rel="noopener") Abrir el PDF en otra pestaña
+
+      if textoOriginal
+        h2 Texto del aviso en el boletín
+        p.raw-text-note Es el texto del aviso tal como sale en el PDF, no el del acuerdo. Extracto aproximado.
+        pre.raw-text= textoOriginal
+
+      h2 Ver más
       ul.related-links
         each e in empresasDelCaso || []
           li
             a(href=`/empresas/${e.slug}`)= `Todos los juicios de ${e.nombre}`
         if expediente.tipo_juicio_norm
           li
-            a(href=`/buscar?tipo=${encodeURIComponent(expediente.tipo_juicio_norm)}`)
-              = `Otros casos de tipo ${expediente.tipo_juicio_norm}`
-            |  (#{num(expediente.mismoTipo)})
+            a(href=(hayEstadisticas ? tipoHref(expediente.tipo_juicio_norm) : `/buscar?tipo=${encodeURIComponent(expediente.tipo_juicio_norm)}`))
+              = `Juicios de tipo ${expediente.tipo_juicio_norm}`
+            |  (#{num(expediente.mismoTipo)} avisos)
         if expediente.juzgado
           li
             a(href=juzgadoHref(expediente.juzgado))

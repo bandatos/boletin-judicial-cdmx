@@ -8,9 +8,12 @@ mixin siteHeader(activo)
       img.logo(src=asset('img/bandatos-logo.webp') alt="Bandatos" width="110" height="52" fetchpriority="high")
       span.producto= siteTitle
     nav.menu
+      a(href="/buscar" class=(activo === 'buscar' ? 'activo' : '')) Buscar
+      a(href="/mis-expedientes" class=(activo === 'mis' ? 'activo' : '')) Mis expedientes
       a(href="/empresas" class=(activo === 'empresas' ? 'activo' : '')) Empresas
-      a(href="/personas" class=(activo === 'personas' ? 'activo' : '')) Personas
-      a(href="/buscar" class=(activo === 'buscar' ? 'activo' : '')) Buscar avisos
+      if hayEstadisticas
+        a(href="/tipos" class=(activo === 'tipos' ? 'activo' : '')) Tipos de juicio
+        a(href="/salas" class=(activo === 'desempeno' ? 'activo' : '')) Desempeño
       a(href="/fecha" class=(activo === 'fecha' ? 'activo' : '')) Por fecha
       a(href="/sources" class=(activo === 'fuentes' ? 'activo' : '')) Fuentes
 
@@ -35,6 +38,8 @@ mixin siteFooter()
         #[a(href="https://bandatos.org" target="_blank" rel="noopener") Bandatos],
         con datos del Boletín Judicial del Poder Judicial de la Ciudad de México ·
         #[a(href="/sources") de dónde vienen los datos]
+      if datosHasta
+        p.datos-hasta Datos hasta el boletín del #[strong= fechaLarga(datosHasta)].
 
   aside#pdf-panel(aria-label="PDF del boletín" hidden)
     .pdf-panel-bar

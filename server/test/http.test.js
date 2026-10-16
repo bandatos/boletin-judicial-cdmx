@@ -85,7 +85,12 @@ test('GET /expediente/:idslug muestra el PDF embebido y links relacionados', asy
   const { body } = await get('/expediente/2');
   // Abre en la página del aviso (fixtures: pagina = id + 2).
   assert.match(body, /<embed src="https:\/\/example\.org\/boletin2\.pdf#page=4&amp;toolbar=0"/);
-  assert.match(body, /Otros casos de tipo Sucesorio Familiar/);
+  assert.match(body, /Juicios de tipo Sucesorio Familiar/);
+  // Número para copiar, aclaración del contenido y qué hacer con el número.
+  assert.match(body, /class="boton-copiar"/);
+  assert.match(body, /no qué se decidió/);
+  assert.match(body, /Qué hacer con este número/);
+  assert.match(body, /todo-derecho-vecino/);
   assert.match(body, /Otros casos de TRIGÉSIMO DE LO FAMILIAR/);
 });
 
@@ -276,7 +281,7 @@ test('la ficha lee el texto original también de .txt.gz', async () => {
 test('GET / es la portada: buscador general, tablas y sin nombres de personas', async () => {
   const { status, body } = await get('/');
   assert.equal(status, 200);
-  assert.match(body, /<h1>Explora el Boletín Judicial de la Ciudad de México<\/h1>/);
+  assert.match(body, /<h1>¿No sabes el número de expediente\?<\/h1>/);
   assert.match(body, /<form method="GET" action="\/buscar"/);
   assert.match(body, /href="\/empresas\/constructora-ejemplo"/);
   assert.match(body, /href="\/fecha\/2026-06-05"/);
@@ -475,4 +480,45 @@ test('¿Quisiste decir…? ante una errata, y nada si la búsqueda está bien es
   assert.match(errata, /href="\/buscar\?q=esquivel\+thebart">«esquivel thebart»<\/a>/);
   assert.doesNotMatch((await get('/buscar?q=thebart')).body, /¿Quisiste decir/);
   assert.match((await get('/buscar?' + new URLSearchParams({ q: 'constructra' }))).body, /«constructora»/);
+});
+
+test('pie con la fecha del último boletín cargado', async () => {
+  const { body } = await get('/buscar');
+  assert.match(body, /Datos hasta el boletín del/);
+});
+
+test('Mis expedientes: página noindex y API con ids numéricos y tope', async () => {
+  const pagina = await get('/mis-expedientes');
+  assert.equal(pagina.status, 200);
+  assert.match(pagina.body, /id="mis-expedientes"/);
+  assert.match(pagina.body, /name="robots" content="noindex"/);
+
+  const res = await fetch(`${base}/api/expedientes?ids=1,abc,999999999`);
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type'), /application\/json/);
+  const datos = await res.json();
+  assert.ok(datos.hasta);
+  assert.equal(datos.expedientes.length, 2);
+  assert.equal(datos.expedientes[0].encontrado, true);
+  assert.match(datos.expedientes[0].href, /^\/expediente\/1-/);
+  assert.equal(datos.expedientes[1].encontrado, false);
+});
+
+test('maqueta de alertas: el correo nunca se envía y la vista previa usa el expediente', async () => {
+  const ficha = await get('/expediente/1');
+  const campo = ficha.body.match(/<input id="alerta-correo"[^>]*>/)[0];
+  assert.doesNotMatch(campo, /name=/);
+  const previa = await get('/alertas/ejemplo?id=1');
+  assert.equal(previa.status, 200);
+  assert.match(previa.body, /vista previa/);
+  assert.match(previa.body, /no es una notificación oficial/);
+  assert.equal((await get('/alertas/ejemplo?id=x')).status, 404);
+});
+
+test('sin tablas de estadísticas (base vieja) las secciones nuevas dan 404 y no salen en el menú', async () => {
+  for (const ruta of ['/salas', '/juzgados', '/tipos', '/salas/primera-sala-civil', '/tipos/ordinario-civil']) {
+    assert.equal((await get(ruta)).status, 404, ruta);
+  }
+  const { body } = await get('/buscar');
+  assert.doesNotMatch(body, /href="\/salas"/);
 });

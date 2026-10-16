@@ -5,7 +5,7 @@
 const path = require('path');
 const pug = require('pug');
 const db = require('./db');
-const { expedienteHref, juzgadoHref } = require('./slug');
+const { expedienteHref, juzgadoHref, slugify } = require('./slug');
 const { getBoletinText, findExcerpt } = require('./raw-text');
 const fechas = require('./fechas');
 
@@ -121,11 +121,39 @@ const pugLocals = {
   // Link al PDF del boletín en la página del aviso (#page=N lo entienden
   // los visores de Chrome y Firefox).
   pdfHref: r => (r.pagina ? `${r.pdf_url}#page=${r.pagina}` : r.pdf_url),
+  // Qué se publicó en un aviso: "2 acuerdos", "Sentencia definitiva"...
+  actuacion,
+  dias: d => (d == null ? '—' : `${num(Math.round(d))} día${Math.round(d) === 1 ? '' : 's'}`),
+  // Demora de publicación: con un decimal (casi todas rondan 1 a 3 días).
+  diasDecimal: d => (d == null ? '—' : `${new Intl.NumberFormat('es-MX', { maximumFractionDigits: 1 }).format(d)} días`),
+  organoHref: (nombre, tipo) => `/${tipo === 'sala' ? 'salas' : 'juzgados'}/${slugify(nombre)}`,
+  tipoHref: tipo => `/tipos/${slugify(tipo)}`,
+  slugify,
+  // Orientación legal gratuita: el chatbot de Todo Derecho Vecino.
+  TDV_URL: 'https://bandatos.org/todo-derecho-vecino/',
 };
+
+const ACTUACIONES = {
+  sentencia_definitiva: 'Sentencia definitiva',
+  sentencia_interlocutoria: 'Sentencia interlocutoria',
+  sentencia: 'Sentencia',
+  audiencia: 'Audiencia',
+};
+function actuacion(a) {
+  if (a.tipo_actuacion && ACTUACIONES[a.tipo_actuacion]) return ACTUACIONES[a.tipo_actuacion];
+  if (a.num_acdos) return `${a.num_acdos} acuerdo${a.num_acdos !== 1 ? 's' : ''}`;
+  return a.tipo_actuacion === 'acuerdo' ? 'Acuerdo' : null;
+}
 
 function renderTemplate(name, locals) {
   const fn = compile(name);
-  return fn({ ...pugLocals, css: cssInline(), ...locals });
+  let datosHasta = null;
+  let hayEstadisticas = false;
+  try {
+    datosHasta = db.getUltimaFecha();
+    hayEstadisticas = db.hayEstadisticas();
+  } catch { /* sin base (404 de arranque): sin fecha ni menú de estadísticas */ }
+  return fn({ ...pugLocals, css: cssInline(), datosHasta, hayEstadisticas, ...locals });
 }
 
 // Con una sola palabra que aparece en más avisos que esto, se sugiere acotar.
@@ -318,6 +346,7 @@ function portada(req) {
       personas: db.hayPersonas() ? db.getResumenPersonas().personas : null,
       chart: db.getYearChart(),
       chartPublicacion: db.getPublicacionChart(),
+      chartPublicacionMes: db.getPublicacionChartMensual(),
     }),
   };
 }
@@ -332,19 +361,28 @@ function chartPorAnio(porAnio) {
   return { buckets: ['Avisos'], colors: [db.CHART_COLORS[0]], years, maxTotal: Math.max(1, ...years.map(y => y.total)) };
 }
 
+// Serie mensual de una parte (una sola serie, "Avisos").
+function chartPorMes(porMes) {
+  return porMes && porMes.length > 1 ? db.seriesSimples([], porMes).mensual : null;
+}
+
 // Avisos por año de publicación y tipos más frecuentes, a partir de todos
 // los avisos de una persona (solo cuando son pocos y se trajeron todos).
 function resumirAvisos(rows) {
   const anios = new Map();
+  const meses = new Map();
   const tipos = new Map();
   for (const r of rows) {
     const a = (r.fecha_iso || '').slice(0, 4);
     if (a) anios.set(a, (anios.get(a) || 0) + 1);
+    const m = (r.fecha_iso || '').slice(0, 7);
+    if (m) meses.set(m, (meses.get(m) || 0) + 1);
     const t = r.tipo_juicio_norm || 'Sin tipo reconocido';
     tipos.set(t, (tipos.get(t) || 0) + 1);
   }
   return {
     porAnio: [...anios.entries()].sort().map(([anio, n]) => ({ anio, n })),
+    porMes: [...meses.entries()].sort().map(([mes, n]) => ({ mes, n })),
     tipos: [...tipos.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([tipo, n]) => ({ tipo, n })),
   };
 }
@@ -359,6 +397,7 @@ function empresa(req, params) {
       req, clase: 'empresa', parte: e,
       totalExpedientes: e.expedientes || 0,
       chart: e.porAnio.length > 1 ? chartPorAnio(e.porAnio) : null,
+      chartMes: chartPorMes(e.porMes),
       tipos: e.tipos,
       expedientes: { filas: exp.rows, pagina: exp.pagina, paginas: exp.paginas, hayMas: exp.pagina < exp.paginas },
     }),
@@ -383,6 +422,7 @@ function persona(req, params) {
       req, clase: 'persona', parte: res.conteos ? { ...p, ...res.conteos } : p,
       totalExpedientes: res.totalExpedientes,
       chart: resumen && resumen.porAnio.length > 1 ? chartPorAnio(resumen.porAnio) : null,
+      chartMes: resumen ? chartPorMes(resumen.porMes) : null,
       tipos: resumen ? resumen.tipos : null,
       expedientes: {
         grupos: res.grupos, pagina: res.pagina, hayMas: res.hayMas,
@@ -391,6 +431,65 @@ function persona(req, params) {
     }),
   };
 }
+// ── Desempeño de salas y juzgados, tipos de juicio ───────────────────────
+function noHay(req) {
+  return { status: 404, html: renderTemplate('404', { req }) };
+}
+
+function organos(tipo) {
+  return req => {
+    if (!db.hayEstadisticas()) return noHay(req);
+    const orden = req.query.orden || 'sentencias';
+    return { status: 200, html: renderTemplate('organos', { req, tipo, orden, datos: db.getOrganos(tipo, orden) }) };
+  };
+}
+
+function organo(tipo) {
+  return (req, params) => {
+    const o = db.hayEstadisticas() ? db.getOrgano(params.slug) : null;
+    if (!o || o.tipo !== tipo) return noHay(req);
+    return { status: 200, html: renderTemplate('organo', { req, o }) };
+  };
+}
+
+function tipos(req) {
+  if (!db.hayEstadisticas()) return noHay(req);
+  return { status: 200, html: renderTemplate('tipos', { req, datos: db.getTiposEstadisticas() }) };
+}
+
+function tipo(req, params) {
+  const t = db.hayEstadisticas() ? db.getTipo(params.slug) : null;
+  if (!t) return noHay(req);
+  return { status: 200, html: renderTemplate('tipo', { req, t }) };
+}
+
+// ── Mis expedientes ───────────────────────────────────────────────────────
+// La lista está en el navegador: la página la pinta behavior.js con lo que
+// devuelve /api/expedientes (solo ids numéricos, con tope).
+function misExpedientes(req) {
+  return { status: 200, html: renderTemplate('mis-expedientes', { req, max: db.MAX_MIS_EXPEDIENTES }) };
+}
+
+function apiExpedientes(req) {
+  const ids = String(req.query.ids || '').split(',').map(x => parseInt(x, 10))
+    .filter(n => Number.isInteger(n) && n > 0).slice(0, db.MAX_MIS_EXPEDIENTES);
+  const filas = db.getResumenExpedientes(ids).map(r => (r.encontrado ? { ...r, href: expedienteHref({ id: r.id, actora: r.titulo, expediente: r.expediente }) } : r));
+  return {
+    status: 200,
+    headers: { 'Content-Type': 'application/json; charset=utf-8', 'X-Robots-Tag': 'noindex', 'Cache-Control': 'no-store' },
+    html: JSON.stringify({ hasta: db.getUltimaFecha(), expedientes: filas }),
+  };
+}
+
+// Maqueta del correo de alertas, con un expediente real: no hay suscripción
+// ni se guarda ningún correo (ver docs/propuesta-feedback-2026-10.md).
+function alertaEjemplo(req) {
+  const id = parseInt(req.query.id, 10);
+  const data = Number.isInteger(id) ? db.getExpedienteById(id) : null;
+  if (!data) return noHay(req);
+  return { status: 200, html: renderTemplate('alerta-ejemplo', { req, expediente: data }) };
+}
+
 function sources(req) {
   return { status: 200, html: renderTemplate('sources', { req, stats: db.getStats() }) };
 }
@@ -402,4 +501,6 @@ function health() {
 
 module.exports = {
   resaltar, health, home, portada, personas, persona, juzgado, expediente, fecha, empresas, empresa, sources, renderTemplate, pugLocals,
+  salas: organos('sala'), juzgados: organos('juzgado'), sala: organo('sala'), juzgadoDesempeno: organo('juzgado'),
+  tipos, tipo, misExpedientes, apiExpedientes, alertaEjemplo,
 };

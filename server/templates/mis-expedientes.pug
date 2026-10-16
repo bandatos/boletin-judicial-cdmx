@@ -1,0 +1,22 @@
+include head.pug
+include chrome.pug
+include mixins.pug
+
+//- /mis-expedientes: la lista vive en el navegador (localStorage). La pinta
+//- behavior.js con lo que devuelve /api/expedientes. noindex.
++head(`Mis expedientes: ${siteTitle}`, null, true)
+  +siteHeader('mis')
+  +breadcrumbs([[siteTitle, '/'], ['Mis expedientes']])
+  main#contenido
+    .container.mis-expedientes-view
+      h1.titulo-seccion Mis expedientes
+      p.intro Los expedientes que guardaste, del que tuvo movimiento más reciente al más viejo. Puedes ponerle a cada uno un nombre para reconocerlo.
+      #mis-expedientes(data-max=max aria-live="polite")
+        p.nota Cargando…
+      noscript
+        p Esta sección necesita JavaScript: la lista se guarda en tu navegador.
+      .aviso-privacidad
+        p #[strong Se guarda solo en este navegador.] No tenemos cuentas ni guardamos qué expedientes sigues. Si borras los datos del navegador o cambias de dispositivo, la lista se pierde.
+        p ¿Necesitas orientación sobre un juicio? #[a(href=TDV_URL target="_blank" rel="noopener") Pregúntale a Todo Derecho Vecino].
+
+  +siteFooter()

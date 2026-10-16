@@ -36,6 +36,10 @@ function reloadDb() {
   resumenEmpresas = null;
   resumenPersonas = null;
   portada = null;
+  ultimaFecha = null;
+  columnas.clear();
+  tablas.clear();
+  estadisticas = null;
   getDb();
 }
 
@@ -407,8 +411,9 @@ function getExpedienteById(id) {
   `).get(id);
   if (!row) return null;
 
+  const actuacion = hayColumna('entradas', 'tipo_actuacion') ? 'e.tipo_actuacion' : 'NULL AS tipo_actuacion';
   const avisos = getDb().prepare(`
-    SELECT e.id, e.boletin_id, e.tipo_juicio, e.num_acdos, e.pagina, b.fecha, b.fecha_iso, b.pdf_url
+    SELECT e.id, e.boletin_id, e.tipo_juicio, e.num_acdos, e.pagina, ${actuacion}, b.fecha, b.fecha_iso, b.pdf_url
     FROM entradas e
     LEFT JOIN boletines b ON e.boletin_id = b.id
     WHERE e.juzgado IS ? AND e.sala IS ? AND e.expediente = ?
@@ -549,10 +554,25 @@ function getFechas() {
 const EMPRESAS_POR_PAGINA = 50;
 const EXPEDIENTES_POR_PAGINA = 50;
 
+// Las secciones nuevas dependen de tablas y columnas que una base vieja no
+// tiene: se consulta una vez por apertura y se oculta lo que falte.
+const tablas = new Map();
 function hayTabla(nombre) {
-  return Boolean(getDb().prepare(
-    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?"
-  ).get(nombre));
+  if (!tablas.has(nombre)) {
+    tablas.set(nombre, Boolean(getDb().prepare(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?"
+    ).get(nombre)));
+  }
+  return tablas.get(nombre);
+}
+
+const columnas = new Map();
+function hayColumna(tabla, columna) {
+  const clave = `${tabla}.${columna}`;
+  if (!columnas.has(clave)) {
+    columnas.set(clave, getDb().prepare(`PRAGMA table_info(${tabla})`).all().some(c => c.name === columna));
+  }
+  return columnas.get(clave);
 }
 
 function hayEmpresas() {
@@ -600,7 +620,10 @@ function getEmpresa(slug) {
     const porAnio = d.prepare(
       'SELECT anio, n FROM empresas_anios WHERE empresa_id = ? ORDER BY anio'
     ).all(e.id);
-    return { ...e, tipos, porAnio, maxAnio: Math.max(1, ...porAnio.map(r => r.n)) };
+    const porMes = hayTabla('empresas_meses')
+      ? d.prepare('SELECT mes, n FROM empresas_meses WHERE empresa_id = ? ORDER BY mes').all(e.id)
+      : null;
+    return { ...e, tipos, porAnio, porMes, maxAnio: Math.max(1, ...porAnio.map(r => r.n)) };
   }
   const tipos = d.prepare(`
     SELECT COALESCE(en.tipo_juicio_norm, 'Sin tipo reconocido') AS tipo, COUNT(*) AS n
@@ -810,6 +833,340 @@ function getExpedientesPersona(persona, pagina) {
   return res;
 }
 
+// ── Fecha de actualización ────────────────────────────────────────────────
+// Último boletín cargado: va en el pie de todas las páginas y en la ficha,
+// para no confundir "no hubo movimiento" con "todavía no se cargó ese día".
+let ultimaFecha = null;
+function getUltimaFecha() {
+  if (ultimaFecha === null) {
+    ultimaFecha = getDb().prepare('SELECT MAX(fecha_iso) AS f FROM boletines WHERE n_entradas > 0').get().f || '';
+  }
+  return ultimaFecha;
+}
+
+// ── Series por año o por mes ──────────────────────────────────────────────
+// Mismo formato que getYearChart() (para el mixin graficoAnios): un período
+// por columna, con segmentos por bucket. Por mes se completan los meses sin
+// datos (abril a julio de 2020 no hubo boletines) para no juntar columnas
+// separadas en el tiempo.
+const MESES_CORTOS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+
+function mesesEntre(desde, hasta) {
+  const res = [];
+  let [a, m] = desde.split('-').map(Number);
+  const [ah, mh] = hasta.split('-').map(Number);
+  while (a < ah || (a === ah && m <= mh)) {
+    res.push(`${a}-${String(m).padStart(2, '0')}`);
+    m++;
+    if (m > 12) { m = 1; a++; }
+  }
+  return res;
+}
+
+// filas: [{ periodo: '2019' | '2019-04', bucket, n }]
+function serie(filas, { buckets, colors = CHART_COLORS, porMes = false, maxPeriodos = 0 } = {}) {
+  const datos = new Map();
+  for (const f of filas) {
+    if (!f.periodo) continue;
+    if (!datos.has(f.periodo)) datos.set(f.periodo, {});
+    datos.get(f.periodo)[f.bucket] = (datos.get(f.periodo)[f.bucket] || 0) + f.n;
+  }
+  let periodos = [...datos.keys()].sort();
+  if (porMes && periodos.length) periodos = mesesEntre(periodos[0], periodos[periodos.length - 1]);
+  if (maxPeriodos) periodos = periodos.slice(-maxPeriodos);
+  const sinDatos = [];
+  const years = periodos.map((p, i) => {
+    const d = datos.get(p) || {};
+    const total = buckets.reduce((s, b) => s + (d[b] || 0), 0);
+    if (!total) sinDatos.push(p);
+    const [anio, mes] = p.split('-');
+    return {
+      anio: p,
+      etiqueta: porMes ? (mes === '01' || i === 0 ? anio : '') : anio,
+      titulo: porMes ? `${MESES_CORTOS[Number(mes) - 1]}. ${anio}` : anio,
+      total,
+      segments: buckets.map(b => ({ bucket: b, n: d[b] || 0 })),
+    };
+  });
+  // Meses sin datos como texto ("abr. a jul. 2020"), para la nota del gráfico.
+  const huecos = [];
+  if (porMes) {
+    for (const p of sinDatos) {
+      const ult = huecos[huecos.length - 1];
+      if (ult && mesesEntre(ult[1], p).length === 2) ult[1] = p;
+      else huecos.push([p, p]);
+    }
+  }
+  const nombre = p => `${MESES_CORTOS[Number(p.slice(5)) - 1]}. ${p.slice(0, 4)}`;
+  return {
+    buckets, years, colors: colors.slice(0, buckets.length), porMes, sinDatos,
+    huecos: huecos.map(([a, b]) => (a === b ? nombre(a) : `${nombre(a)} a ${nombre(b)}`)),
+    maxTotal: Math.max(1, ...years.map(y => y.total)),
+  };
+}
+
+// Una sola serie ("Avisos") por año y por mes, desde [{ anio|mes, n }].
+function seriesSimples(porAnio, porMes) {
+  const anual = serie(porAnio.map(r => ({ periodo: String(r.anio), bucket: 'Avisos', n: r.n })), { buckets: ['Avisos'] });
+  const mensual = porMes && porMes.length
+    ? serie(porMes.map(r => ({ periodo: r.mes, bucket: 'Avisos', n: r.n })), { buckets: ['Avisos'], porMes: true })
+    : null;
+  return { anual, mensual };
+}
+
+// Avisos por mes de publicación, con los mismos cinco tipos de juicio que
+// getPublicacionChart(). Total del mes desde boletines; desglose desde
+// tipo_mes (build_db.py --estadisticas).
+function getPublicacionChartMensual() {
+  if (!hayEstadisticas()) return null;
+  const r = getResumen();
+  if (r.publicacionMensual) return r.publicacionMensual;
+  const d = getDb();
+  const top5 = getTipos().slice(0, 5);
+  const buckets = [...top5, 'Otro'];
+  const filas = [];
+  const totales = new Map(d.prepare(`
+    SELECT substr(fecha_iso, 1, 7) AS mes, SUM(n_entradas) AS n FROM boletines
+    WHERE fecha_iso IS NOT NULL AND n_entradas > 0 GROUP BY 1
+  `).all().map(x => [x.mes, x.n]));
+  const enTop = new Map();
+  for (const x of d.prepare(`SELECT mes, tipo, avisos FROM tipo_mes WHERE tipo IN (${top5.map(() => '?').join(',')})`).all(...top5)) {
+    filas.push({ periodo: x.mes, bucket: x.tipo, n: x.avisos });
+    enTop.set(x.mes, (enTop.get(x.mes) || 0) + x.avisos);
+  }
+  for (const [mes, n] of totales) filas.push({ periodo: mes, bucket: 'Otro', n: Math.max(0, n - (enTop.get(mes) || 0)) });
+  r.publicacionMensual = serie(filas, { buckets, porMes: true });
+  return r.publicacionMensual;
+}
+
+// ── Estadísticas: desempeño de salas y juzgados, tipos de juicio ─────────
+// Tablas de build_db.py --estadisticas. Miden lo que publica el boletín
+// (acuerdos, sentencias, audiencias), no la carga de trabajo.
+
+function hayEstadisticas() {
+  return hayTabla('organo_mes');
+}
+
+const ORDEN_MATERIAS = [
+  'Salas civiles', 'Salas familiares', 'Salas penales',
+  'Civiles', 'Civiles de proceso oral', 'Familiares', 'Familiares de proceso oral',
+  'Unidades de Gestión Judicial', 'Tutela de derechos humanos', 'Tribunales laborales', 'Otros',
+];
+
+function materiaDe(organo) {
+  const o = String(organo || '').toUpperCase();
+  if (/\bSALA\b/.test(o)) return o.includes('FAMILIAR') ? 'Salas familiares' : o.includes('PENAL') ? 'Salas penales' : 'Salas civiles';
+  if (o.includes('GESTIÓN')) return 'Unidades de Gestión Judicial';
+  if (o.includes('LABORAL')) return 'Tribunales laborales';
+  if (o.includes('TUTELA') || o.includes('DERECHOS HUMANOS')) return 'Tutela de derechos humanos';
+  if (o.includes('ORAL')) return o.includes('FAMILIAR') ? 'Familiares de proceso oral' : 'Civiles de proceso oral';
+  if (o.includes('FAMILIAR')) return 'Familiares';
+  if (o.includes('CIVIL')) return 'Civiles';
+  return 'Otros';
+}
+
+// Datos fijos por apertura de la base: órganos y tipos con su slug, y la
+// ventana de comparación (los 12 meses completos más recientes: el último
+// mes publicado suele estar incompleto).
+let estadisticas = null;
+function getEstadisticasBase() {
+  if (estadisticas) return estadisticas;
+  const d = getDb();
+  const organos = new Map();
+  for (const o of d.prepare('SELECT DISTINCT organo, tipo_organo FROM organo_mes').all()) {
+    organos.set(slugify(o.organo), { nombre: o.organo, tipo: o.tipo_organo, slug: slugify(o.organo), materia: materiaDe(o.organo) });
+  }
+  const tiposPorSlug = new Map();
+  for (const t of d.prepare('SELECT tipo, SUM(avisos) AS avisos FROM tipo_mes GROUP BY tipo ORDER BY avisos DESC').all()) {
+    const slug = slugify(t.tipo);
+    if (slug && !tiposPorSlug.has(slug)) tiposPorSlug.set(slug, { nombre: t.tipo, slug, avisos: t.avisos });
+  }
+  const ultimoMes = d.prepare('SELECT MAX(mes) AS m FROM organo_mes').get().m;
+  const meses = mesesEntre('2016-01', ultimoMes);
+  const hasta = meses[meses.length - 2] || ultimoMes;
+  const desde = meses[Math.max(0, meses.length - 13)];
+  // Año de comparación para el tiempo hasta sentencia: el último completo.
+  const anioDuracion = Number(hasta.slice(0, 4)) - (hasta.endsWith('-12') ? 0 : 1);
+  estadisticas = { organos, tiposPorSlug, ventana: { desde, hasta }, anioDuracion };
+  return estadisticas;
+}
+
+function nombreVentana({ desde, hasta }) {
+  const f = p => `${MESES_CORTOS[Number(p.slice(5)) - 1]}. ${p.slice(0, 4)}`;
+  return `${f(desde)} a ${f(hasta)}`;
+}
+
+const MIN_AVISOS_ORGANO = 50;
+const ORDENES_ORGANO = {
+  sentencias: 'sentencias DESC', avisos: 'avisos DESC', expedientes: 'expedientes DESC',
+  duracion: 'mediana IS NULL, mediana', demora: 'demora IS NULL, demora', nombre: 'organo',
+};
+
+// /salas y /juzgados: una tabla por materia con las cifras de la ventana.
+function getOrganos(tipoOrgano, orden) {
+  const base = getEstadisticasBase();
+  const { desde, hasta } = base.ventana;
+  const filas = getDb().prepare(`
+    SELECT m.organo, SUM(m.avisos) AS avisos, SUM(m.acuerdos) AS acuerdos, SUM(m.sentencias) AS sentencias,
+           SUM(m.interlocutorias) AS interlocutorias, SUM(m.audiencias) AS audiencias,
+           CAST(ROUND(AVG(m.expedientes)) AS INTEGER) AS expedientes,
+           ROUND(SUM(m.demora_suma) / NULLIF(SUM(m.demora_n), 0), 1) AS demora,
+           d.mediana AS mediana, d.n AS conDuracion
+    FROM organo_mes m
+    LEFT JOIN organo_duracion d ON d.organo = m.organo AND d.anio = ? AND d.n >= 20
+    WHERE m.tipo_organo = ? AND m.mes BETWEEN ? AND ?
+    GROUP BY m.organo HAVING SUM(m.avisos) >= ?
+    ORDER BY ${ORDENES_ORGANO[orden] || ORDENES_ORGANO.sentencias}
+  `).all(base.anioDuracion, tipoOrgano, desde, hasta, MIN_AVISOS_ORGANO);
+  const grupos = new Map();
+  for (const f of filas) {
+    const materia = materiaDe(f.organo);
+    if (!grupos.has(materia)) grupos.set(materia, []);
+    grupos.get(materia).push({ ...f, slug: slugify(f.organo) });
+  }
+  return {
+    ventana: nombreVentana(base.ventana), anioDuracion: base.anioDuracion,
+    grupos: ORDEN_MATERIAS.filter(m => grupos.has(m)).map(m => ({ materia: m, filas: grupos.get(m) })),
+  };
+}
+
+function getOrgano(slug) {
+  const base = getEstadisticasBase();
+  const o = base.organos.get(slug);
+  if (!o) return null;
+  const d = getDb();
+  const meses = d.prepare('SELECT * FROM organo_mes WHERE organo = ? ORDER BY mes').all(o.nombre);
+  const buckets = ['Sentencias', 'Interlocutorias y audiencias', 'Acuerdos'];
+  const filas = periodo => meses.flatMap(m => [
+    { periodo: periodo(m.mes), bucket: 'Sentencias', n: m.sentencias },
+    { periodo: periodo(m.mes), bucket: 'Interlocutorias y audiencias', n: m.interlocutorias + m.audiencias },
+    { periodo: periodo(m.mes), bucket: 'Acuerdos', n: m.avisos - m.sentencias - m.interlocutorias - m.audiencias },
+  ]);
+  const colores = [CHART_COLORS[0], CHART_COLORS[2], CHART_COLORS[5]];
+  const chartAnio = serie(filas(m => m.slice(0, 4)), { buckets, colors: colores });
+  const chartMes = serie(filas(m => m), { buckets, colors: colores, porMes: true });
+
+  const comparables = getOrganos(o.tipo).grupos.find(g => g.materia === o.materia);
+  const lista = comparables ? comparables.filas : [];
+  const actual = lista.find(f => f.organo === o.nombre) || null;
+  const puesto = actual ? [...lista].sort((a, b) => b.sentencias - a.sentencias).indexOf(actual) + 1 : null;
+  const mediana = arr => {
+    const v = arr.filter(x => x != null).sort((a, b) => a - b);
+    return v.length ? v[Math.floor((v.length - 1) / 2)] : null;
+  };
+  const referencia = {
+    sentencias: mediana(lista.map(f => f.sentencias)),
+    duracion: mediana(lista.map(f => f.mediana)),
+    demora: mediana(lista.map(f => f.demora)),
+    organos: lista.length,
+  };
+
+  const duracion = d.prepare('SELECT anio, n, mediana, p25, p75 FROM organo_duracion WHERE organo = ? AND n >= 20 ORDER BY anio').all(o.nombre);
+  const tipos = d.prepare('SELECT tipo, avisos FROM tipo_organo WHERE organo = ? ORDER BY avisos DESC LIMIT 8').all(o.nombre);
+  let ponencias = null;
+  if (o.tipo === 'sala') {
+    const filasPon = d.prepare(`
+      SELECT ponencia, substr(mes, 1, 4) AS anio, SUM(sentencias) AS n FROM ponencia_mes
+      WHERE sala = ? AND ponencia BETWEEN 1 AND 9 GROUP BY 1, 2 ORDER BY 2, 1
+    `).all(o.nombre);
+    const anios = [...new Set(filasPon.map(f => f.anio))].slice(-6);
+    const nums = [...new Set(filasPon.map(f => f.ponencia))].sort((a, b) => a - b);
+    const celda = new Map(filasPon.map(f => [`${f.ponencia}|${f.anio}`, f.n]));
+    ponencias = { anios, filas: nums.map(p => ({ ponencia: p, valores: anios.map(a => celda.get(`${p}|${a}`) || 0) })) };
+  }
+  return {
+    ...o, chartAnio, chartMes, actual, puesto, referencia, duracion, tipos, ponencias,
+    ventana: nombreVentana(base.ventana), anioDuracion: base.anioDuracion,
+    primerMes: meses.length ? meses[0].mes : null,
+  };
+}
+
+// /tipos: tipos de juicio con más avisos, con las cifras de la ventana y la
+// variación contra los 12 meses anteriores.
+const MAX_TIPOS = 60;
+function getTiposEstadisticas() {
+  const base = getEstadisticasBase();
+  const { desde, hasta } = base.ventana;
+  const meses = mesesEntre('2016-01', hasta);
+  const i = meses.indexOf(desde);
+  const antes = { desde: meses[Math.max(0, i - 12)], hasta: meses[Math.max(0, i - 1)] };
+  const filas = getDb().prepare(`
+    SELECT t.tipo,
+           SUM(t.avisos) AS total,
+           SUM(CASE WHEN t.mes BETWEEN ? AND ? THEN t.avisos ELSE 0 END) AS avisos,
+           SUM(CASE WHEN t.mes BETWEEN ? AND ? THEN t.sentencias ELSE 0 END) AS sentencias,
+           SUM(CASE WHEN t.mes BETWEEN ? AND ? THEN t.avisos ELSE 0 END) AS avisosAntes,
+           (SELECT mediana FROM tipo_duracion d WHERE d.tipo = t.tipo AND d.anio = ? AND d.n >= 20) AS mediana
+    FROM tipo_mes t GROUP BY t.tipo ORDER BY avisos DESC LIMIT ${MAX_TIPOS}
+  `).all(desde, hasta, desde, hasta, antes.desde, antes.hasta, base.anioDuracion);
+  return {
+    ventana: nombreVentana(base.ventana), anioDuracion: base.anioDuracion,
+    filas: filas.map(f => ({
+      ...f, slug: slugify(f.tipo),
+      variacion: f.avisosAntes ? Math.round(((f.avisos - f.avisosAntes) / f.avisosAntes) * 100) : null,
+    })),
+  };
+}
+
+function getTipo(slug) {
+  const base = getEstadisticasBase();
+  const t = base.tiposPorSlug.get(slug);
+  if (!t) return null;
+  const d = getDb();
+  const meses = d.prepare('SELECT mes, avisos, sentencias FROM tipo_mes WHERE tipo = ? ORDER BY mes').all(t.nombre);
+  const buckets = ['Sentencias', 'Otros avisos'];
+  const colores = [CHART_COLORS[0], CHART_COLORS[5]];
+  const filas = periodo => meses.flatMap(m => [
+    { periodo: periodo(m.mes), bucket: 'Sentencias', n: m.sentencias },
+    { periodo: periodo(m.mes), bucket: 'Otros avisos', n: m.avisos - m.sentencias },
+  ]);
+  const organos = d.prepare('SELECT organo, avisos FROM tipo_organo WHERE tipo = ? ORDER BY avisos DESC LIMIT 10').all(t.nombre)
+    .map(o => ({ ...o, slug: slugify(o.organo), materia: materiaDe(o.organo) }));
+  let empresas = null;
+  if (hayTabla('tipo_empresa')) {
+    const top = rol => d.prepare(`
+      SELECT e.nombre, e.slug, te.avisos FROM tipo_empresa te JOIN empresas e ON e.id = te.empresa_id
+      WHERE te.tipo = ? AND te.rol = ? ORDER BY te.avisos DESC LIMIT 10
+    `).all(t.nombre, rol);
+    empresas = { actora: top('actora'), demandada: top('demandada') };
+  }
+  const duracion = d.prepare('SELECT anio, n, mediana, p25, p75 FROM tipo_duracion WHERE tipo = ? AND n >= 20 ORDER BY anio').all(t.nombre);
+  return {
+    ...t, organos, empresas, duracion,
+    chartAnio: serie(filas(m => m.slice(0, 4)), { buckets, colors: colores }),
+    chartMes: serie(filas(m => m), { buckets, colors: colores, porMes: true }),
+    totalSentencias: meses.reduce((s, m) => s + m.sentencias, 0),
+  };
+}
+
+// ── Mis expedientes ───────────────────────────────────────────────────────
+// La lista vive en el navegador (localStorage): acá solo se devuelve el
+// último aviso de cada expediente pedido, por id de cualquiera de sus avisos.
+const MAX_MIS_EXPEDIENTES = 100;
+function getResumenExpedientes(ids) {
+  const d = getDb();
+  const fila = d.prepare(`
+    SELECT e.id, e.actora, e.demandada, e.expediente, e.juzgado, e.sala, e.tipo_juicio_norm, e.tipo_juicio
+    FROM entradas e WHERE e.id = ?
+  `);
+  const ultimo = d.prepare(`
+    SELECT COUNT(*) AS avisos, MAX(b.fecha_iso) AS ultima_fecha
+    FROM entradas e JOIN boletines b ON b.id = e.boletin_id
+    WHERE e.juzgado IS ? AND e.sala IS ? AND e.expediente = ?
+  `);
+  return ids.slice(0, MAX_MIS_EXPEDIENTES).map(id => {
+    const r = fila.get(id);
+    if (!r) return { id, encontrado: false };
+    const u = ultimo.get(r.juzgado, r.sala, r.expediente);
+    return {
+      id, encontrado: true,
+      titulo: r.demandada ? `${r.actora} vs. ${r.demandada}` : r.actora,
+      expediente: r.expediente, organo: r.sala || r.juzgado,
+      tipo: r.tipo_juicio_norm || r.tipo_juicio, avisos: u.avisos, ultima_fecha: u.ultima_fecha,
+    };
+  });
+}
+
 function getStats() {
   // fecha_iso y no fecha: fecha es el texto crudo del portal ("Consulta del
   // Boletin Judicial de fecha 22-sep.-2026") y su MIN/MAX es alfabético.
@@ -836,5 +1193,7 @@ module.exports = {
   ping, getGeneracion, getTipos, getAnios, findJuzgadoBySlug, searchEntradas, groupByExpediente, getExpedienteById,
   getYearChart, getPublicacionChart, getStats, getResumen, getDia, getFechas, reloadDb,
   sugerirConsulta, coincidenciasFichas, getPortada, hayPersonas, getPersonas, getPersona, getResumenPersonas, getExpedientesPersona, buscarExpedientes, EXPEDIENTES_POR_PAGINA, PERSONAS_POR_PAGINA,
+  getUltimaFecha, serie, seriesSimples, getPublicacionChartMensual, hayEstadisticas, materiaDe, getOrganos, getOrgano,
+  getTiposEstadisticas, getTipo, getResumenExpedientes, MAX_MIS_EXPEDIENTES, hayColumna,
   hayEmpresas, getEmpresas, getEmpresa, getExpedientesEmpresa, getEmpresasDeEntradas, getResumenEmpresas, MAX_RESULTS, MAX_ROWS, CANDIDATOS, CHART_COLORS, DB_PATH,
 };

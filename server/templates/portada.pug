@@ -12,14 +12,15 @@ include mixins.pug
 
     .container.portada-view
       section.infobanner
-        h1 Explora el Boletín Judicial de la Ciudad de México
+        h1 ¿No sabes el número de expediente?
         p.
-          Los avisos que el Poder Judicial de la Ciudad de México publica cada día
-          hábil desde octubre de 2016: quiénes son las partes, el tipo de juicio,
-          el juzgado, el expediente y la liga a cada publicación oficial.
+          Encuéntralo con el nombre de cualquiera de las partes. Buscamos en todos
+          los avisos que el Poder Judicial de la Ciudad de México publica cada día
+          hábil desde octubre de 2016, con la liga a cada publicación oficial.
         form(method="GET" action="/buscar")
-          input(type="search" name="q" placeholder="Nombre de persona o empresa, o número de expediente..." autocomplete="off" aria-label="Buscar en los avisos")
+          input(type="search" name="q" placeholder="Nombre de persona, empresa o institución" autocomplete="off" aria-label="Nombre de una de las partes")
           button(type="submit") Buscar
+        p.busqueda-secundaria ¿Ya tienes el número? También puedes escribirlo, por ejemplo «184/2025».
         if resumen
           p.cifras-portada
             a(href="/empresas")= `${num(resumen.empresas)} empresas`
@@ -31,17 +32,35 @@ include mixins.pug
               span(aria-hidden="true") ·
               a(href="/fecha")= a1 === a2 ? `boletines de ${a1}` : `boletines de ${a1} a ${a2}`
 
+      section.para-que(aria-labelledby="titulo-para-que")
+        h2#titulo-para-que Para qué sirve
+        ul
+          li
+            strong Te demandaron y todavía no te notificaron.
+            span Busca tu nombre: los acuerdos de cada juicio se publican en el boletín.
+          li
+            strong Un familiar tiene un juicio y no tienes los papeles.
+            span Con su nombre encuentras el juzgado y el número de expediente.
+          li
+            strong Hay una obra o un conflicto en tu colonia.
+            span Busca a la desarrolladora o a la empresa y mira qué juicios tiene.
+        p.nota
+          | Con el número puedes guardar el expediente en #[a(href="/mis-expedientes") Mis expedientes] para ver cuándo se mueve. ¿Necesitas orientación? #[a(href=TDV_URL target="_blank" rel="noopener") Pregúntale a Todo Derecho Vecino].
+
       nav.acciones-portada(aria-label="Secciones")
         a(href="/empresas") Empresas
         a(href="/personas") Personas
+        if hayEstadisticas
+          a(href="/tipos") Tipos de juicio
+          a(href="/salas") Desempeño de salas y juzgados
         a(href="/fecha") Lo publicado cada día
         a(href="/sources") De dónde vienen los datos
 
       +tarjeta('📊', 'Avisos por año')
         +pestanas('grafico', [{ id: 'grafico-publicacion', titulo: 'Por fecha de publicación' }, { id: 'grafico-expediente', titulo: 'Por año del expediente' }])
         #grafico-publicacion(role="tabpanel" aria-labelledby="tab-grafico-publicacion")
-          +graficoAnios(chartPublicacion)
-          p.nota Lo que publicó el boletín cada año. 2016 empieza en octubre, el primer boletín disponible.
+          +graficoAnioMes(chartPublicacion, chartPublicacionMes, 'publicacion-periodo')
+          p.nota Lo que publicó el boletín en cada período. 2016 empieza en octubre, el primer boletín disponible.
         #grafico-expediente(role="tabpanel" aria-labelledby="tab-grafico-expediente" hidden)
           +graficoAnios(chart)
           p.nota Avisos según el año del número de expediente ("184/2019" es 2019): de qué época son los juicios con acuerdos publicados. Los años recientes tienen menos porque esos juicios son nuevos.

@@ -43,12 +43,12 @@ include mixins.pug
 
       if chart || (tipos && tipos.length)
         +tarjeta('📊', 'Resumen')
-          - const pestanasResumen = [chart && { id: 'resumen-anios', titulo: 'Avisos por año' }, tipos && tipos.length && { id: 'resumen-tipos', titulo: 'Tipos de juicio' }].filter(Boolean)
+          - const pestanasResumen = [chart && { id: 'resumen-anios', titulo: 'Avisos en el tiempo' }, tipos && tipos.length && { id: 'resumen-tipos', titulo: 'Tipos de juicio' }].filter(Boolean)
           +pestanas('resumen', pestanasResumen)
           if chart
             #resumen-anios(role="tabpanel" aria-labelledby="tab-resumen-anios")
-              +graficoAnios(chart)
-              p.nota Avisos publicados en el boletín cada año.
+              +graficoAnioMes(chart, chartMes, 'resumen-periodo')
+              p.nota Avisos publicados en el boletín en cada período.
           if tipos && tipos.length
             #resumen-tipos(role="tabpanel" aria-labelledby="tab-resumen-tipos" hidden=Boolean(chart))
               table.empresas-tabla

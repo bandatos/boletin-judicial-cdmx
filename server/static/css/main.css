@@ -512,3 +512,94 @@ mark { background: #f3dfa2; color: inherit; padding: 0 .1em; border-radius: 2px;
 .juzgados-expediente ul { columns: 2 22rem; margin-top: .4rem; }
 .sugerencia { font-size: 1.05rem; margin: 1rem 0 .5rem; }
 .sugerencia a { font-weight: bold; }
+
+/* ── Portada: búsqueda sin número y para qué sirve ───────────────────── */
+.infobanner .busqueda-secundaria { font-size: .875rem; margin: .75rem auto 0; color: var(--fg-muted); }
+.para-que { max-width: var(--max); margin: 1.5rem auto; padding: 0 1.5rem; }
+.para-que h2 { font-size: 1.2rem; margin-bottom: .75rem; }
+.para-que ul { list-style: none; padding: 0; display: grid; gap: .75rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.para-que li { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: .9rem 1rem; }
+.para-que li strong { display: block; margin-bottom: .3rem; }
+.para-que li span { font-size: .9rem; color: var(--fg-muted); }
+
+/* ── Ficha del expediente ─────────────────────────────────────────────── */
+.expediente-titulo { font-size: 1.4rem; line-height: 1.35; margin: .5rem 0 1rem; }
+.expediente-numero {
+  display: flex; flex-wrap: wrap; align-items: flex-end; gap: .75rem 1.5rem;
+  background: var(--bg-card); border: 2px solid var(--verde); border-radius: var(--radius);
+  padding: 1rem 1.25rem; margin-bottom: 1rem;
+}
+.expediente-numero-dato { display: flex; flex-direction: column; }
+.expediente-numero-etiqueta { font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; color: var(--fg-muted); }
+.expediente-numero-dato strong { font-size: 1.15rem; }
+.expediente-numero .card-meta { flex-basis: 100%; margin-top: 0; }
+.boton-copiar, .boton-guardar, .alerta-maqueta summary, .alerta-maqueta button {
+  font: inherit; font-size: .9rem; padding: .45rem .9rem; border-radius: var(--radius);
+  border: 1px solid var(--verde); background: var(--bg-card); color: var(--verde); cursor: pointer;
+}
+.boton-copiar:hover, .boton-guardar:hover, .alerta-maqueta summary:hover { background: var(--bg-soft); }
+.boton-guardar[aria-pressed="true"] { background: var(--verde); color: #fff; }
+.expediente-acciones { display: flex; flex-wrap: wrap; gap: .75rem; align-items: flex-start; margin-bottom: 1rem; }
+.alerta-maqueta summary { list-style: none; display: inline-block; }
+.alerta-maqueta summary::-webkit-details-marker { display: none; }
+.alerta-maqueta[open] { flex-basis: 100%; }
+.alerta-maqueta form { margin-top: .6rem; max-width: 460px; }
+.alerta-maqueta label { display: block; font-size: .875rem; margin-bottom: .25rem; }
+.alerta-fila { display: flex; gap: .5rem; }
+.alerta-fila input { flex: 1; padding: .45rem .7rem; border: 1px solid var(--border); border-radius: var(--radius); font: inherit; }
+.alerta-maqueta button { background: var(--verde); color: #fff; }
+.actualizacion { font-size: .9rem; color: var(--fg-muted); }
+.aclaracion { background: #fbf3df; border-left: 4px solid #a8730f; padding: .8rem 1rem; border-radius: 0 var(--radius) var(--radius) 0; margin: 1rem 0; font-size: .95rem; }
+.que-hacer { margin: 1.25rem 0; }
+.que-hacer h2 { font-size: 1.15rem; margin-bottom: .5rem; }
+.que-hacer ul { padding-left: 1.2rem; display: grid; gap: .4rem; }
+.expediente-view h2 { font-size: 1.15rem; margin: 1.5rem 0 .6rem; }
+.actuacion { font-size: .85rem; background: var(--bg-soft); border-radius: 2px; padding: .05rem .35rem; }
+.actuacion-sentencia { background: #e1eadc; color: var(--verde); font-weight: 600; }
+
+/* ── Gráficos por año o por mes ───────────────────────────────────────── */
+.pestanas-periodo { justify-content: flex-end; }
+.pestanas-periodo .pestana { font-size: .8rem; padding: .2rem .6rem; }
+.chart.chart-mensual, .chart-labels.chart-mensual { gap: 1px; }
+.chart.chart-mensual .chart-col, .chart-labels.chart-mensual .chart-col-label { min-width: 2px; }
+.chart.chart-mensual .chart-col-segment { border-top-width: 1px; }
+.chart-labels.chart-mensual .chart-col-label { overflow: visible; white-space: nowrap; text-align: left; }
+
+/* ── Desempeño, tipos de juicio ───────────────────────────────────────── */
+.estadisticas-view { padding-bottom: 2rem; }
+.sobretitulo { font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; color: var(--fg-muted); margin: .5rem 0 0; }
+.subtitulo { font-size: 1.05rem; margin: 1.25rem 0 .5rem; }
+.intro { max-width: 760px; margin: .25rem 0 1rem; }
+.subnav { display: flex; flex-wrap: wrap; gap: .5rem; margin: .5rem 0 1rem; }
+.subnav a { padding: .35rem .8rem; border: 1px solid var(--border); border-radius: 999px; text-decoration: none; color: var(--fg); font-size: .9rem; }
+.subnav a[aria-current="page"] { background: var(--verde); border-color: var(--verde); color: #fff; }
+.stats-grid .stat small { display: block; font-size: .78rem; color: var(--fg-muted); margin-top: .2rem; }
+.tabla-scroll { overflow-x: auto; }
+.tabla-desempeno th a { color: inherit; text-decoration: underline dotted; }
+.tabla-desempeno th[aria-sort] a { text-decoration: underline; color: var(--verde); }
+.nota-metodo { background: var(--bg-soft); border-radius: var(--radius); padding: .6rem 1rem; margin: 0 0 1.25rem; font-size: .9rem; }
+.nota-metodo summary { cursor: pointer; font-weight: 600; }
+.nota-metodo ul { margin: .5rem 0 0; padding-left: 1.2rem; display: grid; gap: .35rem; }
+
+/* ── Mis expedientes ──────────────────────────────────────────────────── */
+.mis-lista { list-style: none; padding: 0; }
+.mis-cabecera { display: flex; align-items: center; gap: .75rem; margin-bottom: .4rem; }
+.mis-apodo { flex: 1; max-width: 360px; padding: .3rem .6rem; border: 1px dashed var(--border); border-radius: var(--radius); font: inherit; font-size: .9rem; background: transparent; }
+.mis-apodo:focus { border-style: solid; }
+.mis-nuevo { background: var(--rojo); color: #fff; font-size: .75rem; font-weight: 600; padding: .1rem .5rem; border-radius: 999px; }
+.mis-quitar { margin-top: .6rem; font-size: .85rem; }
+.aviso-privacidad { margin-top: 1.5rem; font-size: .9rem; color: var(--fg-muted); }
+
+/* ── Maqueta del correo de alertas ────────────────────────────────────── */
+.maqueta-aviso { background: #fbf3df; border-left: 4px solid #a8730f; padding: .8rem 1rem; margin: 1rem 0; }
+.correo-ejemplo { max-width: 620px; margin: 1.5rem auto; background: #fff; border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+.correo-cabecera { border-bottom: 1px solid var(--border); padding: .8rem 1.2rem; font-size: .9rem; }
+.correo-cabecera span { color: var(--fg-muted); display: inline-block; min-width: 4.5rem; }
+.correo-cuerpo { padding: 1.2rem; display: grid; gap: .8rem; }
+.correo-caso { background: var(--bg-soft); border-radius: var(--radius); padding: .8rem 1rem; }
+.correo-partes { font-weight: 600; }
+.correo-actuacion { color: var(--verde); font-weight: 600; }
+.correo-ejemplo .boton { display: inline-block; background: var(--verde); color: #fff; padding: .55rem 1rem; border-radius: var(--radius); text-decoration: none; }
+.correo-legal, .correo-pie { font-size: .8rem; color: var(--fg-muted); }
+
+.datos-hasta { font-size: .875rem; flex-basis: 100%; }

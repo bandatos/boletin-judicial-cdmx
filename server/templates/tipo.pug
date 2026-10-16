@@ -1,0 +1,74 @@
+include head.pug
+include chrome.pug
+include mixins.pug
+
+//- /tipos/:slug: un tipo de juicio. Se indexa: las partes se muestran solo
+//- si son empresas.
+- const ultimaDuracion = t.duracion.length ? t.duracion[t.duracion.length - 1] : null
++head(`${t.nombre} en la Ciudad de México: ${siteTitle}`, `Juicios de tipo ${t.nombre} en el Boletín Judicial de la Ciudad de México: avisos por año, juzgados, empresas que más litigan y tiempo hasta sentencia.`)
+  +siteHeader('tipos')
+  +breadcrumbs([[siteTitle, '/'], ['Tipos de juicio', '/tipos'], [t.nombre]])
+  main#contenido
+    .container.estadisticas-view
+      p.sobretitulo Tipo de juicio
+      h1= t.nombre
+      .stats-grid
+        .stat
+          strong= num(t.avisos)
+          span avisos desde 2016
+        .stat
+          strong= num(t.totalSentencias)
+          span sentencias
+        if ultimaDuracion
+          .stat
+            strong= dias(ultimaDuracion.mediana)
+            span tiempo hasta sentencia (#{ultimaDuracion.anio})
+      p
+        a.boton-borde(href=`/buscar?${new URLSearchParams({ tipo: t.nombre })}`) Buscar expedientes de este tipo
+
+      +tarjeta('📊', 'Avisos publicados')
+        +graficoAnioMes(t.chartAnio, t.chartMes, 'tipo-avisos')
+
+      if t.empresas && (t.empresas.actora.length || t.empresas.demandada.length)
+        +tarjeta('🏢', 'Empresas que más aparecen')
+          +pestanas('tipo-empresas', [{ id: 'tipo-actora', titulo: 'Como actora' }, { id: 'tipo-demandada', titulo: 'Como demandada' }])
+          each grupo in [['tipo-actora', t.empresas.actora], ['tipo-demandada', t.empresas.demandada]]
+            div(id=grupo[0] role="tabpanel" aria-labelledby=`tab-${grupo[0]}` hidden=(grupo[0] !== 'tipo-actora'))
+              if grupo[1].length
+                table.empresas-tabla
+                  thead
+                    tr
+                      th Empresa
+                      th.num Avisos
+                  tbody
+                    each e in grupo[1]
+                      tr
+                        td
+                          a(href=`/empresas/${e.slug}`)= e.nombre
+                        td.num= num(e.avisos)
+              else
+                p.nota Ninguna empresa con avisos de este tipo de ese lado del juicio.
+          p.nota Solo empresas. Las personas físicas no se nombran.
+
+      if t.organos.length
+        +tarjeta('⚖️', 'Dónde se tramita')
+          table.empresas-tabla
+            thead
+              tr
+                th Órgano
+                th Materia
+                th.num Avisos
+            tbody
+              each o in t.organos
+                tr
+                  td
+                    a(href=organoHref(o.organo, o.materia.startsWith('Salas') ? 'sala' : 'juzgado'))= o.organo
+                  td= o.materia
+                  td.num= num(o.avisos)
+
+      if t.duracion.length
+        +tarjeta('⏱️', 'Tiempo hasta sentencia')
+          +tablaDuracion(t.duracion)
+          p.nota Desde el primer aviso publicado del expediente hasta su primera sentencia definitiva. Solo expedientes de 2017 en adelante y años con al menos 20 sentencias.
+
+  +siteFooter()

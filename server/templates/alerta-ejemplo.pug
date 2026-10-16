@@ -1,0 +1,38 @@
+include head.pug
+include chrome.pug
+include mixins.pug
+
+//- /alertas/ejemplo?id=N: maqueta del correo de alertas con un expediente
+//- real. El servicio no existe todavía: no hay suscripción ni se guarda
+//- ningún correo. noindex.
+- const titulo = expediente.demandada ? `${expediente.actora} vs. ${expediente.demandada}` : expediente.actora
+- const ultimo = expediente.avisos[0]
+- const organo = expediente.sala || expediente.juzgado
++head(`Así se vería el aviso por correo: ${siteTitle}`, null, true)
+  +siteHeader()
+  main#contenido
+    .container.alerta-view
+      .maqueta-aviso
+        p #[strong Esto es una vista previa.] Los avisos por correo todavía no funcionan y no guardamos ningún correo. Así se vería el aviso cuando este expediente tenga movimiento.
+        p
+          a(href=expedienteHref(expediente)) ← Volver al expediente
+      article.correo-ejemplo(aria-label="Ejemplo de correo")
+        .correo-cabecera
+          p #[span De:] Boletín Judicial CDMX · Bandatos
+          p #[span Asunto:] Movimiento en #{expediente.sala ? 'la toca' : 'el expediente'} #{expediente.expediente}
+        .correo-cuerpo
+          p Hola:
+          p El Boletín Judicial del #[strong= fechaLarga(ultimo.fecha_iso)] publicó un aviso en un expediente que sigues:
+          .correo-caso
+            p.correo-partes= titulo
+            p= `${organo} · ${expediente.sala ? 'Toca' : 'Exp.'} ${expediente.expediente}`
+            if actuacion(ultimo)
+              p.correo-actuacion= actuacion(ultimo)
+          p
+            a.boton(href=pdfHref(ultimo)) Ver el aviso en el PDF oficial
+          p
+            a(href=expedienteHref(expediente)) Ver todo el historial del expediente
+          p.correo-legal Este correo no es una notificación oficial. Los plazos procesales corren desde la publicación en el Boletín Judicial. Podemos omitir avisos por errores de lectura del PDF: revisa siempre la fuente oficial. El boletín publica que hubo movimiento, no el contenido del acuerdo.
+          p.correo-pie Recibes este correo porque confirmaste que querías seguir este expediente. #[a(href="#") Dejar de seguirlo] · #[a(href="#") Ver todos mis avisos]
+
+  +siteFooter()

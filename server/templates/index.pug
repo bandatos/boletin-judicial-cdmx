@@ -16,7 +16,7 @@ include mixins.pug
       h1.visualmente-oculto Buscar avisos
     form#search-box(method="GET" action=formAction role="search")
       .search-row
-        input#q(type="search" name="q" placeholder="Nombre de persona o empresa, o número de expediente..." value=q autocomplete="off" aria-label="Buscar en los avisos")
+        input#q(type="search" name="q" placeholder="Nombre de persona, empresa o institución (o número de expediente)" value=q autocomplete="off" aria-label="Nombre de una de las partes o número de expediente")
         select#tipo(name="tipo" aria-label="Tipo de juicio")
           option(value="") Todos los tipos de juicio
           each t in tipos

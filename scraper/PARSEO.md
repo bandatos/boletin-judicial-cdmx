@@ -287,6 +287,53 @@ la cadena (`(?:\s|$)` en vez de `\s` a secas) — sin esto, un tipo como
 "Alimentos" al final de un segmento (sin nada después) nunca se detectaba
 como palabra de arranque.
 
+### Tocas con guiones, tocas encadenadas y colas (resuelto, oct. 2026)
+
+Hasta septiembre de 2024 el número de toca va con guiones (`Ord. Civ. T.
+84-2020-001, 1 Acdo.`, a veces sin el segundo: `T. 300-2019001`). Como
+`RE_TOCA_END` solo aceptaba barras, **toda la sección SALAS de esos años se
+perdía**: en la base había entre 12 y 1,856 avisos de salas por año de 2016 a
+2023. `_normalizar_toca` deja el número con barras (`84/2020/001`).
+
+Otros casos que fundían dos avisos en uno (se perdía el segundo):
+
+- **Tocas encadenadas** de las mismas partes. Con coma en el formato viejo
+  (`Esp. Hip. T. 39-2020-001, 1 Acdo., Esp. Hip. T. 39-2020-002, 1 Acdo.`)
+  y sin coma en el nuevo (`Ord. Civ. T. In 1256/2026/003, 2 Acdos. Ord. Civ.
+  T. In 1256/2026/002, 1 Acdo.`). `_prefijo_cadena` decide si lo que sigue es
+  otra toca de las mismas partes: sin coma exige que empiece con un tipo de
+  juicio (`RE_TIPO_START`, `RE_TIPO_CADENA`), para no pegarle las partes del
+  aviso anterior a uno nuevo de una sola parte (`Fulano su Sucesión. Suc. T.
+  ...`). `_parse_toca_cadena` copia actora y demandada del aviso anterior.
+- **Sentencias de sala sin conteo** en el formato viejo: `T. 436-2019-003,
+  Sent. Pon. 1.` (cuenta como una sentencia).
+- **Colas después del conteo**: el cuaderno (`, en Cuad. Amp.`, `Cuad. Amp.
+  Act.`, `en Expdllo.`) y la marca de publicación tardía (`no Publ. del 18
+  Sep 2026`, `mal Publ. del 31 de Enero.`).
+
+Medido sobre la sección SALAS: boletín 4115 (sep. 2026) de 889 a
+992 tocas de 992; boletín 1380 (feb. 2020) de 0 a 557 de 576. En una muestra
+de 15 boletines de 2016 a 2026 los avisos de juzgados quedan iguales.
+
+Pendiente: líneas de una o dos letras que el bucle toma como vacías (`3.`
+solo en su línea, cola de `Sent. Pon.`) y números de toca con erratas
+(`3842018-004`).
+
+### Tipo de actuación y ponencia (oct. 2026)
+
+Cada aviso guarda `tipo_actuacion`: `acuerdo`, `sentencia_definitiva`,
+`sentencia_interlocutoria`, `sentencia` (sin calificar: las de sala) o
+`audiencia`. Sale de la última marca de conteo del aviso (`1 Acdo.`, `2
+Sent. Def.`, `1 Aud.`, también invertida: `Sent. Def. 1 Núm. Exp.`) y, si no
+alcanza, de la subsección del órgano (`SENTENCIAS`, `SENTENCIA
+INTERLOCUTORIA DEL ...`, `AUDIENCIAS`), que ahora queda en `ctx["subseccion"]`.
+Sin marca ni subsección es un acuerdo: los avisos de las UGJ en formato
+CNPCyF no traen conteo sino una descripción corta de lo acordado
+(`Núm. Exp. 3193/2026, Reconoce Personalidad.`).
+
+`ponencia`: el número de `Sent. Pon 2` (o `Sent. Cump. Ejec. Amp. Pon. 2.`)
+en las sentencias de sala. El boletín no publica el nombre del magistrado.
+
 ### Variante con conteo después de "Núm. Exp." (resuelto)
 
 Descubierto durante la verificación del fix de arriba: en variantes más

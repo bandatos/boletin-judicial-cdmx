@@ -271,14 +271,96 @@ _RE_TOCA_POISON = (
     r"SOLO CONSULTA|BOLET[IÍ]N JUDICIAL|ACUERDOS DEL|SALAS?\b|"
     r"SECRETARI[OA] DE ACUERDOS|MAL PUBLICADOS|NO PUBLICADOS|AUDIENCIA\b"
 )
+#
+# Hasta septiembre de 2024 el número de toca va con guiones ("Ord. Civ. T.
+# 84-2020-001, 1 Acdo."), a veces sin el segundo ("T. 300-2019001, 002 y
+# 003"). Sin esa variante se perdía toda la sección SALAS de esos años. Se
+# exige año de cuatro dígitos y nada de espacios para no tomar fechas
+# sueltas ("del 2017- 05- 18"). _normalizar_toca lo deja con barras.
+#
+# En ese formato viejo las sentencias de sala no traen conteo: "T.
+# 436-2019-003, Sent. Pon. 1." o "Sent. Cump. Ejec. Amp. Pon. 2." (grupo 2
+# vacío: es una sentencia).
+#
+# Colas opcionales que se consumen con el aviso: el cuaderno después del
+# conteo ("en Cuad. Amp.", "Cuad. Amp. Act.", "en Cuad. de Const.", "en
+# Expdllo.", hasta 2024) y "no Publ. del 18 Sep 2026" / "mal Publ. del 31
+# de Enero.", marca de un acuerdo que se publica tarde. Sin consumirlas
+# acá quedaban al principio del aviso siguiente, que no "parece" un aviso
+# nuevo, y los dos se fundían en uno (se perdía el segundo).
 RE_TOCA_END = re.compile(
     r"T\."
     r"(?i:\s*(?:[A-ZÁÉÍÓÚÑ]{1,4}\.?\s*)?)"
-    r"(\d+/\d+(?:/\d+)?)"
+    r"(\d+/\d+(?:/\d+)?|\d{1,5}-\d{4}(?:-?\d{1,3})?)"
     r"(?:(?!(?i:" + _RE_TOCA_POISON + r")).){0,200}?"
-    r"(?i:(\d+)\s+(?:Acdos?|Audiencias?|Sent\.?)\.)",
+    r"(?i:(?:(\d+)\s+(?:Acdos?|Audiencias?|Sent\.?)\."
+    r"|Sent\.(?:\s*[a-záéíóúñ]+\.){0,4}\s*Pon\.?\s*\d{1,2}(?:\.|(?=\s+en\s)))"
+    r"(?:,?\s*(?:en\s+)?(?:Cuad|Expdllo)\.?(?:\s+(?:de\s+)?[A-Z][a-z]*\.?){0,3}(?:\s*[IVX\d]+)?\.?)?"
+    r"(?:\s*(?:no|mal)\s+Publ\.?(?:\s*del\s+\d{1,2}(?:\s+de)?\s+[a-z]{3,}\.?"
+    r"(?:\s+(?:del?\s+)?\d{4})?\.?)?)?)",
     re.DOTALL,
 )
+RE_TOCA_GUIONES = re.compile(r"^(\d+)-(\d{4})(?:-?(\d{1,3}))?$")
+
+
+def _normalizar_toca(numero):
+    """'84-2020-001' y '300-2019001' -> '84/2020/001' y '300/2019/001'."""
+    m = RE_TOCA_GUIONES.match(numero)
+    if not m:
+        return numero
+    return "/".join(g for g in m.groups() if g)
+
+
+# Tipo de actuación de cada aviso: la marca del conteo ("1 Acdo.", "2 Sent.
+# Def.", "1 Aud.") y, si la marca no alcanza, la subsección del órgano en la
+# que está ("SENTENCIAS", "SENTENCIA INTERLOCUTORIA DEL ...", "AUDIENCIAS").
+RE_MARCA_ACTUACION = re.compile(
+    r"\b\d+\s+(Acdos?|Audiencias?|Aud|Sent(?:encias?)?)\b\.?"
+    r"(?:\s*(Def|Definitivas?|Interl|Inter|Interlocutorias?)\b)?",
+    re.IGNORECASE,
+)
+# Variante con el número después ("Ord. Civil Oral Familiar Sent. Def. 1
+# Núm. Exp. 1545/2026.", "Aud. y Sent. Def. 1 Núm. Exp.").
+RE_MARCA_INVERTIDA = re.compile(
+    r"\b(Acdos?|Audiencias?|Aud|Sent(?:encias?)?)\b\.?"
+    r"(?:\s*(Def|Definitivas?|Interl|Inter|Interlocutorias?)\b\.?)?\s*\d+\s+Núm\.",
+    re.IGNORECASE,
+)
+RE_PONENCIA = re.compile(r"\bSent\.(?:\s*[a-záéíóúñ]+\.){0,4}\s*Pon\.?\s*(\d{1,2})\b", re.IGNORECASE)
+
+
+def _subseccion(line):
+    """Subsección del órgano que abre esta línea de encabezado, o None."""
+    u = line.upper()
+    if u.startswith("SENTENCIA"):
+        if "INTERLOCUTORIA" in u:
+            return "sentencia_interlocutoria"
+        if "DEFINITIVA" in u:
+            return "sentencia_definitiva"
+        return "sentencia"
+    if u.startswith("AUDIENCIA"):
+        return "audiencia"
+    return None
+
+
+def _tipo_actuacion(text, subseccion):
+    """Sin marca de conteo es un acuerdo, salvo que la subsección diga otra
+    cosa: los avisos de las UGJ en formato CNPCyF no traen conteo, sino lo
+    que se acordó ("Núm. Exp. 3193/2026, Reconoce Personalidad.")."""
+    marcas = list(RE_MARCA_ACTUACION.finditer(text or "")) + list(RE_MARCA_INVERTIDA.finditer(text or ""))
+    if not marcas:
+        return subseccion or "acuerdo"
+    ultima = max(marcas, key=lambda m: m.start())
+    palabra, calificador = ultima.group(1).lower(), (ultima.group(2) or "").lower()
+    if palabra.startswith("acdo"):
+        return "acuerdo"
+    if palabra.startswith("aud"):
+        return "audiencia"
+    if calificador.startswith("def"):
+        return "sentencia_definitiva"
+    if calificador.startswith("inter"):
+        return "sentencia_interlocutoria"
+    return subseccion if subseccion and subseccion.startswith("sentencia") else "sentencia"
 
 RE_VS = re.compile(r"\s+vs\.\s+", re.IGNORECASE)
 
@@ -478,7 +560,11 @@ def parse_pdf(text, boletin_id, fecha_raw):
     # abrir el PDF justo ahí (visor con #page=N). pdftotext separa las
     # páginas con un form feed (\f).
     ctx = {"seccion": None, "juzgado": None, "sala": None, "secretaria": None,
-           "fecha_acuerdo": None, "pagina": 1}
+           "fecha_acuerdo": None, "subseccion": None, "pagina": 1}
+    # Último aviso de toca cerrado y si el próximo aviso es otra toca de
+    # las mismas partes ("[,] [Tipo] T. NNN, N Acdo.", ver _prefijo_cadena).
+    ultimo_toca = None
+    en_cadena = False
     block = []
 
     def flush_bare():
@@ -517,8 +603,9 @@ def parse_pdf(text, boletin_id, fecha_raw):
             if line and _es_continuacion_organo(line):
                 organo.append(line)
                 continue
-            ctx.update(juzgado=" ".join(organo), sala=None, secretaria=None)
+            ctx.update(juzgado=" ".join(organo), sala=None, secretaria=None, subseccion=None)
             organo = None
+            ultimo_toca, en_cadena = None, False
 
         if not line or len(line) < 3:
             flush_bare()
@@ -551,21 +638,29 @@ def parse_pdf(text, boletin_id, fecha_raw):
             continue
 
         if line in SECTION_HEADERS:
-            ctx.update(seccion=line, juzgado=None, sala=None, secretaria=None)
+            ctx.update(seccion=line, juzgado=None, sala=None, secretaria=None, subseccion=None)
             block = []
+            ultimo_toca, en_cadena = None, False
             continue
 
         if line in SKIP_LINES or RE_SKIP_PREFIX.match(line):
+            sub = _subseccion(line)
+            if sub:
+                ctx["subseccion"] = sub
+            elif line.upper().startswith("ACUERDO"):
+                ctx["subseccion"] = None
             continue
 
         if RE_JUZGADO.match(line):
-            ctx.update(juzgado=line, sala=None, secretaria=None)
+            ctx.update(juzgado=line, sala=None, secretaria=None, subseccion=None)
             block = []
+            ultimo_toca, en_cadena = None, False
             continue
 
         if RE_SALA.match(line):
-            ctx.update(sala=line, juzgado=None, secretaria=None)
+            ctx.update(sala=line, juzgado=None, secretaria=None, subseccion=None)
             block = []
+            ultimo_toca, en_cadena = None, False
             continue
 
         if RE_SECRETARIA.match(line):
@@ -576,6 +671,7 @@ def parse_pdf(text, boletin_id, fecha_raw):
         m_ac = RE_ACUERDOS.match(line)
         if m_ac:
             ctx["fecha_acuerdo"] = m_ac.group(1).strip()
+            ctx["subseccion"] = None
             block = []
             continue
 
@@ -627,14 +723,29 @@ def parse_pdf(text, boletin_id, fecha_raw):
             # razón social: el punto sí cierra la entrada, aunque la próxima
             # sea de una sola parte (sin "vs." que la delate).
             corte_seguro = not is_toca and letra_suelta and not razon_social
-            if not corte_seguro and not _looks_like_new_entry_start(resto):
+            # Otra toca de las mismas partes a continuación (", Esp. Hip. T.
+            # 39-2020-002, 1 Acdo." o "Ord. Civ. T. In 1256/2026/002, 1
+            # Acdo."): también es un corte. Sin esto se seguía buscando el
+            # próximo terminador y la segunda toca quedaba dentro del texto
+            # de la primera (se perdía).
+            cadena = is_toca and _prefijo_cadena(resto) is not None
+            if not corte_seguro and not cadena and not _looks_like_new_entry_start(resto):
                 search_from = m_end.end()
                 continue
 
-            parse_fn = _parse_toca_entry if is_toca else _parse_entry
-            entry = parse_fn(joined[: m_end.end()], boletin_id, fecha_raw, ctx)
+            texto = joined[: m_end.end()]
+            entry = None
+            if is_toca and en_cadena:
+                entry = _parse_toca_cadena(texto, ultimo_toca, boletin_id, fecha_raw, ctx)
+                if entry is None:
+                    texto = texto.lstrip(",. ")
+            if entry is None:
+                parse_fn = _parse_toca_entry if is_toca else _parse_entry
+                entry = parse_fn(texto, boletin_id, fecha_raw, ctx)
             if entry:
                 entries.append(entry)
+            ultimo_toca = entry if is_toca else None
+            en_cadena = cadena
 
             if not resto:
                 block = []
@@ -742,8 +853,8 @@ def _parse_toca_entry(text, boletin_id, fecha_raw, ctx):
     if not m_toca:
         return None
 
-    expediente = m_toca.group(1).strip()
-    num_acdos = int(m_toca.group(2))
+    expediente = _normalizar_toca(m_toca.group(1).strip())
+    num_acdos = int(m_toca.group(2) or 1)
     pre = text[:m_toca.start()].strip()
 
     partes = RE_VS.split(pre, maxsplit=1)
@@ -757,6 +868,53 @@ def _parse_toca_entry(text, boletin_id, fecha_raw, ctx):
     demandada, tipo_juicio = _relocate_tipo_juicio(demandada, tipo_juicio)
 
     return _row(boletin_id, fecha_raw, ctx, actora, demandada, tipo_juicio, num_acdos, expediente, text)
+
+
+# Comienzo de otra toca de las mismas partes después de un aviso de toca:
+# ", Esp. Hip. T. 39-2020-002" (hasta 2024) u "Ord. Civ. T. In 1256/2026/002"
+# (después). Basta con que llegue el número: la cola puede venir en la
+# línea siguiente.
+RE_CADENA_TOCA = re.compile(
+    r"^([,.]?)\s*(.{0,120}?)\s*T\.(?i:\s*(?:[A-ZÁÉÍÓÚÑ]{1,4}\.?\s*)?)(?:\d+/\d+|\d{1,5}-\d{4})",
+    re.DOTALL,
+)
+
+
+# Abreviaturas de tipo de las salas que RE_TIPO_START no tiene ("Cnpcyf -
+# Especial de Arrendamiento Oral", "Suc.", "Controv. Fam.", "Prov. Prec.").
+RE_TIPO_CADENA = re.compile(r"^(?:Cnpcyf|Suc|Controv|Prov|Interd|Inc|Med|Proc|Rec)\b")
+
+
+def _prefijo_cadena(resto):
+    """Tipo de juicio de la toca encadenada que empieza en `resto`, o None
+    si `resto` es un aviso nuevo. Sin coma adelante se exige que sea un tipo
+    de juicio reconocible: un aviso de una sola parte ("Fulano su Sucesión.
+    Suc. Test. T. 12/2026/001") también llega a la toca sin "vs."."""
+    m = RE_CADENA_TOCA.match(resto)
+    if not m:
+        return None
+    coma, prefijo = m.group(1), m.group(2).strip()
+    if RE_VS.search(" " + prefijo + " "):
+        return None
+    if (coma == "," or not prefijo or RE_TIPO_START.match(prefijo) or RE_TIPO_CADENA.match(prefijo)
+            or _match_canonical_tipo(prefijo)):
+        return prefijo
+    return None
+
+
+def _parse_toca_cadena(text, padre, boletin_id, fecha_raw, ctx):
+    """Toca encadenada a la anterior, con las mismas partes (ver
+    _prefijo_cadena). Devuelve None si no hay aviso anterior o si lo que va
+    antes de la toca no es un tipo de juicio corto."""
+    m = RE_TOCA_END.search(text)
+    if not m or not padre:
+        return None
+    prefijo = text[:m.start()].strip().lstrip(",.").strip()
+    if len(prefijo) > 120 or RE_VS.search(" " + prefijo + " "):
+        return None
+    tipo = _match_canonical_tipo(prefijo) or prefijo.rstrip(" ,.") or padre["tipo_juicio"]
+    return _row(boletin_id, fecha_raw, ctx, padre["actora"], padre["demandada"], tipo,
+                int(m.group(2) or 1), _normalizar_toca(m.group(1).strip()), text)
 
 
 # Restos de la entrada anterior que quedan al principio de la actora: la
@@ -783,6 +941,8 @@ def _row(boletin_id, fecha_raw, ctx, actora, demandada, tipo_juicio, num_acdos, 
         "tipo_juicio": tipo_juicio,
         "num_acdos": num_acdos,
         "expediente": expediente,
+        "tipo_actuacion": _tipo_actuacion(raw_text, ctx.get("subseccion")),
+        "ponencia": int(m_pon.group(1)) if (m_pon := RE_PONENCIA.search(raw_text or "")) else None,
         "raw_text": raw_text,
     }
 

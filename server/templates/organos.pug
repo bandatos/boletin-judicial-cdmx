@@ -1,0 +1,50 @@
+include head.pug
+include chrome.pug
+include mixins.pug
+include _metodo.pug
+
+//- /salas y /juzgados: una tabla por materia con las cifras de los últimos
+//- 12 meses completos. Se indexa: no nombra personas.
+- const esSala = tipo === 'sala'
+- const titulo = esSala ? 'Desempeño de las salas' : 'Desempeño de los juzgados'
+- const base = esSala ? '/salas' : '/juzgados'
+- const columnas = [['nombre', esSala ? 'Sala' : 'Juzgado', false], ['sentencias', esSala ? 'Sentencias' : 'Sentencias definitivas', true], ['expedientes', 'Expedientes con movimiento por mes', true], ['duracion', `Tiempo hasta sentencia (${datos.anioDuracion})`, true], ['demora', 'Demora de publicación', true]]
++head(`${titulo}: ${siteTitle}`, `Sentencias, expedientes con movimiento, tiempo hasta sentencia y demora de publicación de cada ${esSala ? 'sala' : 'juzgado'} del Poder Judicial de la Ciudad de México, según su Boletín Judicial.`)
+  +siteHeader('desempeno')
+  +breadcrumbs([[siteTitle, '/'], [titulo]])
+  main#contenido
+    .container.estadisticas-view
+      h1.titulo-seccion= titulo
+      nav.subnav(aria-label="Instancia")
+        a(href="/salas" aria-current=(esSala ? 'page' : null)) Salas (segunda instancia)
+        a(href="/juzgados" aria-current=(esSala ? null : 'page')) Juzgados (primera instancia)
+      p.intro
+        if esSala
+          | Las salas resuelven las apelaciones contra lo que deciden los juzgados. Cifras de #{datos.ventana}.
+        else
+          | Los juzgados son la primera instancia: ahí empieza cada juicio. Cifras de #{datos.ventana}.
+      +notaMetodo(datos.ventana, datos.anioDuracion)
+      each g in datos.grupos
+        section.tarjeta
+          h2.tarjeta-titulo= g.materia
+          .tabla-scroll
+            table.empresas-tabla.tabla-desempeno
+              caption.visualmente-oculto= `${g.materia}, ${datos.ventana}`
+              thead
+                tr
+                  each c in columnas
+                    th(class=(c[2] ? 'num' : null) aria-sort=(orden === c[0] ? (c[0] === 'nombre' || c[0] === 'duracion' || c[0] === 'demora' ? 'ascending' : 'descending') : null))
+                      a(href=`${base}?orden=${c[0]}`)= c[1]
+              tbody
+                each f in g.filas
+                  tr
+                    td
+                      a(href=organoHref(f.organo, tipo))= f.organo
+                    td.num= num(f.sentencias)
+                    td.num= num(f.expedientes)
+                    td.num= dias(f.mediana)
+                    td.num= diasDecimal(f.demora)
+      if !datos.grupos.length
+        p Todavía no hay datos de desempeño en esta base.
+
+  +siteFooter()

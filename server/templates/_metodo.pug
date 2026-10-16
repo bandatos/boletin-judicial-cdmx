@@ -1,0 +1,10 @@
+//- Nota de método compartida por las páginas de desempeño y tipos de juicio.
+mixin notaMetodo(ventana, anioDuracion)
+  details.nota-metodo
+    summary Qué se mide y qué no
+    ul
+      li Cuenta lo que publica el Boletín Judicial: acuerdos, sentencias y audiencias de cada órgano. No mide la carga de trabajo: el boletín no informa cuántos asuntos ingresan ni cuánto personal tiene cada órgano.
+      li Las comparaciones usan los 12 meses completos más recientes (#{ventana}) y solo entre órganos de la misma materia.
+      li #[strong Tiempo hasta sentencia]: días entre el primer aviso publicado del expediente y su primera sentencia definitiva (en salas, la que resuelve la apelación). Solo expedientes de 2017 en adelante, porque el primer boletín disponible es de octubre de 2016, y sin los que tienen la sentencia como primer aviso publicado. El primer aviso publicado no es la fecha en que empezó el juicio. Se muestra la mediana de #{anioDuracion}.
+      li #[strong Demora de publicación]: días entre la fecha del acuerdo y el boletín que lo publica.
+      li Los avisos se leen del PDF del boletín con un programa: puede haber errores de lectura. Cada aviso enlaza a la página del PDF oficial para verificarlo.

@@ -100,27 +100,63 @@ mixin paginacion(actual, total, href, hayMas)
         a.page.arrow(href=href(actual + 1) aria-label="Página siguiente" rel="next")
           span(aria-hidden="true") →
 
-//- Avisos por año, apilados por tipo de juicio (colores en db.CHART_COLORS).
-//- chart: db.getYearChart() (año del expediente) o db.getPublicacionChart().
+//- Avisos por período (año o mes), apilados por bucket (colores en
+//- chart.colors). chart: db.getYearChart(), db.getPublicacionChart() o
+//- db.serie(). Por mes la etiqueta va solo en enero y el resumen accesible
+//- se da por año (120 meses en un aria-label no se pueden escuchar).
 mixin graficoAnios(chart, titulo)
   .chart-box
     if titulo
       h2.chart-title= titulo
-    - const resumenChart = chart.years.map(y => `${y.anio}: ${num(y.total)}`).join('; ')
-    .chart(role="img" aria-label=`${titulo || 'Avisos por año'}. ${resumenChart} avisos.`)
+    - const porAnioResumen = new Map()
+    - for (const y of chart.years) { const a = String(y.anio).slice(0, 4); porAnioResumen.set(a, (porAnioResumen.get(a) || 0) + y.total) }
+    - const resumenChart = [...porAnioResumen].map(([a, n]) => `${a}: ${num(n)}`).join('; ')
+    .chart(class=chart.porMes ? 'chart-mensual' : null role="img" aria-label=`${titulo || (chart.porMes ? 'Avisos por mes' : 'Avisos por año')}. Total por año: ${resumenChart}.`)
       each y in chart.years
-        .chart-col(style=`height:${(y.total / chart.maxTotal) * 100}%` data-valor=`${y.anio}: ${num(y.total)} avisos` aria-hidden="true")
+        .chart-col(style=`height:${(y.total / chart.maxTotal) * 100}%` data-valor=`${y.titulo || y.anio}: ${num(y.total)} avisos` aria-hidden="true")
           each seg, i in y.segments
             if seg.n
               .chart-col-segment(style=`height:${(seg.n / y.total) * 100}%;background:${chart.colors[i]}`)
-    .chart-labels(aria-hidden="true")
+    .chart-labels(class=chart.porMes ? 'chart-mensual' : null aria-hidden="true")
       each y in chart.years
-        .chart-col-label= y.anio
-    .chart-legend(aria-hidden="true")
-      each b, i in chart.buckets
-        span.chart-legend-item
-          span.chart-legend-swatch(style=`background:${chart.colors[i]}`)
-          = b
+        .chart-col-label= y.etiqueta != null ? y.etiqueta : y.anio
+    if chart.buckets.length > 1
+      .chart-legend(aria-hidden="true")
+        each b, i in chart.buckets
+          span.chart-legend-item
+            span.chart-legend-swatch(style=`background:${chart.colors[i]}`)
+            = b
+    if chart.huecos && chart.huecos.length
+      p.nota Sin boletines publicados en #{chart.huecos.join(', ')}.
+
+//- El mismo gráfico por año y por mes, con un selector. Sin serie mensual
+//- (base sin estadísticas), solo el anual.
+mixin graficoAnioMes(anual, mensual, id, titulo)
+  if mensual
+    +pestanas(id, [{ id: `${id}-anio`, titulo: 'Por año' }, { id: `${id}-mes`, titulo: 'Por mes' }], 'pestanas-periodo')
+    div(id=`${id}-anio` role="tabpanel" aria-labelledby=`tab-${id}-anio`)
+      +graficoAnios(anual, titulo)
+    div(id=`${id}-mes` role="tabpanel" aria-labelledby=`tab-${id}-mes` hidden)
+      +graficoAnios(mensual, titulo)
+  else
+    +graficoAnios(anual, titulo)
+
+//- Tiempo hasta sentencia por año: mediana y rango intercuartil.
+mixin tablaDuracion(filas)
+  table.empresas-tabla
+    thead
+      tr
+        th Año de la sentencia
+        th.num Expedientes
+        th.num Mediana
+        th.num La mitad entre
+    tbody
+      each d in filas.slice().reverse()
+        tr
+          td= d.anio
+          td.num= num(d.n)
+          td.num= dias(d.mediana)
+          td.num= `${dias(d.p25)} y ${dias(d.p75)}`
 
 //- Tarjeta: título con ícono, contenido (block) y link a la sección.
 mixin tarjeta(icono, titulo, verTodos, verTodosTexto)
@@ -135,8 +171,8 @@ mixin tarjeta(icono, titulo, verTodos, verTodosTexto)
 
 //- Pestañas: [{ id, titulo }]. Cada una muestra el tabpanel con ese id
 //- (behavior.js). Sin JS se ve la primera.
-mixin pestanas(grupo, pestanas)
-  .pestanas(role="tablist")
+mixin pestanas(grupo, pestanas, clase)
+  .pestanas(role="tablist" class=clase)
     each p, i in pestanas
       button.pestana(type="button" role="tab" id=`tab-${p.id}` aria-controls=p.id aria-selected=(i === 0 ? 'true' : 'false') data-grupo=grupo)= p.titulo
 

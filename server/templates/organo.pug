@@ -1,0 +1,92 @@
+include head.pug
+include chrome.pug
+include mixins.pug
+include _metodo.pug
+
+//- /salas/:slug y /juzgados/:slug: desempeño de un órgano. Se indexa: no
+//- nombra personas.
+- const esSala = o.tipo === 'sala'
+- const listado = esSala ? ['Salas', '/salas'] : ['Juzgados', '/juzgados']
+- const a = o.actual
+- const ref = o.referencia
++head(`${o.nombre}: desempeño, ${siteTitle}`, `Sentencias, expedientes con movimiento, tiempo hasta sentencia y demora de publicación de ${o.nombre}, según el Boletín Judicial de la Ciudad de México.`)
+  +siteHeader('desempeno')
+  +breadcrumbs([[siteTitle, '/'], listado, [o.nombre]])
+  main#contenido
+    .container.estadisticas-view
+      p.sobretitulo= o.materia
+      h1= o.nombre
+      if !esSala
+        p
+          a.boton-borde(href=juzgadoHref(o.nombre)) Ver los expedientes de este juzgado
+
+      if a
+        h2.subtitulo Últimos 12 meses (#{o.ventana})
+        .stats-grid
+          .stat
+            strong= num(a.sentencias)
+            span= esSala ? 'sentencias' : 'sentencias definitivas'
+            if ref.sentencias != null
+              small Mediana de #{ref.organos} #{o.materia.toLowerCase()}: #{num(ref.sentencias)}
+          .stat
+            strong= num(a.expedientes)
+            span expedientes con movimiento por mes
+          .stat
+            strong= dias(a.mediana)
+            span tiempo hasta sentencia (#{o.anioDuracion})
+            if ref.duracion != null
+              small Mediana de la materia: #{dias(ref.duracion)}
+          .stat
+            strong= diasDecimal(a.demora)
+            span demora de publicación
+            if ref.demora != null
+              small Mediana de la materia: #{diasDecimal(ref.demora)}
+        if o.puesto
+          p.nota Puesto #{o.puesto} de #{ref.organos} en sentencias entre los órganos de su materia. #[a(href=listado[1]) Ver la comparación completa].
+      else
+        p.nota Sin suficientes avisos en los últimos 12 meses para compararlo.
+
+      +tarjeta('📊', 'Lo que publicó')
+        +graficoAnioMes(o.chartAnio, o.chartMes, 'actividad')
+        p.nota Avisos publicados en el boletín según qué contienen. Desde #{o.primerMes ? o.primerMes.slice(0, 4) : '2016'}.
+
+      if o.duracion.length
+        +tarjeta('⏱️', 'Tiempo hasta sentencia')
+          +tablaDuracion(o.duracion)
+          p.nota Desde el primer aviso publicado del expediente hasta su primera sentencia definitiva. Solo años con al menos 20 sentencias.
+
+      if o.ponencias && o.ponencias.filas.length
+        +tarjeta('⚖️', 'Sentencias por ponencia')
+          .tabla-scroll
+            table.empresas-tabla
+              thead
+                tr
+                  th Ponencia
+                  each an in o.ponencias.anios
+                    th.num= an
+              tbody
+                each p in o.ponencias.filas
+                  tr
+                    td Ponencia #{p.ponencia}
+                    each v in p.valores
+                      td.num= num(v)
+          p.nota Cada sala tiene tres ponencias, una por magistrada o magistrado. El boletín publica el número de ponencia, no el nombre, y quién ocupa cada ponencia cambia con el tiempo. Por eso aquí no se muestran nombres.
+
+      if o.tipos.length
+        +tarjeta('📁', 'Tipos de juicio')
+          table.empresas-tabla
+            thead
+              tr
+                th Tipo de juicio
+                th.num Avisos
+            tbody
+              each t in o.tipos
+                tr
+                  td
+                    a(href=tipoHref(t.tipo))= t.tipo
+                  td.num= num(t.avisos)
+          p.nota Desde el primer boletín disponible.
+
+      +notaMetodo(o.ventana, o.anioDuracion)
+
+  +siteFooter()

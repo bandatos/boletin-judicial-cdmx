@@ -1,0 +1,37 @@
+include head.pug
+include chrome.pug
+include mixins.pug
+include _metodo.pug
+
+//- /tipos: tipos de juicio con más avisos. Se indexa: no nombra personas.
++head(`Tipos de juicio en la Ciudad de México: ${siteTitle}`, 'Cuántos avisos y sentencias publica el Boletín Judicial de la Ciudad de México por tipo de juicio, y cuánto tardan en llegar a sentencia.')
+  +siteHeader('tipos')
+  +breadcrumbs([[siteTitle, '/'], ['Tipos de juicio']])
+  main#contenido
+    .container.estadisticas-view
+      h1.titulo-seccion Tipos de juicio
+      p.intro Los #{datos.filas.length} tipos de juicio con más avisos en #{datos.ventana}, con la variación contra los 12 meses anteriores.
+      +notaMetodo(datos.ventana, datos.anioDuracion)
+      .tabla-scroll
+        table.empresas-tabla.tabla-desempeno
+          caption.visualmente-oculto Tipos de juicio, #{datos.ventana}
+          thead
+            tr
+              th Tipo de juicio
+              th.num Avisos
+              th.num Variación
+              th.num Sentencias
+              th.num= `Tiempo hasta sentencia (${datos.anioDuracion})`
+              th.num Avisos desde 2016
+          tbody
+            each f in datos.filas
+              tr
+                td
+                  a(href=`/tipos/${f.slug}`)= f.tipo
+                td.num= num(f.avisos)
+                td.num= f.variacion == null ? '—' : `${f.variacion > 0 ? '+' : ''}${f.variacion}%`
+                td.num= num(f.sentencias)
+                td.num= dias(f.mediana)
+                td.num= num(f.total)
+
+  +siteFooter()

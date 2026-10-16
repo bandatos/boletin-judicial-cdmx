@@ -1,15 +1,89 @@
 {
-  "/": { "viewType": "function", "handler": "portada" },
-  "/buscar": { "viewType": "function", "handler": "home" },
-  "/expediente/:idslug": { "viewType": "function", "handler": "expediente" },
-  "/juzgado/:slug": { "viewType": "function", "handler": "juzgado" },
-  "/fecha": { "viewType": "function", "handler": "fecha" },
-  "/fecha/:iso": { "viewType": "function", "handler": "fecha" },
-  "/empresas": { "viewType": "function", "handler": "empresas" },
-  "/empresas/:slug": { "viewType": "function", "handler": "empresa" },
-  "/personas": { "viewType": "function", "handler": "personas" },
-  "/personas/:slug": { "viewType": "function", "handler": "persona" },
-  "/sources": { "viewType": "function", "handler": "sources" },
-  "/health": { "viewType": "function", "handler": "health" },
-  "/static": { "viewType": "static" }
+  "/": {
+    "viewType": "function",
+    "handler": "portada"
+  },
+  "/buscar": {
+    "viewType": "function",
+    "handler": "home"
+  },
+  "/expediente/:idslug": {
+    "viewType": "function",
+    "handler": "expediente"
+  },
+  "/juzgado/:slug": {
+    "viewType": "function",
+    "handler": "juzgado"
+  },
+  "/fecha": {
+    "viewType": "function",
+    "handler": "fecha"
+  },
+  "/fecha/:iso": {
+    "viewType": "function",
+    "handler": "fecha"
+  },
+  "/empresas": {
+    "viewType": "function",
+    "handler": "empresas"
+  },
+  "/empresas/:slug": {
+    "viewType": "function",
+    "handler": "empresa"
+  },
+  "/personas": {
+    "viewType": "function",
+    "handler": "personas"
+  },
+  "/personas/:slug": {
+    "viewType": "function",
+    "handler": "persona"
+  },
+  "/mis-expedientes": {
+    "viewType": "function",
+    "handler": "misExpedientes"
+  },
+  "/api/expedientes": {
+    "viewType": "function",
+    "handler": "apiExpedientes"
+  },
+  "/alertas/ejemplo": {
+    "viewType": "function",
+    "handler": "alertaEjemplo"
+  },
+  "/salas": {
+    "viewType": "function",
+    "handler": "salas"
+  },
+  "/salas/:slug": {
+    "viewType": "function",
+    "handler": "sala"
+  },
+  "/juzgados": {
+    "viewType": "function",
+    "handler": "juzgados"
+  },
+  "/juzgados/:slug": {
+    "viewType": "function",
+    "handler": "juzgadoDesempeno"
+  },
+  "/tipos": {
+    "viewType": "function",
+    "handler": "tipos"
+  },
+  "/tipos/:slug": {
+    "viewType": "function",
+    "handler": "tipo"
+  },
+  "/sources": {
+    "viewType": "function",
+    "handler": "sources"
+  },
+  "/health": {
+    "viewType": "function",
+    "handler": "health"
+  },
+  "/static": {
+    "viewType": "static"
+  }
 }
