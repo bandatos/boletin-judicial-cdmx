@@ -79,6 +79,7 @@
     "viewType": "function",
     "handler": "sources"
   },
+  "/robots.txt": { "viewType": "function", "handler": "robots" },
   "/health": {
     "viewType": "function",
     "handler": "health"

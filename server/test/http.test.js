@@ -522,3 +522,16 @@ test('sin tablas de estadísticas (base vieja) las secciones nuevas dan 404 y no
   const { body } = await get('/buscar');
   assert.doesNotMatch(body, /href="\/salas"/);
 });
+
+test('robots.txt deja fuera las páginas que nombran personas', async () => {
+  const res = await fetch(base + '/robots.txt');
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type'), /text\/plain/);
+  const t = await res.text();
+  for (const r of ['/buscar', '/expediente/', '/personas', '/fecha', '/juzgado/']) assert.match(t, new RegExp(`Disallow: ${r}`));
+  assert.doesNotMatch(t, /Disallow: \/empresas/);
+});
+
+test('sin GA en desarrollo y tests', async () => {
+  assert.doesNotMatch((await get('/')).body, /googletagmanager/);
+});

@@ -109,7 +109,9 @@ const pugLocals = {
   siteTitle: 'Boletín Judicial CDMX',
   tagline: 'Juicios civiles, mercantiles y familiares en la Ciudad de México, ' +
     'a partir del Boletín Judicial del Poder Judicial de la CDMX.',
-  gaId: process.env.GA_ID || '',
+  // Google Analytics: el ID de la propiedad (público) solo en producción, así
+  // los tests y el desarrollo local no mandan visitas. GA_ID lo pisa.
+  gaId: process.env.GA_ID || (process.env.NODE_ENV === 'production' ? 'G-C5TLEW76Y3' : ''),
   asset,
   resaltar,
   CHART_COLORS: db.CHART_COLORS,
@@ -495,12 +497,33 @@ function sources(req) {
 }
 
 // Healthcheck del contenedor (ver Dockerfile).
+// robots.txt: los buscadores pueden recorrer la portada, empresas y las
+// estadísticas; no las páginas que nombran personas (búsquedas, expedientes,
+// personas, días, juzgados) ni la API. Esas ya llevan noindex, pero los bots
+// las recorrían igual: 55 mil fichas de expediente en 5 días.
+const ROBOTS = [
+  'User-agent: *',
+  'Disallow: /buscar',
+  'Disallow: /expediente/',
+  'Disallow: /personas',
+  'Disallow: /fecha',
+  'Disallow: /juzgado/',
+  'Disallow: /api/',
+  'Disallow: /mis-expedientes',
+  'Disallow: /alertas',
+  '',
+].join('\n');
+
+function robots() {
+  return { status: 200, headers: { 'Content-Type': 'text/plain; charset=utf-8' }, html: ROBOTS };
+}
+
 function health() {
   return { status: db.ping() ? 200 : 503, headers: { 'Content-Type': 'text/plain; charset=utf-8' }, html: 'ok' };
 }
 
 module.exports = {
-  resaltar, health, home, portada, personas, persona, juzgado, expediente, fecha, empresas, empresa, sources, renderTemplate, pugLocals,
+  resaltar, robots, health, home, portada, personas, persona, juzgado, expediente, fecha, empresas, empresa, sources, renderTemplate, pugLocals,
   salas: organos('sala'), juzgados: organos('juzgado'), sala: organo('sala'), juzgadoDesempeno: organo('juzgado'),
   tipos, tipo, misExpedientes, apiExpedientes, alertaEjemplo,
 };
