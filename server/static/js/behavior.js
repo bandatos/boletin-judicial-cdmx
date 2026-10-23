@@ -87,6 +87,40 @@
   });
 })();
 
+// Términos de búsqueda en Google Analytics: al enviar cualquier caja de
+// búsqueda (name="q") con texto se manda el evento estándar "search" con lo
+// escrito y la sección, y después sigue el envío. Si GA no confirma en
+// 800 ms, se envía igual. Sin GA (desarrollo, bloqueadores) no hace nada.
+(function () {
+  document.addEventListener('submit', function (e) {
+    var form = e.target;
+    var campo = form.querySelector('input[name="q"]');
+    if (!campo || typeof window.gtag !== 'function' || form.getAttribute('data-registrada')) return;
+    var termino = campo.value.trim();
+    if (!termino) return;
+    e.preventDefault();
+    form.setAttribute('data-registrada', '1');
+    var enviado = false;
+    function seguir() {
+      if (enviado) return;
+      enviado = true;
+      form.submit();
+    }
+    window.gtag('event', 'search', {
+      search_term: termino,
+      seccion: location.pathname.split('/')[1] || 'portada',
+      transport_type: 'beacon',
+      event_callback: seguir,
+    });
+    setTimeout(seguir, 800);
+  });
+  // Al volver con "atrás", que la próxima búsqueda se registre de nuevo.
+  window.addEventListener('pageshow', function () {
+    var forms = document.querySelectorAll('form[data-registrada]');
+    for (var i = 0; i < forms.length; i++) forms[i].removeAttribute('data-registrada');
+  });
+})();
+
 // Formularios de búsqueda: el botón avisa que está buscando (algunas
 // búsquedas tardan uno o dos segundos en el server).
 (function () {
