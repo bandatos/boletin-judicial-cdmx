@@ -536,9 +536,10 @@ test('sin GA en desarrollo y tests', async () => {
   assert.doesNotMatch((await get('/')).body, /googletagmanager/);
 });
 
-test('la búsqueda con resultados trae la pregunta de intención oculta, con el formulario de entrevista', async () => {
+test('la búsqueda con resultados trae la pregunta de intención, con el formulario de entrevista', async () => {
   const { body } = await get('/buscar?q=thebart');
-  assert.match(body, /<section class="intencion" id="intencion" hidden/);
+  assert.match(body, /<section class="intencion" id="intencion"/);
+  assert.match(body, /localStorage\.getItem\('boletin-intencion'\)/);
   assert.match(body, /data-valor="propio"/);
   assert.match(body, /docs\.google\.com\/forms\/d\/e\/[^"]+\/viewform/);
   assert.match(body, /data-campo="entry\.954807767"/);

@@ -209,12 +209,13 @@ mixin expedienteEmpresa(x)
         = ' '
         +pdfLink(x, x.pagina ? `PDF (p. ${x.pagina})` : 'PDF')
 
-//- Pregunta de intención (behavior.js la muestra una vez por navegador). Las
+//- Pregunta de intención, una vez por navegador: se muestra por CSS según
+//- la clase que pone head.pug antes de pintar, y behavior.js maneja las respuestas. Las
 //- opciones de data-form son las de la primera pregunta del formulario de
 //- entrevistas; data-campo es su id de campo para dejarla marcada.
 mixin preguntaIntencion()
   - const formEntrevista = 'https://docs.google.com/forms/d/e/1FAIpQLScdxU6Y8GRpRIr5dO7NRKtDNW4O2BaZB8tKNhkBO5q7g8UNPw/viewform?usp=pp_url'
-  section#intencion.intencion(hidden aria-labelledby="intencion-titulo" data-campo="entry.954807767")
+  section#intencion.intencion(aria-labelledby="intencion-titulo" data-campo="entry.954807767")
     button.intencion-cerrar(type="button" aria-label="Cerrar la pregunta") ✕
     .intencion-pregunta
       h2#intencion-titulo ¿Para qué estás buscando?

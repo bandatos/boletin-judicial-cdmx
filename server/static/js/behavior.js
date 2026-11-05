@@ -327,9 +327,9 @@ function eventoGa(nombre, params) {
   var caja = document.getElementById('intencion');
   if (!caja) return;
   var CLAVE = 'boletin-intencion';
-  try { if (localStorage.getItem(CLAVE)) return; } catch (err) { return; }
+  // La franja ya se ve o no por CSS (clase intencion-vista de head.pug).
+  if (document.documentElement.classList.contains('intencion-vista')) return;
   var marcar = function (valor) { try { localStorage.setItem(CLAVE, valor); } catch (err) { /* sin almacenamiento */ } };
-  caja.hidden = false;
   eventoGa('intencion_mostrada');
   caja.addEventListener('click', function (e) {
     var opcion = e.target.closest('button[data-valor]');

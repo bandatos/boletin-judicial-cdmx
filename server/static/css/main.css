@@ -605,6 +605,10 @@ mark { background: #f3dfa2; color: inherit; padding: 0 .1em; border-radius: 2px;
 .datos-hasta { font-size: .875rem; flex-basis: 100%; }
 
 /* ── Pregunta de intención ── */
+/* Visible desde el primer pintado solo con JS y sin respuesta previa (clases
+   que pone head.pug), para no mover los resultados. */
+.intencion, .intencion[hidden] { display: none; }
+html.js:not(.intencion-vista) .intencion:not([hidden]) { display: block; }
 .intencion {
   position: relative; border: 2px solid var(--verde); border-radius: var(--radius-lg); background: var(--bg-card);
   padding: 1rem 2.75rem 1rem 1.25rem; margin: 1rem 0;

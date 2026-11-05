@@ -14,6 +14,10 @@ mixin head(title, description, noindex)
         meta(name="robots" content="noindex")
       link(rel="icon" type="image/webp" href=asset('img/favicon-32.webp'))
       link(rel="apple-touch-icon" href=asset('img/favicon-180.webp'))
+      //- Antes de pintar: marca si hay JS y si ya se respondió la pregunta de
+      //- intención, para que la franja se muestre o no por CSS sin mover la página.
+      script.
+        (function (d) { d.className += ' js'; try { if (localStorage.getItem('boletin-intencion')) d.className += ' intencion-vista'; } catch (e) { d.className += ' intencion-vista'; } })(document.documentElement);
       //- Todo el CSS inline (ver cssInline en lib/views.js).
       style!= css
       if gaId
