@@ -41,6 +41,9 @@ include mixins.pug
           else
             | Puede incluir juicios de otras personas con el mismo nombre.
 
+      if esEmpresa
+        +preguntaIntencion('empresa')
+
       if chart || (tipos && tipos.length)
         +tarjeta('📊', 'Resumen')
           - const pestanasResumen = [chart && { id: 'resumen-anios', titulo: 'Avisos en el tiempo' }, tipos && tipos.length && { id: 'resumen-tipos', titulo: 'Tipos de juicio' }].filter(Boolean)

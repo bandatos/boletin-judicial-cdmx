@@ -556,3 +556,14 @@ test('el log anota el dominio de origen externo y el bot conocido', () => {
   assert.equal(bot(req({ 'user-agent': 'Mozilla/5.0 AppleWebKit/537.36; compatible; ChatGPT-User/1.0' })), ' bot=ChatGPT-User');
   assert.equal(bot(req({ 'user-agent': 'Mozilla/5.0 (iPhone) Safari/604.1' })), '');
 });
+
+test('la ficha de empresa trae la pregunta de intención con sus opciones, la de persona no', async () => {
+  const { body } = await get('/empresas/constructora-ejemplo');
+  assert.match(body, /id="intencion"/);
+  assert.match(body, /¿Por qué consultas esta empresa\?/);
+  assert.match(body, /data-valor="propio" data-form="Revisar un juicio propio">Tengo un juicio con esta empresa/);
+  assert.doesNotMatch(body, /data-valor="conocido"/);
+  const personas = await get('/personas');
+  const slug = (personas.body.match(/href="\/personas\/([^"?]+)"/) || [])[1];
+  if (slug) assert.doesNotMatch((await get('/personas/' + slug)).body, /id="intencion"/);
+});

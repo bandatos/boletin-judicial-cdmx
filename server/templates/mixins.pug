@@ -213,22 +213,24 @@ mixin expedienteEmpresa(x)
 //- la clase que pone head.pug antes de pintar, y behavior.js maneja las respuestas. Las
 //- opciones de data-form son las de la primera pregunta del formulario de
 //- entrevistas; data-campo es su id de campo para dejarla marcada.
-mixin preguntaIntencion()
+mixin preguntaIntencion(lugar)
+  //- lugar: 'busqueda' (por defecto) o 'empresa'. Mismo valor en GA para
+  //- respuestas equivalentes (propio, empresa, trabajo...), y tipo_pagina
+  //- dice desde dónde se respondió.
   - const formEntrevista = 'https://docs.google.com/forms/d/e/1FAIpQLScdxU6Y8GRpRIr5dO7NRKtDNW4O2BaZB8tKNhkBO5q7g8UNPw/viewform?usp=pp_url'
+  - const enEmpresa = lugar === 'empresa'
+  - const opciones = enEmpresa ? [['propio', 'Revisar un juicio propio', 'Tengo un juicio con esta empresa'], ['empresa', 'Averiguar sobre una empresa o un inmueble', 'Quiero saber cómo es antes de contratar, comprar o rentar'], ['trabajo', 'Por trabajo (abogacía, periodismo, investigación)', 'Trabajo (abogacía, periodismo, investigación)'], ['otro', null, 'Otra cosa']] : [['propio', 'Revisar un juicio propio', 'Mi propio juicio'], ['conocido', 'Revisar el juicio de alguien que conozco', 'El de alguien que conozco'], ['empresa', 'Averiguar sobre una empresa o un inmueble', 'Una empresa o un inmueble'], ['trabajo', 'Por trabajo (abogacía, periodismo, investigación)', 'Trabajo (abogacía, periodismo, investigación)'], ['otro', null, 'Otra cosa']]
   section#intencion.intencion(aria-labelledby="intencion-titulo" data-campo="entry.954807767")
     button.intencion-cerrar(type="button" aria-label="Cerrar la pregunta") ✕
     .intencion-pregunta
-      h2#intencion-titulo ¿Para qué estás buscando?
-      p.nota Nos ayuda a mejorar el buscador. Es anónimo y solo te lo preguntamos una vez.
+      h2#intencion-titulo= enEmpresa ? '¿Por qué consultas esta empresa?' : '¿Para qué estás buscando?'
+      p.nota Nos ayuda a mejorar el sitio. Es anónimo y solo te lo preguntamos una vez.
       .intencion-opciones
-        button(type="button" data-valor="propio" data-form="Revisar un juicio propio") Mi propio juicio
-        button(type="button" data-valor="conocido" data-form="Revisar el juicio de alguien que conozco") El de alguien que conozco
-        button(type="button" data-valor="empresa" data-form="Averiguar sobre una empresa o un inmueble") Una empresa o un inmueble
-        button(type="button" data-valor="trabajo" data-form="Por trabajo (abogacía, periodismo, investigación)") Trabajo (abogacía, periodismo, investigación)
-        button(type="button" data-valor="otro") Otra cosa
+        each o in opciones
+          button(type="button" data-valor=o[0] data-form=o[1])= o[2]
     .intencion-gracias(hidden)
       h2 ¡Gracias!
       p
-        | ¿Nos ayudas a entender mejor qué necesitas? Buscamos personas que usen el buscador para platicar 20 a 30 minutos.
+        | ¿Nos ayudas a entender mejor qué necesitas? Buscamos personas que usen el sitio para platicar 20 a 30 minutos.
         = ' '
         a(href=formEntrevista target="_blank" rel="noopener") Quiero participar en una entrevista
