@@ -86,6 +86,8 @@ include mixins.pug
           else
             = `Más de ${num(candidatos)} avisos`
           |  · del más reciente al más viejo
+        if groups.length
+          +preguntaIntencion()
         if !groups.length
           .sin-resultados
             p #[strong Sin resultados.] Algunas ideas:

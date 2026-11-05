@@ -535,3 +535,23 @@ test('robots.txt deja fuera las páginas que nombran personas', async () => {
 test('sin GA en desarrollo y tests', async () => {
   assert.doesNotMatch((await get('/')).body, /googletagmanager/);
 });
+
+test('la búsqueda con resultados trae la pregunta de intención oculta, con el formulario de entrevista', async () => {
+  const { body } = await get('/buscar?q=thebart');
+  assert.match(body, /<section class="intencion" id="intencion" hidden/);
+  assert.match(body, /data-valor="propio"/);
+  assert.match(body, /docs\.google\.com\/forms\/d\/e\/[^"]+\/viewform/);
+  assert.match(body, /data-campo="entry\.954807767"/);
+  const vacia = await get('/buscar?q=zzzzqqqq');
+  assert.doesNotMatch(vacia.body, /id="intencion"/);
+});
+
+test('el log anota el dominio de origen externo y el bot conocido', () => {
+  const { origen, bot } = require('../lib/logger');
+  const req = (headers) => ({ headers });
+  assert.equal(origen(req({ host: 'x.org', referer: 'https://chatgpt.com/c/123?q=juan' })), ' ref=chatgpt.com');
+  assert.equal(origen(req({ host: 'x.org:3000', referer: 'http://x.org/buscar' })), '');
+  assert.equal(origen(req({ host: 'x.org' })), '');
+  assert.equal(bot(req({ 'user-agent': 'Mozilla/5.0 AppleWebKit/537.36; compatible; ChatGPT-User/1.0' })), ' bot=ChatGPT-User');
+  assert.equal(bot(req({ 'user-agent': 'Mozilla/5.0 (iPhone) Safari/604.1' })), '');
+});

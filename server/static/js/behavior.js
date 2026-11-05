@@ -1,3 +1,12 @@
+// Evento de Google Analytics, si está cargado (en desarrollo, en los tests o
+// con bloqueadores no hace nada). tipo_pagina: primera parte de la ruta.
+function eventoGa(nombre, params) {
+  if (typeof window.gtag !== 'function') return;
+  var p = params || {};
+  p.tipo_pagina = location.pathname.split('/')[1] || 'portada';
+  window.gtag('event', nombre, p);
+}
+
 // behavior.js — panel lateral con el PDF. La búsqueda es 100% server-side
 // (formulario GET, sin fetch/XHR).
 
@@ -43,6 +52,7 @@
     var item = a.closest('li, .card');
     if (item) item.classList.add('comparando');
     abrir(a.getAttribute('data-pdf'), a.getAttribute('data-pagina'), a.getAttribute('data-titulo'));
+    eventoGa('ver_pdf');
   });
   document.getElementById('pdf-panel-close').addEventListener('click', cerrar);
   document.addEventListener('keydown', function (e) {
@@ -217,6 +227,7 @@
       }
       escribir(l);
       pintar();
+      eventoGa(ya ? 'quitar_expediente' : 'guardar_expediente', { cantidad: l.length });
     });
   }
 
@@ -242,6 +253,7 @@
     cont.appendChild(vacio);
     return;
   }
+  eventoGa('mis_expedientes_con_lista', { cantidad: lista.length });
   cont.appendChild(el('p', 'nota', 'Cargando…'));
   var max = Number(cont.getAttribute('data-max')) || 100;
   var ids = lista.slice(0, max).map(function (x) { return x.id; }).join(',');
@@ -304,5 +316,42 @@
     cont.appendChild(ol);
   }).catch(function () {
     cont.textContent = 'No se pudo cargar la lista. Prueba de nuevo en un rato.';
+  });
+})();
+
+// Pregunta de intención, una vez por navegador, en la primera búsqueda con
+// resultados. La respuesta va a GA (evento "intencion") y no se guarda en el
+// server. Después se invita a una entrevista con un formulario de Google,
+// con la respuesta ya marcada en la primera pregunta.
+(function () {
+  var caja = document.getElementById('intencion');
+  if (!caja) return;
+  var CLAVE = 'boletin-intencion';
+  try { if (localStorage.getItem(CLAVE)) return; } catch (err) { return; }
+  var marcar = function (valor) { try { localStorage.setItem(CLAVE, valor); } catch (err) { /* sin almacenamiento */ } };
+  caja.hidden = false;
+  eventoGa('intencion_mostrada');
+  caja.addEventListener('click', function (e) {
+    var opcion = e.target.closest('button[data-valor]');
+    if (opcion) {
+      var valor = opcion.getAttribute('data-valor');
+      marcar(valor);
+      eventoGa('intencion', { valor: valor });
+      caja.querySelector('.intencion-pregunta').hidden = true;
+      var gracias = caja.querySelector('.intencion-gracias');
+      var link = gracias.querySelector('a');
+      var opcionForm = opcion.getAttribute('data-form');
+      if (opcionForm) link.href += '&' + caja.getAttribute('data-campo') + '=' + encodeURIComponent(opcionForm);
+      gracias.hidden = false;
+      link.focus();
+      return;
+    }
+    if (e.target.closest('.intencion-cerrar')) {
+      marcar('cerrada');
+      eventoGa('intencion_cerrada');
+      caja.hidden = true;
+      return;
+    }
+    if (e.target.closest('.intencion-gracias a')) eventoGa('entrevista_click');
   });
 })();

@@ -603,3 +603,21 @@ mark { background: #f3dfa2; color: inherit; padding: 0 .1em; border-radius: 2px;
 .correo-legal, .correo-pie { font-size: .8rem; color: var(--fg-muted); }
 
 .datos-hasta { font-size: .875rem; flex-basis: 100%; }
+
+/* ── Pregunta de intención ── */
+.intencion {
+  position: relative; border: 2px solid var(--verde); border-radius: var(--radius-lg); background: var(--bg-card);
+  padding: 1rem 2.75rem 1rem 1.25rem; margin: 1rem 0;
+}
+.intencion h2 { font-size: 1.1rem; margin-bottom: .25rem; }
+.intencion-opciones { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .6rem; }
+.intencion-opciones button {
+  border: 2px solid var(--verde); border-radius: 22px; background: var(--bg-card); color: var(--verde);
+  padding: .4em 1em; font: inherit; font-size: .9rem; font-weight: bold; cursor: pointer;
+}
+.intencion-opciones button:hover { background: var(--verde); color: #fff; }
+.intencion-cerrar {
+  position: absolute; top: .5rem; right: .5rem; border: none; background: none; font-size: 1.1rem;
+  cursor: pointer; color: var(--fg-muted); padding: .25rem .5rem;
+}
+.intencion-gracias a { font-weight: bold; }
