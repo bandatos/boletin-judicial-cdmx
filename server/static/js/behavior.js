@@ -337,12 +337,13 @@ function eventoGa(nombre, params) {
       var valor = opcion.getAttribute('data-valor');
       marcar(valor);
       eventoGa('intencion', { valor: valor });
-      caja.querySelector('.intencion-pregunta').hidden = true;
-      var gracias = caja.querySelector('.intencion-gracias');
-      var link = gracias.querySelector('a');
+      // Sin variables que dependan de otras del mismo bloque: el minificador
+      // de producción junta los var y los reordena.
+      var link = caja.querySelector('.intencion-gracias a');
       var opcionForm = opcion.getAttribute('data-form');
       if (opcionForm) link.href += '&' + caja.getAttribute('data-campo') + '=' + encodeURIComponent(opcionForm);
-      gracias.hidden = false;
+      caja.querySelector('.intencion-pregunta').hidden = true;
+      caja.querySelector('.intencion-gracias').hidden = false;
       link.focus();
       return;
     }

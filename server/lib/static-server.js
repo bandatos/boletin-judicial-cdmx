@@ -42,7 +42,9 @@ async function serveStatic(file, res, versionado = false) {
 
     if (needsMinify) {
       try {
-        content = await minify(fullPath);
+        // JS con terser: el minificador por defecto (putout) junta los var y
+        // los reordena, y rompía handlers (una variable usada antes de asignarse).
+        content = await minify(fullPath, { js: { type: 'terser', terser: {} } });
         fs.writeFileSync(minPath, content);
       } catch (e) {
         console.error('minify error:', e.message);
