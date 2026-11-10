@@ -24,6 +24,8 @@ ENV NODE_ENV=production \
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY server/ ./
+# Novedades del sitio (/novedades), en la raíz del repo.
+COPY CHANGELOG.md ./
 # static-server.js escribe los .min.css/.min.js al lado de los originales.
 RUN chown -R node:node /app/static
 USER node

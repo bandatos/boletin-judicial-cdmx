@@ -319,40 +319,78 @@ function eventoGa(nombre, params) {
   });
 })();
 
-// Pregunta de intención, una vez por navegador, en la primera búsqueda con
-// resultados. La respuesta va a GA (evento "intencion") y no se guarda en el
-// server. Después se invita a una entrevista con un formulario de Google,
-// con la respuesta ya marcada en la primera pregunta.
+// Pregunta de intención, una vez por navegador. La respuesta va a GA
+// (evento "intencion") y no se guarda en el server. Después se invita a una
+// entrevista con un formulario de Google, con la respuesta ya marcada.
+// Qué franja se ve lo decide head.pug antes de pintar (clases en <html>):
+// acá solo se registran los eventos y se guardan las respuestas.
+// Sin variables que dependan de otras del mismo bloque: el minificador de
+// producción junta los var y los reordena.
 (function () {
+  var raiz = document.documentElement;
+  var guardar = function (clave, valor) { try { localStorage.setItem(clave, valor); } catch (err) { /* sin almacenamiento */ } };
+  var leer = function (clave) { try { return localStorage.getItem(clave); } catch (err) { return null; } };
   var caja = document.getElementById('intencion');
-  if (!caja) return;
-  var CLAVE = 'boletin-intencion';
-  // La franja ya se ve o no por CSS (clase intencion-vista de head.pug).
-  if (document.documentElement.classList.contains('intencion-vista')) return;
-  var marcar = function (valor) { try { localStorage.setItem(CLAVE, valor); } catch (err) { /* sin almacenamiento */ } };
-  eventoGa('intencion_mostrada');
-  caja.addEventListener('click', function (e) {
-    var opcion = e.target.closest('button[data-valor]');
+  var reoferta = document.getElementById('reoferta');
+  if (caja && raiz.classList.contains('js') && !raiz.classList.contains('intencion-vista')) eventoGa('intencion_mostrada');
+  if (reoferta && raiz.classList.contains('entrevista-reofrecer')) {
+    guardar('boletin-reofrecida', String(Date.now()));
+    eventoGa('intencion_reofrecida');
+  }
+
+  // Link al formulario con la respuesta a la pregunta ya marcada: opciones
+  // de la primera pregunta del formulario y su id de campo.
+  var OPCIONES_FORM = {
+    propio: 'Revisar un juicio propio',
+    conocido: 'Revisar el juicio de alguien que conozco',
+    empresa: 'Averiguar sobre una empresa o un inmueble',
+    trabajo: 'Por trabajo (abogacía, periodismo, investigación)'
+  };
+  var conRespuesta = function (link) {
+    var texto = OPCIONES_FORM[leer('boletin-intencion')];
+    if (texto && link.href.indexOf('entry.') < 0) link.href += '&entry.954807767=' + encodeURIComponent(texto);
+  };
+
+  document.addEventListener('click', function (e) {
+    if (!e.target.closest) return;
+    var opcion = caja && e.target.closest('#intencion button[data-valor]');
     if (opcion) {
-      var valor = opcion.getAttribute('data-valor');
-      marcar(valor);
-      eventoGa('intencion', { valor: valor });
-      // Sin variables que dependan de otras del mismo bloque: el minificador
-      // de producción junta los var y los reordena.
-      var link = caja.querySelector('.intencion-gracias a');
-      var opcionForm = opcion.getAttribute('data-form');
-      if (opcionForm) link.href += '&' + caja.getAttribute('data-campo') + '=' + encodeURIComponent(opcionForm);
+      guardar('boletin-intencion', opcion.getAttribute('data-valor'));
+      guardar('boletin-intencion-fecha', String(Date.now()));
+      eventoGa('intencion', { valor: opcion.getAttribute('data-valor') });
+      caja.querySelector('.entrevista-texto').textContent = opcion.getAttribute('data-invita');
       caja.querySelector('.intencion-pregunta').hidden = true;
       caja.querySelector('.intencion-gracias').hidden = false;
-      link.focus();
+      caja.querySelector('.entrevista-si').focus();
       return;
     }
-    if (e.target.closest('.intencion-cerrar')) {
-      marcar('cerrada');
-      eventoGa('intencion_cerrada');
-      caja.hidden = true;
+    var cerrar = e.target.closest('.intencion-cerrar');
+    if (cerrar) {
+      var franja = cerrar.closest('.intencion');
+      // Cerrar la pregunta sin responder la marca como cerrada. Cerrar la
+      // invitación (después de responder o en la reoferta) es un "no".
+      if (franja === caja && !caja.querySelector('.intencion-pregunta').hidden) {
+        guardar('boletin-intencion', 'cerrada');
+        eventoGa('intencion_cerrada');
+      } else {
+        guardar('boletin-entrevista', 'no');
+        eventoGa('entrevista_rechazada', { lugar: franja === caja ? 'pregunta' : 'reoferta' });
+      }
+      franja.hidden = true;
       return;
     }
-    if (e.target.closest('.intencion-gracias a')) eventoGa('entrevista_click');
+    var si = e.target.closest('.entrevista-si');
+    if (si) {
+      conRespuesta(si);
+      guardar('boletin-entrevista', 'si');
+      eventoGa('entrevista_click', { lugar: si.closest('.entrevista').getAttribute('data-lugar') });
+      return;
+    }
+    var no = e.target.closest('.entrevista-no');
+    if (no) {
+      guardar('boletin-entrevista', 'no');
+      eventoGa('entrevista_rechazada', { lugar: no.closest('.entrevista').getAttribute('data-lugar') });
+      no.closest('.intencion').hidden = true;
+    }
   });
 })();

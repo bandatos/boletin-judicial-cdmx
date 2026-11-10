@@ -14,10 +14,12 @@ mixin head(title, description, noindex)
         meta(name="robots" content="noindex")
       link(rel="icon" type="image/webp" href=asset('img/favicon-32.webp'))
       link(rel="apple-touch-icon" href=asset('img/favicon-180.webp'))
-      //- Antes de pintar: marca si hay JS y si ya se respondió la pregunta de
-      //- intención, para que la franja se muestre o no por CSS sin mover la página.
+      //- Antes de pintar: marca si hay JS, si ya se respondió la pregunta de
+      //- intención, si ya se contestó la invitación a la entrevista y si toca
+      //- volver a ofrecerla (3 días después de responder). Así las franjas se
+      //- muestran o no por CSS sin mover la página.
       script.
-        (function (d) { d.className += ' js'; try { if (localStorage.getItem('boletin-intencion')) d.className += ' intencion-vista'; } catch (e) { d.className += ' intencion-vista'; } })(document.documentElement);
+        (function (d) { var c = ' js'; try { var r = localStorage.getItem('boletin-intencion'), e = localStorage.getItem('boletin-entrevista'), f = Number(localStorage.getItem('boletin-intencion-fecha')) || 0, o = localStorage.getItem('boletin-reofrecida'); if (r) c += ' intencion-vista'; if (e) c += ' entrevista-respondida'; else if (r && r !== 'cerrada' && !o && Date.now() - f > 3 * 864e5) c += ' entrevista-reofrecer'; } catch (x) { c += ' intencion-vista entrevista-respondida'; } d.className += c; })(document.documentElement);
       //- Todo el CSS inline (ver cssInline en lib/views.js).
       style!= css
       if gaId

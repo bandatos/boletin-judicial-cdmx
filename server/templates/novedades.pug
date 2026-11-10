@@ -1,0 +1,19 @@
+include head.pug
+include chrome.pug
+
+//- Novedades: CHANGELOG.md de la raíz del repo, agrupado por día (lib/novedades.js).
++head(`Novedades — ${siteTitle}`, `Lo que cambia en ${siteTitle}, día por día.`)
+  +siteHeader()
+  +breadcrumbs([[siteTitle, '/'], ['Novedades']])
+  main#contenido
+    .container.novedades-view
+      h1 Novedades
+      p.nota Lo que cambia en el sitio, día por día.
+      each dia in dias
+        section.novedades-dia
+          h2
+            time(datetime=dia.fecha)= fechaLarga(dia.fecha)
+          ul
+            each c in dia.cambios
+              li= c
+  +siteFooter()

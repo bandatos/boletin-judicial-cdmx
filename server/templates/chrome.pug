@@ -37,7 +37,8 @@ mixin siteFooter()
         #[strong= siteTitle] es un proyecto de Todo Derecho Vecino, dentro de
         #[a(href="https://bandatos.org" target="_blank" rel="noopener") Bandatos],
         con datos del Boletín Judicial del Poder Judicial de la Ciudad de México ·
-        #[a(href="/sources") de dónde vienen los datos]
+        #[a(href="/sources") de dónde vienen los datos] ·
+        #[a(href="/novedades") novedades]
       if datosHasta
         p.datos-hasta Datos hasta el boletín del #[strong= fechaLarga(datosHasta)].
 
@@ -47,5 +48,11 @@ mixin siteFooter()
       a#pdf-panel-open(href="#" target="_blank" rel="noopener") Abrir en pestaña nueva
       button#pdf-panel-close(type="button" aria-label="Cerrar PDF") ✕
     iframe#pdf-frame(title="PDF del boletín")
+    //- Invitación a la entrevista para quien abre el PDF (la mayor intención).
+    //- Se oculta por CSS si ya contestó la invitación (head.pug).
+    p.pdf-panel-invita.entrevista(data-lugar="pdf")
+      | ¿Te sirve el buscador? Buscamos personas para platicar 20 minutos.
+      = ' '
+      a.entrevista-si(href="https://docs.google.com/forms/d/e/1FAIpQLScdxU6Y8GRpRIr5dO7NRKtDNW4O2BaZB8tKNhkBO5q7g8UNPw/viewform?usp=pp_url" target="_blank" rel="noopener") Quiero participar
 
   script(src=asset('js/behavior.js') defer)

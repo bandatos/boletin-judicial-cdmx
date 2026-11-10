@@ -58,6 +58,8 @@ include mixins.pug
         if datosHasta
           |  Revisamos hasta el boletín del #{fechaLarga(datosHasta)}.
 
+      +preguntaIntencion('expediente')
+
       .aclaracion
         p #[strong El boletín publica que hubo movimiento, no qué se decidió.] Cada aviso dice cuántos acuerdos hubo o si se dictó una sentencia, pero no su contenido. Para leerlo completo, consulta el expediente en Mi Tribunal si eres parte del juicio, o acude al #{expediente.sala ? 'tribunal' : 'juzgado'}.
 

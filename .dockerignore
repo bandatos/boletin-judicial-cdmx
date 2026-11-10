@@ -1,6 +1,7 @@
 # Solo hace falta server/ (sin node_modules: se instalan en la imagen).
 *
 !server/
+!CHANGELOG.md
 server/node_modules
 server/test
 server/static/**/*.min.*

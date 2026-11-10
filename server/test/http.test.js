@@ -542,7 +542,6 @@ test('la búsqueda con resultados trae la pregunta de intención, con el formula
   assert.match(body, /localStorage\.getItem\('boletin-intencion'\)/);
   assert.match(body, /data-valor="propio"/);
   assert.match(body, /docs\.google\.com\/forms\/d\/e\/[^"]+\/viewform/);
-  assert.match(body, /data-campo="entry\.954807767"/);
   const vacia = await get('/buscar?q=zzzzqqqq');
   assert.doesNotMatch(vacia.body, /id="intencion"/);
 });
@@ -561,9 +560,32 @@ test('la ficha de empresa trae la pregunta de intención con sus opciones, la de
   const { body } = await get('/empresas/constructora-ejemplo');
   assert.match(body, /id="intencion"/);
   assert.match(body, /¿Por qué consultas esta empresa\?/);
-  assert.match(body, /data-valor="propio" data-form="Revisar un juicio propio">Tengo un juicio con esta empresa/);
+  assert.match(body, /data-valor="propio"[^>]*>Tengo un juicio con esta empresa/);
   assert.doesNotMatch(body, /data-valor="conocido"/);
   const personas = await get('/personas');
   const slug = (personas.body.match(/href="\/personas\/([^"?]+)"/) || [])[1];
   if (slug) assert.doesNotMatch((await get('/personas/' + slug)).body, /id="intencion"/);
+});
+
+test('/novedades muestra el CHANGELOG agrupado por día, sin el criterio', async () => {
+  const { status, body } = await get('/novedades');
+  assert.equal(status, 200);
+  assert.match(body, /<h1>Novedades<\/h1>/);
+  assert.match(body, /<time datetime="2026-10-14">/);
+  assert.doesNotMatch(body, /Qué no entra/);
+  assert.match((await get('/')).body, /href="\/novedades"/);
+});
+
+test('parsear de novedades: solo lo de debajo de la marca, días sin líneas fuera', () => {
+  const { parsear } = require('../lib/novedades');
+  const dias = parsear('# X\n## 2020-01-01\n- no\n<!-- novedades -->\n## 2026-01-02\n- uno\n- dos\n## 2026-01-01\n');
+  assert.deepEqual(dias, [{ fecha: '2026-01-02', cambios: ['uno', 'dos'] }]);
+});
+
+test('la ficha de expediente trae la pregunta de intención y la invitación con botones', async () => {
+  const { body } = await get('/expediente/2');
+  assert.match(body, /¿Para qué consultas este expediente\?/);
+  assert.match(body, /class="entrevista-si"[^>]*>Sí, quiero platicar/);
+  assert.match(body, /id="reoferta"/);
+  assert.match(body, /class="pdf-panel-invita entrevista" data-lugar="pdf"/);
 });

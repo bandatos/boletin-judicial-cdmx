@@ -608,7 +608,7 @@ mark { background: #f3dfa2; color: inherit; padding: 0 .1em; border-radius: 2px;
 /* Visible desde el primer pintado solo con JS y sin respuesta previa (clases
    que pone head.pug), para no mover los resultados. */
 .intencion, .intencion[hidden] { display: none; }
-html.js:not(.intencion-vista) .intencion:not([hidden]) { display: block; }
+html.js:not(.intencion-vista) #intencion:not([hidden]) { display: block; }
 .intencion {
   position: relative; border: 2px solid var(--verde); border-radius: var(--radius-lg); background: var(--bg-card);
   padding: 1rem 2.75rem 1rem 1.25rem; margin: 1rem 0;
@@ -624,4 +624,24 @@ html.js:not(.intencion-vista) .intencion:not([hidden]) { display: block; }
   position: absolute; top: .5rem; right: .5rem; border: none; background: none; font-size: 1.1rem;
   cursor: pointer; color: var(--fg-muted); padding: .25rem .5rem;
 }
-.intencion-gracias a { font-weight: bold; }
+.entrevista-texto { margin: .25rem 0; }
+.entrevista-botones { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .6rem; }
+.entrevista-si, .entrevista-no {
+  border: 2px solid var(--verde); border-radius: 22px; padding: .45em 1.1em; font: inherit; font-size: .95rem;
+  font-weight: bold; cursor: pointer; text-decoration: none;
+}
+.entrevista-si { background: var(--verde); color: #fff; }
+.entrevista-si:hover { filter: brightness(1.1); }
+.entrevista-no { background: none; color: var(--verde); }
+/* Segunda oportunidad: una vez, 3 días después de responder (head.pug). */
+.reoferta, .reoferta[hidden] { display: none; }
+html.js.entrevista-reofrecer .reoferta:not([hidden]) { display: block; }
+.pdf-panel-invita { margin: 0; padding: .5rem .75rem; border-top: 1px solid var(--border); font-size: .875rem; }
+.pdf-panel-invita .entrevista-si { border: 0; background: none; color: var(--accent); padding: 0; font-size: inherit; text-decoration: underline; }
+html.entrevista-respondida .pdf-panel-invita { display: none; }
+
+/* ── Novedades ── */
+.novedades-dia { margin: 1.5rem 0; }
+.novedades-dia h2 { font-size: 1.05rem; margin-bottom: .4rem; }
+.novedades-dia ul { margin: 0; padding-left: 1.25rem; }
+.novedades-dia li { margin: .25rem 0; }

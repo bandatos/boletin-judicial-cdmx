@@ -75,6 +75,10 @@
     "viewType": "function",
     "handler": "tipo"
   },
+  "/novedades": {
+    "viewType": "function",
+    "handler": "novedades"
+  },
   "/sources": {
     "viewType": "function",
     "handler": "sources"

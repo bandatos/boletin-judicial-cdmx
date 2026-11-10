@@ -210,27 +210,41 @@ mixin expedienteEmpresa(x)
         +pdfLink(x, x.pagina ? `PDF (p. ${x.pagina})` : 'PDF')
 
 //- Pregunta de intención, una vez por navegador: se muestra por CSS según
-//- la clase que pone head.pug antes de pintar, y behavior.js maneja las respuestas. Las
-//- opciones de data-form son las de la primera pregunta del formulario de
-//- entrevistas; data-campo es su id de campo para dejarla marcada.
+//- la clase que pone head.pug antes de pintar, y behavior.js maneja las
+//- respuestas. Después de responder, invitación a una entrevista con el
+//- texto según la respuesta (data-invita). La respuesta queda marcada en el
+//- formulario (OPCIONES_FORM en behavior.js). Si no contesta la invitación, se
+//- le ofrece una sola vez más, a los 3 días o más (#reoferta).
+//- lugar: 'busqueda' (por defecto), 'empresa' o 'expediente'. Mismo valor en
+//- GA para respuestas equivalentes, y tipo_pagina dice desde dónde.
 mixin preguntaIntencion(lugar)
-  //- lugar: 'busqueda' (por defecto) o 'empresa'. Mismo valor en GA para
-  //- respuestas equivalentes (propio, empresa, trabajo...), y tipo_pagina
-  //- dice desde dónde se respondió.
-  - const formEntrevista = 'https://docs.google.com/forms/d/e/1FAIpQLScdxU6Y8GRpRIr5dO7NRKtDNW4O2BaZB8tKNhkBO5q7g8UNPw/viewform?usp=pp_url'
   - const enEmpresa = lugar === 'empresa'
-  - const opciones = enEmpresa ? [['propio', 'Revisar un juicio propio', 'Tengo un juicio con esta empresa'], ['empresa', 'Averiguar sobre una empresa o un inmueble', 'Quiero saber cómo es antes de contratar, comprar o rentar'], ['trabajo', 'Por trabajo (abogacía, periodismo, investigación)', 'Trabajo (abogacía, periodismo, investigación)'], ['otro', null, 'Otra cosa']] : [['propio', 'Revisar un juicio propio', 'Mi propio juicio'], ['conocido', 'Revisar el juicio de alguien que conozco', 'El de alguien que conozco'], ['empresa', 'Averiguar sobre una empresa o un inmueble', 'Una empresa o un inmueble'], ['trabajo', 'Por trabajo (abogacía, periodismo, investigación)', 'Trabajo (abogacía, periodismo, investigación)'], ['otro', null, 'Otra cosa']]
-  section#intencion.intencion(aria-labelledby="intencion-titulo" data-campo="entry.954807767")
+  - const invita = { propio: '¿Nos cuentas cómo sigues tu juicio? Queremos que el sitio le sirva más a gente en tu situación.', conocido: '¿Nos cuentas cómo acompañas ese juicio? Queremos que el sitio le sirva más a gente en tu situación.', empresa: '¿Nos cuentas qué querías saber? Queremos que el sitio sirva mejor para averiguar sobre empresas.', trabajo: '¿Nos cuentas cómo lo usas en tu trabajo? Queremos saber qué te falta.', otro: '¿Nos cuentas para qué lo usas? Queremos entender qué necesitas.' }
+  - const opciones = enEmpresa ? [['propio', 'Tengo un juicio con esta empresa'], ['empresa', 'Quiero saber cómo es antes de contratar, comprar o rentar'], ['trabajo', 'Trabajo (abogacía, periodismo, investigación)'], ['otro', 'Otra cosa']] : [['propio', 'Mi propio juicio'], ['conocido', 'El de alguien que conozco'], ['empresa', 'Una empresa o un inmueble'], ['trabajo', 'Trabajo (abogacía, periodismo, investigación)'], ['otro', 'Otra cosa']]
+  - const titulo = enEmpresa ? '¿Por qué consultas esta empresa?' : lugar === 'expediente' ? '¿Para qué consultas este expediente?' : '¿Para qué estás buscando?'
+  section#intencion.intencion(aria-labelledby="intencion-titulo")
     button.intencion-cerrar(type="button" aria-label="Cerrar la pregunta") ✕
     .intencion-pregunta
-      h2#intencion-titulo= enEmpresa ? '¿Por qué consultas esta empresa?' : '¿Para qué estás buscando?'
+      h2#intencion-titulo= titulo
       p.nota Nos ayuda a mejorar el sitio. Es anónimo y solo te lo preguntamos una vez.
       .intencion-opciones
         each o in opciones
-          button(type="button" data-valor=o[0] data-form=o[1])= o[2]
+          button(type="button" data-valor=o[0] data-invita=invita[o[0]])= o[1]
     .intencion-gracias(hidden)
       h2 ¡Gracias!
-      p
-        | ¿Nos ayudas a entender mejor qué necesitas? Buscamos personas que usen el sitio para platicar 20 a 30 minutos.
-        = ' '
-        a(href=formEntrevista target="_blank" rel="noopener") Quiero participar en una entrevista
+      +invitacionEntrevista('pregunta', invita.otro)
+  section#reoferta.intencion.reoferta(aria-labelledby="reoferta-titulo")
+    button.intencion-cerrar(type="button" aria-label="Cerrar la invitación") ✕
+    h2#reoferta-titulo ¿Platicamos 20 minutos?
+    +invitacionEntrevista('reoferta', 'Hace unos días nos contaste para qué usas el sitio. Queremos entender mejor qué necesitas.')
+
+//- Invitación a la entrevista: texto, qué ofrecemos y dos botones. El link
+//- lleva al formulario de Google, behavior.js le agrega la respuesta marcada.
+mixin invitacionEntrevista(lugar, texto)
+  - const formEntrevista = 'https://docs.google.com/forms/d/e/1FAIpQLScdxU6Y8GRpRIr5dO7NRKtDNW4O2BaZB8tKNhkBO5q7g8UNPw/viewform?usp=pp_url'
+  .entrevista(data-lugar=lugar)
+    p.entrevista-texto= texto
+    p.nota Son 20 minutos, por WhatsApp, llamada o videollamada. Si participas, te invitamos a nuestros encuentros y al grupo de personas usuarias que nos ayudan a mejorar el sitio.
+    .entrevista-botones
+      a.entrevista-si(href=formEntrevista target="_blank" rel="noopener") Sí, quiero platicar
+      button.entrevista-no(type="button") No, gracias

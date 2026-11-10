@@ -8,6 +8,7 @@ const db = require('./db');
 const { expedienteHref, juzgadoHref, slugify } = require('./slug');
 const { getBoletinText, findExcerpt } = require('./raw-text');
 const fechas = require('./fechas');
+const { getNovedades } = require('./novedades');
 
 const TEMPLATES_DIR = path.join(__dirname, '..', 'templates');
 const isDev = process.env.NODE_ENV !== 'production';
@@ -492,6 +493,10 @@ function alertaEjemplo(req) {
   return { status: 200, html: renderTemplate('alerta-ejemplo', { req, expediente: data }) };
 }
 
+function novedades(req) {
+  return { status: 200, html: renderTemplate('novedades', { req, dias: getNovedades() }) };
+}
+
 function sources(req) {
   return { status: 200, html: renderTemplate('sources', { req, stats: db.getStats() }) };
 }
@@ -523,7 +528,7 @@ function health() {
 }
 
 module.exports = {
-  resaltar, robots, health, home, portada, personas, persona, juzgado, expediente, fecha, empresas, empresa, sources, renderTemplate, pugLocals,
+  resaltar, robots, health, home, portada, personas, persona, juzgado, expediente, fecha, empresas, empresa, sources, novedades, renderTemplate, pugLocals,
   salas: organos('sala'), juzgados: organos('juzgado'), sala: organo('sala'), juzgadoDesempeno: organo('juzgado'),
   tipos, tipo, misExpedientes, apiExpedientes, alertaEjemplo,
 };
