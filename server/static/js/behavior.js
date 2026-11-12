@@ -344,11 +344,11 @@ function eventoGa(nombre, params) {
     propio: 'Revisar un juicio propio',
     conocido: 'Revisar el juicio de alguien que conozco',
     empresa: 'Averiguar sobre una empresa o un inmueble',
-    trabajo: 'Por trabajo (abogacía, periodismo, investigación)'
+    trabajo: 'Por trabajo (casos de clientes, periodismo, investigación)'
   };
   var conRespuesta = function (link) {
     var texto = OPCIONES_FORM[leer('boletin-intencion')];
-    if (texto && link.href.indexOf('entry.') < 0) link.href += '&entry.954807767=' + encodeURIComponent(texto);
+    if (texto && link.href.indexOf('entry.') < 0) link.href += '&entry.1051725648=' + encodeURIComponent(texto);
   };
 
   document.addEventListener('click', function (e) {
