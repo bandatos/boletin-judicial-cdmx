@@ -585,7 +585,7 @@ test('parsear de novedades: solo lo de debajo de la marca, días sin líneas fue
 test('la ficha de expediente trae la pregunta de intención y la invitación con botones', async () => {
   const { body } = await get('/expediente/2');
   assert.match(body, /¿Para qué consultas este expediente\?/);
-  assert.match(body, /class="entrevista-si"[^>]*>Sí, dar mi opinión/);
+  assert.match(body, /class="entrevista-si"[^>]*>Sí, les cuento/);
   assert.match(body, /id="reoferta"/);
   assert.match(body, /class="pdf-panel-invita entrevista" data-lugar="pdf"/);
 });

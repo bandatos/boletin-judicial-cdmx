@@ -219,7 +219,7 @@ mixin expedienteEmpresa(x)
 //- GA para respuestas equivalentes, y tipo_pagina dice desde dónde.
 mixin preguntaIntencion(lugar)
   - const enEmpresa = lugar === 'empresa'
-  - const invita = { propio: '¿Nos cuentas qué te sirvió y qué te faltó para seguir tu juicio?', conocido: '¿Nos cuentas qué te sirvió y qué te faltó para seguir ese juicio?', empresa: '¿Nos cuentas qué te sirvió y qué te faltó para averiguar sobre la empresa?', trabajo: '¿Nos cuentas qué te sirvió y qué te faltó para tu trabajo?', otro: '¿Nos cuentas qué te sirvió y qué te faltó?' }
+  - const invita = '¿Nos cuentas más sobre tu experiencia con el sitio? Nos ayuda a seguir mejorando la plataforma.'
   - const opciones = enEmpresa ? [['propio', 'Tengo un juicio con esta empresa'], ['empresa', 'Quiero saber cómo es antes de contratar, comprar o rentar'], ['trabajo', 'Trabajo (casos de clientes, periodismo, investigación)'], ['otro', 'Otra cosa']] : [['propio', 'Mi propio juicio'], ['conocido', 'El de alguien que conozco'], ['empresa', 'Una empresa o un inmueble'], ['trabajo', 'Trabajo (casos de clientes, periodismo, investigación)'], ['otro', 'Otra cosa']]
   - const titulo = enEmpresa ? '¿Por qué consultas esta empresa?' : lugar === 'expediente' ? '¿Para qué consultas este expediente?' : '¿Para qué estás buscando?'
   section#intencion.intencion(aria-labelledby="intencion-titulo")
@@ -229,14 +229,14 @@ mixin preguntaIntencion(lugar)
       p.nota Nos ayuda a mejorar el sitio. Es anónimo y solo te lo preguntamos una vez.
       .intencion-opciones
         each o in opciones
-          button(type="button" data-valor=o[0] data-invita=invita[o[0]])= o[1]
+          button(type="button" data-valor=o[0] data-invita=invita)= o[1]
     .intencion-gracias(hidden)
       h2 ¡Gracias!
-      +invitacionEntrevista('pregunta', invita.otro)
+      +invitacionEntrevista('pregunta', invita)
   section#reoferta.intencion.reoferta(aria-labelledby="reoferta-titulo")
     button.intencion-cerrar(type="button" aria-label="Cerrar la invitación") ✕
-    h2#reoferta-titulo ¿Qué te ha parecido el sitio?
-    +invitacionEntrevista('reoferta', 'Hace unos días nos contaste para qué usas el sitio. Cuéntanos qué te sirvió y qué no.')
+    h2#reoferta-titulo ¿Nos cuentas tu experiencia?
+    +invitacionEntrevista('reoferta', 'Hace unos días nos contaste para qué usas el sitio. Si nos das más detalles de tu experiencia, podemos seguir mejorando la plataforma.')
 
 //- Invitación a opinar (con entrevista opcional): texto, qué ofrecemos y dos botones. El link
 //- lleva al formulario de Google, behavior.js le agrega la respuesta marcada.
@@ -244,7 +244,7 @@ mixin invitacionEntrevista(lugar, texto)
   - const formEntrevista = 'https://docs.google.com/forms/d/e/1FAIpQLScdxU6Y8GRpRIr5dO7NRKtDNW4O2BaZB8tKNhkBO5q7g8UNPw/viewform?usp=pp_url'
   .entrevista(data-lugar=lugar)
     p.entrevista-texto= texto
-    p.nota Es anónimo y toma un par de minutos. Al final, si quieres, puedes ofrecerte para platicar 20 minutos y sumarte al grupo de personas usuarias que nos ayudan a mejorar el sitio.
+    p.nota Es un formulario breve y anónimo.
     .entrevista-botones
-      a.entrevista-si(href=formEntrevista target="_blank" rel="noopener") Sí, dar mi opinión
+      a.entrevista-si(href=formEntrevista target="_blank" rel="noopener") Sí, les cuento
       button.entrevista-no(type="button") No, gracias
