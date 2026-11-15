@@ -16,9 +16,15 @@ include _metodo.pug
     .container.estadisticas-view
       p.sobretitulo= o.materia
       h1= o.nombre
-      if !esSala
-        p
-          a.boton-borde(href=juzgadoHref(o.nombre)) Ver los expedientes de este juzgado
+      //- Acciones, en dos niveles como en la ficha del expediente.
+      .acciones-pagina
+        if !esSala
+          .exp-acciones-principales
+            a.boton-borde.boton-principal(href=juzgadoHref(o.nombre) data-accion="ver_expedientes_juzgado" title=`Buscar entre los expedientes de ${o.nombre}`) Ver los expedientes de este juzgado
+        .exp-acciones-secundarias
+          if datosHasta
+            a(href=`/fecha/${datosHasta}?organo=${slugify(o.nombre)}` data-accion="ultimo_boletin" title=`Lo que publicó ${o.nombre} en el boletín del ${fechaMedia(datosHasta)}`) Lo publicado en el último boletín
+          button.boton-copiar.boton-texto(type="button" data-copiar="url" data-accion="copiar_enlace" title="Copia la dirección de esta página para compartirla") Copiar enlace a esta página
 
       if a
         h2.subtitulo Últimos 12 meses (#{o.ventana})

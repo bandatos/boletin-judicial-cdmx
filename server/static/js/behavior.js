@@ -30,7 +30,7 @@ function eventoGa(nombre, params) {
       frame.src = href;
       actual.parentNode.replaceChild(frame, actual);
     }
-    document.getElementById('pdf-panel-title').textContent = titulo || 'PDF del boletín';
+    document.getElementById('pdf-panel-title').textContent = titulo || 'Boletín';
     document.getElementById('pdf-panel-open').href = href;
     panel.hidden = false;
     document.body.classList.add('pdf-open');
@@ -52,13 +52,95 @@ function eventoGa(nombre, params) {
     var item = a.closest('li, .card');
     if (item) item.classList.add('comparando');
     abrir(a.getAttribute('data-pdf'), a.getAttribute('data-pagina'), a.getAttribute('data-titulo'));
-    eventoGa('ver_pdf');
+    eventoGa(a.getAttribute('data-tipo') === 'sentencia' ? 'ver_sentencia' : 'ver_pdf');
   });
   document.getElementById('pdf-panel-close').addEventListener('click', cerrar);
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape' && !panel.hidden) cerrar();
   });
 })();
+
+// Avisos tal como salieron en el boletín (ficha del expediente): al abrir
+// el desplegable se pide el texto de cada uno, de a uno para no cargar el
+// server (cada aviso lee el archivo de su boletín).
+(function () {
+  document.addEventListener('toggle', function (e) {
+    var d = e.target;
+    if (!d.classList || !d.classList.contains('avisos-textos') || !d.open || d.getAttribute('data-cargado')) return;
+    d.setAttribute('data-cargado', '1');
+    var items = d.querySelectorAll('li[data-aviso]');
+    var i = 0;
+    function siguiente() {
+      if (i >= items.length) return;
+      var li = items[i++];
+      var cuerpo = li.querySelector('.aviso-texto-cuerpo');
+      cuerpo.textContent = 'Cargando…';
+      fetch('/api/aviso/' + li.getAttribute('data-aviso') + '?json=1')
+        .then(function (r) { return r.json(); })
+        .then(function (j) { cuerpo.textContent = j.texto || 'No encontramos el texto en el boletín.'; })
+        .catch(function () { cuerpo.textContent = 'No se pudo cargar el texto.'; })
+        .then(siguiente);
+    }
+    siguiente();
+    eventoGa('ver_texto_aviso');
+  }, true);
+})();
+
+// "Ver los N avisos" en las listas de expedientes: la línea de tiempo se
+// pide al desplegar (/expediente/:id/avisos), la misma que en la ficha.
+document.addEventListener('toggle', function (e) {
+  var d = e.target;
+  if (!d.classList || !d.classList.contains('exp-avisos') || !d.open || d.getAttribute('data-cargado')) return;
+  d.setAttribute('data-cargado', '1');
+  var lista = d.querySelector('.exp-avisos-lista');
+  var enlace = lista.innerHTML;
+  lista.textContent = 'Cargando…';
+  fetch('/expediente/' + d.getAttribute('data-expediente') + '/avisos')
+    .then(function (r) { if (!r.ok) throw new Error(r.status); return r.text(); })
+    .then(function (html) { lista.innerHTML = html; })
+    .catch(function () { lista.innerHTML = enlace; d.removeAttribute('data-cargado'); });
+  eventoGa('ver_avisos_lista');
+}, true);
+
+// Maqueta de avisos por correo: cuánta gente la pide y si escribió algo en
+// el campo. Nunca se manda el correo (el campo no tiene name y acá solo se
+// mira si está vacío).
+document.addEventListener('submit', function (e) {
+  var f = e.target;
+  if (!f.closest || !f.closest('.alerta-maqueta')) return;
+  var campo = f.querySelector('input[type="email"]');
+  eventoGa('alerta_pedida', { con_correo: campo && campo.value.trim() ? 'si' : 'no' });
+}, true);
+
+// Interés en avisos por correo de una empresa (maqueta sin formulario).
+document.addEventListener('toggle', function (e) {
+  var d = e.target;
+  if (d.classList && d.classList.contains('alerta-empresa') && d.open) eventoGa('alerta_pedida', { tipo: 'empresa' });
+}, true);
+
+// Acciones (botones y enlaces con data-accion): un evento "accion" con su
+// nombre. tipo_pagina dice en qué página (eventoGa). Las que tienen evento
+// propio (guardar, ver_pdf, ir_tdv, alerta_pedida) no llevan data-accion.
+document.addEventListener('click', function (e) {
+  var a = e.target.closest && e.target.closest('[data-accion]');
+  if (a) eventoGa('accion', { accion: a.getAttribute('data-accion') });
+}, true);
+// Abrir el formulario de avisos por correo de la ficha (enviarlo es
+// alerta_pedida).
+document.addEventListener('toggle', function (e) {
+  var d = e.target;
+  if (d.classList && d.classList.contains('alerta-maqueta') && !d.classList.contains('alerta-empresa') && d.open) {
+    eventoGa('accion', { accion: 'alerta_abrir' });
+  }
+}, true);
+
+// Clics hacia Todo Derecho Vecino (orientación legal): evento propio, con la
+// página desde la que se fue. La medición automática de clics salientes de
+// GA puede no contarlo, porque está en el mismo dominio (bandatos.org).
+document.addEventListener('click', function (e) {
+  var a = e.target.closest && e.target.closest('a[href*="todo-derecho-vecino"]');
+  if (a) eventoGa('ir_tdv');
+});
 
 // Pestañas: cada botón muestra su tabpanel y oculta los otros del mismo
 // grupo. Teclado como el patrón ARIA de pestañas: flechas, Inicio y Fin
@@ -160,6 +242,7 @@ function eventoGa(nombre, params) {
     var b = e.target.closest && e.target.closest('button.boton-copiar');
     if (!b) return;
     var texto = b.getAttribute('data-copiar');
+    if (texto === 'url') texto = location.origin + location.pathname;
     var listo = function () {
       var antes = b.textContent;
       b.textContent = 'Copiado';
@@ -268,9 +351,13 @@ function eventoGa(nombre, params) {
     cont.textContent = '';
     if (datos.hasta) cont.appendChild(el('p', 'nota', 'Revisamos hasta el boletín del ' + fecha(datos.hasta) + '.'));
     var ol = el('ol', 'mis-lista');
+    // Mismo componente que las listas del sitio (mixins.pug: expedienteItem):
+    // número y órgano, partes, tipo con el último aviso y los avisos al
+    // desplegar. Arriba, el nombre que le pone la persona y si hay novedades.
     filas.forEach(function (f) {
       var g = f.guardado, d = f.dato || {};
-      var li = el('li', 'card');
+      var li = el('li', 'mis-item');
+      var art = el('article', 'exp-item');
       var apodoId = 'apodo-' + g.id;
       var cab = el('div', 'mis-cabecera');
       var etiqueta = el('label', 'visualmente-oculto', 'Nombre para reconocer este expediente');
@@ -289,29 +376,68 @@ function eventoGa(nombre, params) {
       cab.appendChild(etiqueta);
       cab.appendChild(apodo);
       if (d.ultima_fecha && (!g.visto || d.ultima_fecha > g.visto)) cab.appendChild(el('span', 'mis-nuevo', 'Nuevo aviso'));
-      li.appendChild(cab);
-      var titulo = el('div', 'card-partes');
-      if (d.encontrado) {
-        var link = el('a', null, d.titulo);
-        link.href = d.href;
-        titulo.appendChild(link);
-      } else {
-        titulo.textContent = (g.titulo || 'Expediente') + ' (ya no está en la base)';
+      art.appendChild(cab);
+
+      var header = el('header');
+      var num = el(d.encontrado ? 'a' : 'span', 'exp-item-num', 'Exp. ' + (d.expediente || g.expediente || '—'));
+      if (d.encontrado) num.href = d.href;
+      header.appendChild(num);
+      // Orden fijo: expediente, tipo de juicio, juzgado, secretaría.
+      if (d.tipo) header.appendChild(el('span', 'exp-item-tipo', d.tipo));
+      header.appendChild(el('span', 'exp-item-organo', [d.organo || g.organo, d.secretaria].filter(Boolean).join(' · ')));
+      var u = d.ultimo_aviso || {};
+      if (d.sentencia) {
+        var marca = el('span', 'marca-sentencia');
+        var et = el('span', 'actuacion act-sentencia', 'Sentencia ' + fecha(d.sentencia).replace('.', ''));
+        et.title = 'Sentencia publicada en el boletín del ' + fecha(d.sentencia);
+        marca.appendChild(et);
+        header.appendChild(marca);
       }
-      li.appendChild(titulo);
-      var meta = el('div', 'card-meta');
-      [d.organo || g.organo, 'Exp. ' + (d.expediente || g.expediente), d.tipo].forEach(function (t) {
-        if (t) meta.appendChild(el('span', null, t));
-      });
-      if (d.ultima_fecha) meta.appendChild(el('span', null, 'Último aviso: ' + fecha(d.ultima_fecha) + ' · ' + d.avisos + ' avisos'));
-      li.appendChild(meta);
+      art.appendChild(header);
+
+      var partes = el('div', 'exp-item-partes');
+      if (d.encontrado && d.demandada) {
+        // Misma etiqueta "vs" que en el resto del sitio (mixins.pug: vs).
+        partes.appendChild(el('b', null, d.actora));
+        partes.appendChild(document.createTextNode(' '));
+        var vs = el('span', 'vs', 'vs.');
+        vs.setAttribute('aria-label', 'contra');
+        partes.appendChild(vs);
+        partes.appendChild(document.createTextNode(' '));
+        partes.appendChild(el('b', null, d.demandada));
+      } else {
+        partes.textContent = d.encontrado ? d.titulo : (g.titulo || 'Expediente') + ' (ya no está en la base)';
+      }
+      art.appendChild(partes);
+
+      if (d.ultima_fecha) {
+        var meta = el('p', 'exp-item-meta');
+        meta.appendChild(el('span', null, d.avisos > 1 ? d.avisos + ' avisos · último:' : 'Aviso:'));
+        meta.appendChild(el('span', null, fecha(d.ultima_fecha)));
+        if (u.etiqueta) meta.appendChild(el('span', 'actuacion ' + (u.clase || ''), u.etiqueta));
+        if (u.descripcion && u.descripcion !== u.etiqueta) meta.appendChild(el('span', 'lt-desc', u.descripcion));
+        if (u.extra) meta.appendChild(el('span', 'lt-extra', u.extra));
+        art.appendChild(meta);
+      }
+      if (d.encontrado && d.avisos > 1) {
+        var det = el('details', 'exp-avisos');
+        det.setAttribute('data-expediente', g.id);
+        det.appendChild(el('summary', null, 'Ver los ' + d.avisos + ' avisos'));
+        var lista = el('div', 'exp-avisos-lista');
+        var enFicha = el('a', null, 'Ver los avisos en la ficha del expediente');
+        enFicha.href = d.href;
+        lista.appendChild(enFicha);
+        det.appendChild(lista);
+        art.appendChild(det);
+      }
       var quitar = el('button', 'boton-borde mis-quitar', 'Quitar');
       quitar.type = 'button';
       quitar.addEventListener('click', function () {
         escribir((leer() || []).filter(function (x) { return x.id !== g.id; }));
         li.remove();
       });
-      li.appendChild(quitar);
+      art.appendChild(quitar);
+      li.appendChild(art);
       ol.appendChild(li);
     });
     cont.appendChild(ol);

@@ -45,11 +45,12 @@ include mixins.pug
             strong Hay una obra o un conflicto en tu colonia.
             span Busca a la desarrolladora o a la empresa y mira qué juicios tiene.
         p.nota
-          | Con el número puedes guardar el expediente en #[a(href="/mis-expedientes") Mis expedientes] para ver cuándo se mueve. ¿Necesitas orientación? #[a(href=TDV_URL target="_blank" rel="noopener") Pregúntale a Todo Derecho Vecino].
+          | Con el número puedes guardar el expediente en #[a(href="/mis-expedientes") Mis expedientes] para ver cuándo se mueve. ¿Un problema con vecinos? #[a(href=TDV_URL target="_blank" rel="noopener" title="Todo Derecho Vecino, de Bandatos: describes tu problema vecinal y te propone una ruta para resolverlo (otro sitio)") Pregúntale a Todo Derecho Vecino ↗].
 
       nav.acciones-portada(aria-label="Secciones")
         a(href="/empresas") Empresas
-        a(href="/personas") Personas
+        if personas
+          a(href="/personas") Personas
         if hayEstadisticas
           a(href="/tipos") Tipos de juicio
           a(href="/salas") Desempeño de salas y juzgados

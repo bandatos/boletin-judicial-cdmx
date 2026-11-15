@@ -18,6 +18,13 @@ function fechaCorta(iso) {
   return `${d.getUTCDate()} ${MESES[d.getUTCMonth()].slice(0, 3)}. ${d.getUTCFullYear()}`;
 }
 
+// "13 de noviembre de 2026", sin el día de la semana.
+function fechaMedia(iso) {
+  if (!iso) return '—';
+  const d = isoToDate(iso);
+  return `${d.getUTCDate()} de ${MESES[d.getUTCMonth()]} de ${d.getUTCFullYear()}`;
+}
+
 function fechaLarga(iso) {
   const d = isoToDate(iso);
   return `${DIAS[d.getUTCDay()]} ${d.getUTCDate()} de ${MESES[d.getUTCMonth()]} de ${d.getUTCFullYear()}`;
@@ -46,4 +53,4 @@ function moverMes(anio, mes, delta) {
 
 const mesKey = (anio, mes) => `${anio}-${pad(mes)}`;
 
-module.exports = { MESES, fechaCorta, fechaLarga, nombreMes, semanasDelMes, moverMes, mesKey, isoToDate };
+module.exports = { MESES, fechaCorta, fechaMedia, fechaLarga, nombreMes, semanasDelMes, moverMes, mesKey, isoToDate };

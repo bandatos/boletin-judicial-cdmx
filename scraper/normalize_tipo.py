@@ -10,6 +10,7 @@ un puñado de categorías reales, a costa de descartar ruido residual que no
 matchea ninguna regla (queda tal cual, sin normalizar).
 """
 
+import functools
 import re
 
 ABBR = {
@@ -240,6 +241,10 @@ SPELLING_FIXES = [
 ]
 
 
+# Caché: el build llama esto cientos de miles de veces con los mismos
+# textos (tipos de juicio y prefijos de descripciones), y cada llamada
+# recorre SPELLING_FIXES. Funciones puras de su argumento.
+@functools.lru_cache(maxsize=400_000)
 def expand_abbr(text):
     """Expande abreviaciones token por token ("Ord." -> "Ordinario") y
     corrige variantes de escritura conocidas (typos, singular/plural)."""
@@ -256,13 +261,22 @@ def expand_abbr(text):
     return text
 
 
+# Tipos canónicos en minúsculas, agrupados por primera letra y en el mismo
+# orden (más largos primero). match_canonical_prefix corre por cada aviso
+# del build (34M): pasar a minúsculas los ~100 tipos en cada llamada era la
+# mayor parte del costo.
+_CANON_POR_LETRA = {}
+for _c in CANONICAL_TIPOS:
+    _CANON_POR_LETRA.setdefault(_c[:1].lower(), []).append((_c.lower(), _c))
+
+
+@functools.lru_cache(maxsize=400_000)
 def match_canonical_prefix(text):
     """Si `text` empieza (sin abreviar) con uno de los CANONICAL_TIPOS,
     devuelve ese tipo canónico. Si no, None. Usado tanto por el extractor
     (poc.py, en el momento del parseo) como por normalize() más abajo."""
     t_lower = text.lower()
-    for canon in CANONICAL_TIPOS:
-        cl = canon.lower()
+    for cl, canon in _CANON_POR_LETRA.get(t_lower[:1], ()):
         if t_lower.startswith(cl):
             rest = t_lower[len(cl):]
             # el match no debe cortar en medio de una palabra ("Oral Civil"

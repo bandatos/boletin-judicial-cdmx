@@ -81,17 +81,45 @@ test('GET /expediente/:idslug con id inexistente devuelve 404', async () => {
   assert.match(body, /No encontramos esa página/);
 });
 
-test('GET /expediente/:idslug muestra el PDF embebido y links relacionados', async () => {
+test('GET /expediente/:idslug muestra la ficha sin PDF embebido y con links relacionados', async () => {
   const { body } = await get('/expediente/2');
-  // Abre en la página del aviso (fixtures: pagina = id + 2).
-  assert.match(body, /<embed src="https:\/\/example\.org\/boletin2\.pdf#page=4&amp;toolbar=0"/);
+  // El boletín se abre desde cada aviso (panel lateral), no embebido.
+  assert.doesNotMatch(body, /<embed /);
+  assert.match(body, /class="ver-pdf"[^>]*data-pdf="https:\/\/example\.org\/boletin1\.pdf"/);
+  // Línea de tiempo ordenada por fecha: el 5 de junio antes que el 20 de marzo.
+  assert.ok(body.indexOf('datetime="2026-06-05"') < body.indexOf('datetime="2026-03-20"'));
   assert.match(body, /Juicios de tipo Sucesorio Familiar/);
   // Número para copiar, aclaración del contenido y qué hacer con el número.
-  assert.match(body, /class="boton-copiar"/);
-  assert.match(body, /no qué se decidió/);
-  assert.match(body, /Qué hacer con este número/);
-  assert.match(body, /todo-derecho-vecino/);
+  assert.match(body, /class="boton-copiar boton-texto"/);
+  assert.match(body, /Lo que dice cada acuerdo no se publica/);
+  // Cabecera: datos, y una sola fila de acciones (copiar, guardar, correo,
+  // Mi Tribunal, orientación) con su ayuda.
+  assert.match(body, /class="exp-datos"[\s\S]*Secretaría A/);
+  // Dos niveles: seguir el expediente (guardar, correo) y utilidades y
+  // salidas (copiar, Mi Tribunal, orientación).
+  assert.match(body, /class="exp-acciones-principales"[\s\S]*boton-guardar[\s\S]*alerta-maqueta/);
+  assert.match(body, /class="exp-acciones-secundarias"[\s\S]*boton-copiar[\s\S]*Mi Tribunal[\s\S]*todo-derecho-vecino/);
+  assert.match(body, /class="exp-acciones-ayuda"/);
+  // Período de los avisos, en el título de la lista.
+  assert.match(body, /class="avisos-titulo"[^>]*>Avisos \(2\)<small> · del /);
   assert.match(body, /Otros casos de TRIGÉSIMO DE LO FAMILIAR/);
+});
+
+test('GET /expediente/:id/avisos devuelve la línea de tiempo sin layout', async () => {
+  const { status, body } = await get('/expediente/2/avisos');
+  assert.equal(status, 200);
+  assert.match(body, /^<ol class="linea-tiempo">/);
+  assert.doesNotMatch(body, /<html/);
+  assert.equal((await get('/expediente/999999/avisos')).status, 404);
+});
+
+test('la búsqueda muestra cada expediente con los avisos encontrados y el enlace a la ficha', async () => {
+  const { body } = await get('/buscar?q=esquivel');
+  assert.match(body, /class="exp-item"[\s\S]*class="exp-item-num"[^>]*>Exp\. 184\/2025/);
+  assert.match(body, /2 avisos encontrados hasta el 5 de junio de 2026 · <a href="\/expediente\/\d+[^"]*" title="Abre la ficha del expediente 184\/2025[^"]*" data-accion="ver_detalles">Ver detalles<\/a>/);
+  // Sin despliegue de avisos ni enlaces a fechas o boletines: eso está en la ficha.
+  assert.doesNotMatch(body, /class="exp-avisos"/);
+  assert.doesNotMatch(body, /class="exp-item"[\s\S]*?class="ver-pdf"[\s\S]*?<\/article>/);
 });
 
 test('el header es igual en todas las páginas (salvo el ítem activo del menú)', async () => {
@@ -160,12 +188,41 @@ test('num() formatea con separador de miles (es-MX)', () => {
   assert.equal(pugLocals.num(500), '500');
 });
 
-test('GET /expediente/:id muestra un extracto del texto original leído de disco', async () => {
+test('la ficha ofrece ver los avisos tal como salieron, con link al texto plano', async () => {
   const { body } = await get('/expediente/2');
-  assert.match(body, /class="raw-text"/);
-  assert.match(body, /Sucesorio Familiar 1 Acdo\. Núm\. Exp\. 184\/2025\./);
+  assert.match(body, /class="avisos-textos"/);
+  assert.match(body, /<li data-aviso="\d+">/);
+  assert.match(body, /href="\/api\/aviso\/\d+"/);
+});
+
+test('GET /api/aviso/:id devuelve el texto del aviso leído de disco', async () => {
+  // El aviso 2 es del boletín 2, que tiene .txt en el fixture.
+  const { status, body } = await get('/api/aviso/2?json=1');
+  assert.equal(status, 200);
+  const { texto } = JSON.parse(body);
+  assert.match(texto, /Sucesorio Familiar 1 Acdo\. Núm\. Exp\. 184\/2025\./);
   // No debe filtrarse el texto de otro aviso del mismo archivo.
-  assert.doesNotMatch(body, /999\/2020/);
+  assert.doesNotMatch(texto, /999\/2020/);
+  assert.equal((await get('/api/aviso/999999?json=1')).status, 404);
+});
+
+test('findExcerpt elige la aparición del expediente más cercana a la actora', () => {
+  const { findExcerpt } = require('../lib/raw-text');
+  const texto = 'Banco X vs. Pérez Juan. Esp. Hip. 1 Acdo. Núm. Exp. 10/2024.\n'
+    + 'Banco X vs. López Ana. Esp. Hip. 1 Acdo. Núm. Exp. 1184/2025.\n'
+    + 'Banco X vs. Ruiz Eva. Esp. Hip. 2 Acdos. Núm. Exp. 184/2025.\n'
+    + 'Gómez vs. Díaz. Cnpcyf Alimentos Núm. Exp. 6703/2026, Prevención. 1 Acdo.\n';
+  assert.equal(findExcerpt(texto, { actora: 'Banco X', expediente: '184/2025' }),
+    'Banco X vs. Ruiz Eva. Esp. Hip. 2 Acdos. Núm. Exp. 184/2025.');
+  assert.equal(findExcerpt(texto, { actora: 'Gómez', expediente: '6703/2026' }),
+    'Gómez vs. Díaz. Cnpcyf Alimentos Núm. Exp. 6703/2026, Prevención. 1 Acdo.');
+  // Dos avisos del mismo expediente el mismo día: desempata la marca.
+  const dos = 'Ana vs. Juan. Esp. Familiar 4 Acdos. Núm. Exp. 1232/2026. '
+    + 'Ana vs. Juan. Esp. Familiar Aud. 272-B Sent. Def. 1 Núm. Exp. 1232/2026 SOLO CONSULTA LA SECRETARIA.';
+  assert.equal(findExcerpt(dos, { actora: 'Ana', expediente: '1232/2026', marca: /\bSent\b/i }),
+    'Ana vs. Juan. Esp. Familiar Aud. 272-B Sent. Def. 1 Núm. Exp. 1232/2026');
+  assert.equal(findExcerpt(dos, { actora: 'Ana', expediente: '1232/2026', marca: /\b4\s+Acdos?\b/i }),
+    'Ana vs. Juan. Esp. Familiar 4 Acdos. Núm. Exp. 1232/2026.');
 });
 
 test('GET /juzgado/:slug lista los expedientes de ese juzgado', async () => {
@@ -212,7 +269,7 @@ test('GET /fecha/:iso?organo= muestra los avisos con link al PDF en su página',
   const { body } = await get('/fecha/2026-06-05?organo=trigesimo-de-lo-familiar');
   assert.match(body, /Esquivel Thebart Alejandro/);
   assert.match(body, /boletin1\.pdf#page=3/);
-  assert.match(body, /ver en PDF \(p\. 3\)/);
+  assert.match(body, /ver boletín \(p\. 3\)/);
   assert.doesNotMatch(body, /Tello de Meneses/);
 });
 
@@ -226,10 +283,10 @@ test('GET /fecha/:iso?q= filtra en todo el día; día sin boletín y fecha invá
   assert.equal((await get('/fecha/no-es-fecha')).status, 404);
 });
 
-test('GET /?q=NNN/AAAA busca por expediente y las fechas llevan al día', async () => {
+test('GET /?q=NNN/AAAA busca por expediente', async () => {
   const { body } = await get('/buscar?q=' + encodeURIComponent('184/2025'));
   assert.match(body, /1 expediente\b/);
-  assert.match(body, /href="\/fecha\/2026-06-05"/);
+  assert.match(body, /Exp\. 184\/2025/);
 });
 
 test('GET /fecha con desplegables ?a=&m= muestra ese mes', async () => {
@@ -261,7 +318,9 @@ test('GET /empresas/:slug muestra expedientes sin nombrar personas', async () =>
   assert.match(body, /Exp\. 77\/2025/);
   assert.match(body, /persona\(s\) física\(s\)/);
   assert.match(body, /href="\/empresas\/banco-ejemplo"/);
-  assert.match(body, /boletin3\.pdf#page=6/);
+  // Misma tarjeta que la búsqueda: avisos y fecha, y la ficha para el detalle.
+  assert.match(body, /class="exp-item"[\s\S]*avisos? hasta el|class="exp-item"[\s\S]*1 aviso, del/);
+  assert.match(body, />Ver detalles<\/a>/);
   assert.doesNotMatch(body, /<meta name="robots" content="noindex">/);
   assert.doesNotMatch(body, PERSONAS_FIXTURE);
   assert.equal((await get('/empresas/no-existe')).status, 404);
@@ -272,10 +331,10 @@ test('la ficha de expediente linkea a las empresas del caso', async () => {
   assert.match(body, /href="\/empresas\/constructora-ejemplo"/);
 });
 
-test('la ficha lee el texto original también de .txt.gz', async () => {
-  const { body } = await get('/expediente/4');
-  assert.match(body, /Núm\. Exp\. 55\/2024/);
-  assert.match(body, /class="raw-text"/);
+test('el texto del aviso se lee también de .txt.gz', async () => {
+  const id = (await get('/expediente/4')).body.match(/data-aviso="(\d+)"/)[1];
+  const { body } = await get(`/api/aviso/${id}?json=1`);
+  assert.match(JSON.parse(body).texto, /Núm\. Exp\. 55\/2024/);
 });
 
 test('GET / es la portada: buscador general, tablas y sin nombres de personas', async () => {
@@ -693,4 +752,30 @@ test('GET /opinion muestra el formulario, linkeado desde el pie; otros métodos 
   assert.equal((await fetch(base + '/buscar', { method: 'POST', body: 'q=x' })).status, 405);
   assert.equal((await fetch(base + '/opinion', { method: 'PUT', body: 'q=x' })).status, 405);
   assert.equal((await fetch(base + '/opinion', { method: 'POST', body: 'x'.repeat(9000) }).catch(() => ({ status: 413 }))).status, 413);
+});
+
+// Enlace a la versión pública: extrae las URLs firmadas de la respuesta xajax del SIVEP.
+test('sivep: urlsDeRespuesta toma documentPath y desescapa &amp;', () => {
+  const { urlsDeRespuesta } = require('../lib/sivep');
+  const xml = "<td><abbr title='Sentencia original'><a href='https://gestordocumental.poderjudicialcdmx.gob.mx/preview/document?disk=volumen11&amp;documentPath=%2FEstructuras%2FTSJ%2FSIVEP%2F1%2F28%2Fx.pdf&amp;expires=1&amp;signature=ab' class='btn'></a></abbr></td>";
+  const urls = urlsDeRespuesta(xml);
+  assert.equal(urls.size, 1);
+  assert.equal(urls.get('/Estructuras/TSJ/SIVEP/1/28/x.pdf'),
+    'https://gestordocumental.poderjudicialcdmx.gob.mx/preview/document?disk=volumen11&documentPath=%2FEstructuras%2FTSJ%2FSIVEP%2F1%2F28%2Fx.pdf&expires=1&signature=ab');
+});
+
+test('expandirAbreviaturas: solo las de la lista y sin tocar las mayúsculas del boletín', () => {
+  const { expandirAbreviaturas } = require('../lib/actuaciones');
+  assert.equal(expandirAbreviaturas('Revocadas Autorizaciones y Dom. Procesal Cóny. Sra.'), 'Revocadas Autorizaciones y Domicilio Procesal Cónyuge Señora');
+  assert.equal(expandirAbreviaturas('Desahoga Vista Mp'), 'Desahoga Vista Ministerio Público');
+  // Sin verificar, queda como está; y no se expande dentro de otra palabra.
+  assert.equal(expandirAbreviaturas('Oficio Rpp'), 'Oficio Rpp');
+  assert.equal(expandirAbreviaturas('Domingo Mpio.'), 'Domingo Mpio.');
+});
+
+test('desempeño ordenado por nombre (salas y juzgados) no falla', async () => {
+  // Con la base del fixture sin estadísticas da 404; lo que no debe dar es 500.
+  for (const ruta of ['/salas?orden=nombre', '/juzgados?orden=nombre']) {
+    assert.notEqual((await get(ruta)).status, 500);
+  }
 });

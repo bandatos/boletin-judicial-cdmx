@@ -58,7 +58,7 @@ include mixins.pug
           span #{num(dia.total)} avisos · #{num(dia.grupos.length)} juzgados y salas
           each b in dia.boletines
             if b.pdf_url
-              +pdfLink({ pdf_url: b.pdf_url, fecha_iso: iso }, 'Ver PDF del boletín')
+              +pdfLink({ pdf_url: b.pdf_url, fecha_iso: iso }, 'Ver boletín')
 
         form.dia-filtro(method="GET" action=`/fecha/${iso}`)
           input(type="search" name="q" value=q placeholder="Filtrar en este boletín por nombre, expediente o tipo de juicio..." autocomplete="off")

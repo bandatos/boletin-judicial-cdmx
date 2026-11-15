@@ -73,8 +73,9 @@ test('getExpedienteById devuelve el expediente con todos sus avisos', () => {
   assert.ok(exp);
   assert.equal(exp.expediente, '184/2025');
   assert.equal(exp.avisos.length, 2);
-  // Ordenados por boletin_id descendente (más reciente primero).
-  assert.equal(exp.avisos[0].boletin_id, 2);
+  // Ordenados por fecha del boletín, más reciente primero (en el fixture el
+  // boletín 1 es del 5 de junio y el 2 del 20 de marzo).
+  assert.equal(exp.avisos[0].boletin_id, 1);
 });
 
 test('getExpedienteById con id inexistente devuelve null', () => {

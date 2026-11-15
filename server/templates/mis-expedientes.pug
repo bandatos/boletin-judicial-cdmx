@@ -17,6 +17,9 @@ include mixins.pug
         p Esta sección necesita JavaScript: la lista se guarda en tu navegador.
       .aviso-privacidad
         p #[strong Se guarda solo en este navegador.] No tenemos cuentas ni guardamos qué expedientes sigues. Si borras los datos del navegador o cambias de dispositivo, la lista se pierde.
-        p ¿Necesitas orientación sobre un juicio? #[a(href=TDV_URL target="_blank" rel="noopener") Pregúntale a Todo Derecho Vecino].
+        p
+          | ¿Tienes un problema con vecinos?
+          = ' '
+          +enlaceTDV('Pregúntale a Todo Derecho Vecino ↗')
 
   +siteFooter()

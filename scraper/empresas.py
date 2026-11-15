@@ -17,6 +17,7 @@ empresa ("Banco Santander (México), S.A., Institución de Banca Múltiple" y
 "BANCO SANTANDER MEXICO S.A." dan "banco santander mexico").
 """
 
+import functools
 import re
 import unicodedata
 
@@ -342,6 +343,9 @@ def trozos(campo):
     return salida
 
 
+# Los mismos nombres se repiten miles de veces (bancos, aseguradoras,
+# "Secreto"): con caché, la detección cuesta una vez por texto distinto.
+@functools.lru_cache(maxsize=500_000)
 def partes(campo):
     """Divide un campo actora/demandada en (empresas, hay_otras_partes).
 
@@ -364,7 +368,8 @@ def partes(campo):
                 continue
         if re.search(r"[A-Za-zÁÉÍÓÚÑáéíóúñ]{2}", t) and not RE_Y_OTROS.match(" " + t):
             otras = True
-    return empresas, otras
+    # Tupla y no lista: el resultado se comparte entre llamadas (caché).
+    return tuple(empresas), otras
 
 
 def partes_empresa(campo):

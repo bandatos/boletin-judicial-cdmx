@@ -6,6 +6,7 @@ const path = require('path');
 const Database = require('better-sqlite3');
 const { slugify } = require('./slug');
 const busqueda = require('./busqueda');
+const actuaciones = require('./actuaciones');
 
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, '..', '..', 'boletin.sqlite');
 
@@ -116,8 +117,20 @@ function findJuzgadoBySlug(slug) {
   return getResumen().slugs.get(slug) || null;
 }
 
-const COLS_AVISO = `e.id, e.boletin_id, e.actora, e.demandada, e.tipo_juicio, e.tipo_juicio_norm,
-             e.expediente, e.juzgado, e.sala, e.pagina, b.fecha, b.fecha_iso, b.pdf_url`;
+const COLS_AVISO_BASE = `e.id, e.boletin_id, e.actora, e.demandada, e.tipo_juicio, e.tipo_juicio_norm,
+             e.expediente, e.juzgado, e.sala, e.secretaria, e.pagina, e.num_acdos, b.fecha, b.fecha_iso, b.pdf_url`;
+// Columnas de lo que pasó en cada aviso (etiqueta, descripción, cuaderno).
+// Las bases viejas no las tienen: van como NULL y las páginas muestran el
+// conteo de acuerdos, como antes. Las usan todas las listas de avisos, para
+// que la etiqueta salga igual en la ficha, la búsqueda, la vista por fecha,
+// empresas, personas y Mis expedientes.
+function colsActuacion(alias = 'e') {
+  return ['tipo_actuacion', 'tipo_acuerdo', 'descripcion', 'cuaderno']
+    .map(c => (hayColumna('entradas', c) ? `${alias}.${c}` : `NULL AS ${c}`)).join(', ');
+}
+function colsAviso() {
+  return `${COLS_AVISO_BASE}, ${colsActuacion('e')}`;
+}
 
 // Tramos de ids en los que el orden de los ids es el de las fechas, del más
 // nuevo al más viejo. Los ids no son cronológicos (las corridas del scraper
@@ -152,7 +165,7 @@ const CANDIDATOS = 5000;
 const FROM_FTS = 'entradas_fts f CROSS JOIN entradas e ON e.id = f.rowid';
 function avisosRecientes({ from, where, params, limite, colId = 'e.id' }) {
   const d = getDb();
-  const base = `SELECT ${COLS_AVISO} FROM ${from} LEFT JOIN boletines b ON e.boletin_id = b.id WHERE ${where}`;
+  const base = `SELECT ${colsAviso()} FROM ${from} LEFT JOIN boletines b ON e.boletin_id = b.id WHERE ${where}`;
   const candidatos = d.prepare(`${base} LIMIT ${CANDIDATOS}`).all(...params);
   const porFecha = (a, b) => String(b.fecha_iso || '').localeCompare(String(a.fecha_iso || '')) || b.id - a.id;
   if (candidatos.length < CANDIDATOS) {
@@ -227,7 +240,7 @@ function paginaExpedientes({ from, where, params, colId = 'e.id', pagina, filtro
   const d = getDb();
   const p = Math.max(1, parseInt(pagina, 10) || 1);
   const desde = (p - 1) * EXPEDIENTES_POR_PAGINA;
-  const base = `SELECT ${COLS_AVISO} FROM ${from} LEFT JOIN boletines b ON e.boletin_id = b.id WHERE ${where}`;
+  const base = `SELECT ${colsAviso()} FROM ${from} LEFT JOIN boletines b ON e.boletin_id = b.id WHERE ${where}`;
   const porFecha = (a, b) => String(b.fecha_iso || '').localeCompare(String(a.fecha_iso || '')) || b.id - a.id;
 
   const candidatos = d.prepare(`${base} LIMIT ${maxCandidatos}`).all(...params);
@@ -411,13 +424,16 @@ function getExpedienteById(id) {
   `).get(id);
   if (!row) return null;
 
-  const actuacion = hayColumna('entradas', 'tipo_actuacion') ? 'e.tipo_actuacion' : 'NULL AS tipo_actuacion';
+  // Enlace a la versión pública de la sentencia (build_db.py --sivep).
+  const conSivep = hayTabla('sentencias_publicas');
   const avisos = getDb().prepare(`
-    SELECT e.id, e.boletin_id, e.tipo_juicio, e.num_acdos, e.pagina, ${actuacion}, b.fecha, b.fecha_iso, b.pdf_url
+    SELECT e.id, e.boletin_id, e.tipo_juicio, e.tipo_juicio_norm, e.num_acdos, e.pagina, ${colsActuacion('e')},
+           ${conSivep ? 'EXISTS (SELECT 1 FROM sentencias_publicas sp WHERE sp.entrada_id = e.id)' : '0'} AS sentencia_publica,
+           b.fecha, b.fecha_iso, b.pdf_url
     FROM entradas e
     LEFT JOIN boletines b ON e.boletin_id = b.id
     WHERE e.juzgado IS ? AND e.sala IS ? AND e.expediente = ?
-    ORDER BY e.boletin_id DESC
+    ORDER BY b.fecha_iso DESC, e.boletin_id DESC, e.id DESC
   `).all(row.juzgado, row.sala, row.expediente);
 
   const { porTipo, porJuzgado } = getResumen();
@@ -521,9 +537,9 @@ function normTxt(str) {
 function getDia(iso, { q } = {}) {
   const boletines = getResumen().boletinesPorFecha.get(iso) || [];
   const stmt = getDb().prepare(`
-    SELECT id, juzgado, sala, secretaria, actora, demandada, tipo_juicio, expediente,
-           num_acdos, pagina
-    FROM entradas WHERE id BETWEEN ? AND ? AND boletin_id = ? ORDER BY id
+    SELECT e.id, e.juzgado, e.sala, e.secretaria, e.actora, e.demandada, e.tipo_juicio, e.expediente,
+           e.num_acdos, e.pagina, ${colsActuacion('e')}
+    FROM entradas e WHERE e.id BETWEEN ? AND ? AND e.boletin_id = ? ORDER BY e.id
   `);
   const filtro = normTxt((q || '').trim());
   const grupos = new Map();
@@ -665,9 +681,10 @@ function getExpedientesEmpresa(empresa, pagina) {
   const ids = grupos.map(g => g.ultimo_id);
   const marcas = ids.map(() => '?').join(',');
   const detalle = new Map(d.prepare(`
-    SELECT en.id, en.tipo_juicio, en.pagina, b.fecha_iso, b.pdf_url
+    SELECT en.id, en.tipo_juicio, en.secretaria, en.pagina, en.num_acdos, ${colsActuacion('en')}, b.fecha_iso, b.pdf_url
     FROM entradas en JOIN boletines b ON b.id = en.boletin_id WHERE en.id IN (${marcas})
   `).all(...ids).map(r => [r.id, r]));
+  const sentencias = sentenciasDe(grupos.map(g => ({ organo: g.organo, expediente: g.expediente })));
   const otrasEmpresas = new Map();
   for (const r of d.prepare(`
     SELECT ee.entrada_id, ee.rol, e.nombre, e.slug
@@ -690,6 +707,7 @@ function getExpedientesEmpresa(empresa, pagina) {
       ...detalle.get(g.ultimo_id),
       contraEmpresas: contra,
       contraPersonas: Boolean(pers && pers[`otras_${otroRol}`]),
+      sentencia: sentencias.get(`${g.organo}|${g.expediente}`) || null,
     };
   });
   return {
@@ -999,7 +1017,7 @@ function nombreVentana({ desde, hasta }) {
 const MIN_AVISOS_ORGANO = 50;
 const ORDENES_ORGANO = {
   sentencias: 'sentencias DESC', avisos: 'avisos DESC', expedientes: 'expedientes DESC',
-  duracion: 'mediana IS NULL, mediana', demora: 'demora IS NULL, demora', nombre: 'organo',
+  duracion: 'mediana IS NULL, mediana', demora: 'demora IS NULL, demora', nombre: 'm.organo',
 };
 
 // /salas y /juzgados: una tabla por materia con las cifras de la ventana.
@@ -1146,7 +1164,7 @@ const MAX_MIS_EXPEDIENTES = 100;
 function getResumenExpedientes(ids) {
   const d = getDb();
   const fila = d.prepare(`
-    SELECT e.id, e.actora, e.demandada, e.expediente, e.juzgado, e.sala, e.tipo_juicio_norm, e.tipo_juicio
+    SELECT e.id, e.actora, e.demandada, e.expediente, e.juzgado, e.sala, e.secretaria, e.tipo_juicio_norm, e.tipo_juicio
     FROM entradas e WHERE e.id = ?
   `);
   const ultimo = d.prepare(`
@@ -1154,14 +1172,29 @@ function getResumenExpedientes(ids) {
     FROM entradas e JOIN boletines b ON b.id = e.boletin_id
     WHERE e.juzgado IS ? AND e.sala IS ? AND e.expediente = ?
   `);
+  // El aviso más reciente, para mostrar su etiqueta.
+  const masReciente = d.prepare(`
+    SELECT e.num_acdos, ${colsActuacion('e')}
+    FROM entradas e JOIN boletines b ON b.id = e.boletin_id
+    WHERE e.juzgado IS ? AND e.sala IS ? AND e.expediente = ?
+    ORDER BY b.fecha_iso DESC, e.id DESC LIMIT 1
+  `);
   return ids.slice(0, MAX_MIS_EXPEDIENTES).map(id => {
     const r = fila.get(id);
     if (!r) return { id, encontrado: false };
     const u = ultimo.get(r.juzgado, r.sala, r.expediente);
+    const a = masReciente.get(r.juzgado, r.sala, r.expediente) || {};
+    const s = sentenciasDe([{ organo: r.sala || r.juzgado, expediente: r.expediente }]).values().next().value;
     return {
       id, encontrado: true,
+      ultimo_aviso: {
+        etiqueta: actuaciones.etiqueta(a), clase: actuaciones.actuacionClase(a),
+        descripcion: actuaciones.expandirAbreviaturas(a.descripcion) || null, extra: actuaciones.acuerdosExtra(a),
+      },
+      sentencia: s ? s.fecha_iso : null,
       titulo: r.demandada ? `${r.actora} vs. ${r.demandada}` : r.actora,
-      expediente: r.expediente, organo: r.sala || r.juzgado,
+      actora: r.actora, demandada: r.demandada,
+      expediente: r.expediente, organo: r.sala || r.juzgado, secretaria: actuaciones.secretariaCorta(r.secretaria),
       tipo: r.tipo_juicio_norm || r.tipo_juicio, avisos: u.avisos, ultima_fecha: u.ultima_fecha,
     };
   });
@@ -1189,8 +1222,54 @@ function ping() {
   return getDb().prepare('SELECT 1 AS ok').get().ok === 1;
 }
 
+// Datos mínimos de un aviso para ubicar su texto en el boletín.
+function getAviso(id) {
+  return getDb().prepare(`
+    SELECT e.id, e.boletin_id, e.actora, e.expediente, e.pagina, e.num_acdos,
+           ${hayColumna('entradas', 'tipo_actuacion') ? 'e.tipo_actuacion' : 'NULL AS tipo_actuacion'},
+           b.pdf_url, b.fecha_iso
+    FROM entradas e LEFT JOIN boletines b ON b.id = e.boletin_id WHERE e.id = ?
+  `).get(id) || null;
+}
+
+// Sentencia definitiva (o de sala) más reciente de cada expediente, para
+// marcarla en listas (empresas, Mis expedientes). Clave "órgano|expediente".
+// Usa idx_expediente (juzgado, expediente); las salas, idx_expediente_num.
+function sentenciasDe(pares) {
+  const out = new Map();
+  if (!pares.length || !hayColumna('entradas', 'tipo_actuacion')) return out;
+  // Una consulta por juzgado y otra por sala: con "juzgado = ? OR sala = ?"
+  // SQLite no usaba índice y recorría toda la tabla (8 s por página).
+  const consulta = col => getDb().prepare(`
+    SELECT b.fecha_iso FROM entradas e JOIN boletines b ON b.id = e.boletin_id
+    WHERE e.${col} = ? AND e.expediente = ?
+      AND e.tipo_actuacion IN ('sentencia_definitiva', 'sentencia')
+    ORDER BY b.fecha_iso DESC LIMIT 1
+  `);
+  const porJuzgado = consulta('juzgado');
+  const porSala = consulta('sala');
+  for (const { organo, expediente } of pares) {
+    const esSala = /\bSALA\b/i.test(organo || '');
+    const r = expediente && (esSala ? porSala : porJuzgado).get(organo, expediente);
+    if (r) out.set(`${organo}|${expediente}`, { fecha_iso: r.fecha_iso });
+  }
+  return out;
+}
+
+
+// Parámetros para pedir al SIVEP la URL vigente de la versión pública
+// enlazada a un aviso (ver lib/sivep.js).
+function getSentenciaPublica(entradaId) {
+  if (!hayTabla('sentencias_publicas')) return null;
+  return getDb().prepare(`
+    SELECT sp.*, e.id AS entrada_id, e.actora, e.expediente
+    FROM sentencias_publicas sp JOIN entradas e ON e.id = sp.entrada_id
+    WHERE sp.entrada_id = ? LIMIT 1
+  `).get(entradaId) || null;
+}
+
 module.exports = {
-  ping, getGeneracion, getTipos, getAnios, findJuzgadoBySlug, searchEntradas, groupByExpediente, getExpedienteById,
+  ping, getSentenciaPublica, getAviso, getGeneracion, getTipos, getAnios, findJuzgadoBySlug, searchEntradas, groupByExpediente, getExpedienteById,
   getYearChart, getPublicacionChart, getStats, getResumen, getDia, getFechas, reloadDb,
   sugerirConsulta, coincidenciasFichas, getPortada, hayPersonas, getPersonas, getPersona, getResumenPersonas, getExpedientesPersona, buscarExpedientes, EXPEDIENTES_POR_PAGINA, PERSONAS_POR_PAGINA,
   getUltimaFecha, serie, seriesSimples, getPublicacionChartMensual, hayEstadisticas, materiaDe, getOrganos, getOrgano,

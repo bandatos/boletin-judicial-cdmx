@@ -1,0 +1,19 @@
+include head.pug
+include chrome.pug
+
+//- Respaldo de /sentencia-publica/:id cuando el SIVEP no responde o ya no
+//- lista el documento: cómo encontrarlo a mano.
++head(`Versión pública de la sentencia: ${siteTitle}`, siteTitle, true)
+  +siteHeader()
+  main#contenido
+    .container
+      h1 No pudimos abrir la versión pública
+      p El Sistema de Versiones Públicas (SIVEP) del Poder Judicial no respondió, o ya no muestra este documento. Puedes buscarlo a mano:
+      ol
+        li Entra al #[a(href=sivepBase target="_blank" rel="noopener") SIVEP].
+        li Elige #[strong Sentencias], materia #[strong= sentencia.materia], el juzgado, el ejercicio #[strong= sentencia.ejercicio] y el trimestre #[strong= trimestreTexto].
+        li Busca la sentencia de #[strong= (sentencia.tipo_juicio || '').toLowerCase()] con fecha #[strong= sentencia.fecha_emision ? fechaCorta(sentencia.fecha_emision) : '—'].
+      p.nota La versión pública no trae nombres ni número de expediente: el Poder Judicial los testa.
+      p
+        a(href=volver) ← Volver al expediente
+  +siteFooter()

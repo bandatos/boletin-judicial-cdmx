@@ -24,10 +24,15 @@ include mixins.pug
           p Hola:
           p El Boletín Judicial del #[strong= fechaLarga(ultimo.fecha_iso)] publicó un aviso en un expediente que sigues:
           .correo-caso
-            p.correo-partes= titulo
+            p.correo-partes
+              = expediente.actora
+              if expediente.demandada
+                +vs()
+                = expediente.demandada
             p= `${organo} · ${expediente.sala ? 'Toca' : 'Exp.'} ${expediente.expediente}`
             if actuacion(ultimo)
-              p.correo-actuacion= actuacion(ultimo)
+              p.correo-actuacion
+                span.actuacion(class=actuacionClase(ultimo))= actuacion(ultimo)
           p
             a.boton(href=pdfHref(ultimo)) Ver el aviso en el PDF oficial
           p

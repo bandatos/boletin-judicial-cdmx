@@ -22,11 +22,14 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 from normalize_tipo import normalize
 import empresas as emp
+from acuerdos import (descripcion, descripcion_de_sobrante, quitar_marca_publicacion, separar_expediente,
+                      separar_parte, tipo_acuerdo)
 import personas as pers
 
 # normalize() es una cascada de regex y era ~80% del tiempo de carga, pero
@@ -36,6 +39,14 @@ normalize_tipo = functools.lru_cache(maxsize=None)(normalize)
 csv.field_size_limit(10**9)
 
 RE_ANIO = re.compile(r"/(\d{4})\b")
+
+
+
+def hilos_sqlite(conn):
+    """Ordenamiento en varios hilos para CREATE INDEX y GROUP BY grandes
+    (PRAGMA threads, SQLite >= 3.8.7). Sin esto, indexar 34M filas usa un
+    solo núcleo."""
+    conn.execute(f"PRAGMA threads={min(8, os.cpu_count() or 1)}")
 
 
 def create_schema(conn):
@@ -80,7 +91,19 @@ def create_schema(conn):
             -- sentencia (sin calificar: las de sala) o audiencia
             tipo_actuacion TEXT,
             ponencia    INTEGER, -- sentencias de sala: "Sent. Pon 2"
-            fecha_acuerdo TEXT   -- "ACUERDOS DEL ..." del órgano, ISO
+            fecha_acuerdo TEXT,  -- "ACUERDOS DEL ..." del órgano, ISO
+            -- Qué se resolvió en un acuerdo, si el órgano lo publica:
+            -- prevencion, negacion o admision (acuerdos.tipo_acuerdo). NULL si el
+            -- aviso no trae descripción, o si es sentencia o audiencia.
+            tipo_acuerdo TEXT,
+            -- Lo que el órgano escribió sobre lo acordado ("Prevención 3
+            -- Días", "Admisión Apel. Efecto Devoluctivo"), si lo escribió
+            -- (acuerdos.descripcion). La ficha lo muestra en cada aviso.
+            descripcion TEXT,
+            -- Cuaderno o tomo que el boletín pega al número ("Tomo II",
+            -- "Inc", "Principal"). expediente queda solo con el número
+            -- (acuerdos.separar_expediente), que es la clave de la ficha.
+            cuaderno TEXT
         );
 
 
@@ -247,7 +270,8 @@ FIELDS = [
     "actora", "demandada", "tipo_juicio", "expediente", "num_acdos", "pagina",
     "tipo_actuacion", "ponencia",
 ]
-COLS_CARGA = FIELDS + ["tipo_juicio_norm", "anio", "fecha_acuerdo"]
+COLS_CARGA = FIELDS + ["tipo_juicio_norm", "anio", "fecha_acuerdo", "tipo_acuerdo", "descripcion", "cuaderno"]
+I_EXPEDIENTE = FIELDS.index("expediente")
 
 MESES_LARGOS = {"ENERO": 1, "FEBRERO": 2, "MARZO": 3, "ABRIL": 4, "MAYO": 5, "JUNIO": 6, "JULIO": 7,
                 "AGOSTO": 8, "SEPTIEMBRE": 9, "SETIEMBRE": 9, "OCTUBRE": 10, "NOVIEMBRE": 11, "DICIEMBRE": 12}
@@ -260,7 +284,7 @@ def fecha_acuerdo_iso(texto):
     if not m or m.group(2) not in MESES_LARGOS:
         return None
     return f"{m.group(3)}-{MESES_LARGOS[m.group(2)]:02d}-{int(m.group(1)):02d}"
-BLOQUE = 64 * 1024 * 1024  # bytes de CSV por tarea
+BLOQUE = 16 * 1024 * 1024  # bytes de CSV por tarea (con 64 MB una corrida chica daba 4 tareas y sobraban núcleos)
 
 # Estado de cada proceso de la carga paralela (lo fija _init_worker).
 _W = {}
@@ -269,6 +293,26 @@ _W = {}
 def _init_worker(csv_path, col, loaded, en_rango, tmp_dir, con_empresas=False):
     _W.update(path=csv_path, col=col, loaded=loaded, en_rango=en_rango, tmp_dir=tmp_dir,
               con_empresas=con_empresas)
+
+
+def _tipo_acuerdo_fila(row, i_tacdo, i_raw, i_actuacion, i_dem):
+    """tipo_acuerdo de la fila: el del CSV si lo trae, o calculado desde el
+    texto del aviso. Solo para acuerdos (las sentencias tienen su tipo)."""
+    if i_tacdo is not None:
+        return row[i_tacdo] or None
+    if i_raw is None or (i_actuacion is not None and row[i_actuacion] not in ("", "acuerdo")):
+        return None
+    return tipo_acuerdo(row[i_raw], row[i_dem] or None)
+
+
+def _descripcion_fila(row, i_desc, i_raw, i_actuacion, i_dem):
+    """descripcion de la fila: la del CSV si la trae, o calculada desde el
+    texto del aviso. Solo para acuerdos."""
+    if i_desc is not None:
+        return row[i_desc] or None
+    if i_raw is None or (i_actuacion is not None and row[i_actuacion] not in ("", "acuerdo")):
+        return None
+    return descripcion(row[i_raw], row[i_dem] or None)
 
 
 def _parse_bloque(bounds):
@@ -280,6 +324,11 @@ def _parse_bloque(bounds):
     idx = [col.get(k) for k in FIELDS]
     i_bol, i_tipo, i_exp = col["boletin_id"], col["tipo_juicio"], col["expediente"]
     i_facdo = col.get("fecha_acuerdo")
+    # CSV anteriores a las columnas tipo_acuerdo y descripcion: se calculan
+    # desde raw_text.
+    i_tacdo, i_raw, i_act_t = col.get("tipo_acuerdo"), col.get("raw_text"), col.get("tipo_actuacion")
+    i_desc = col.get("descripcion")
+    i_cuad = col.get("cuaderno")
 
     lineas = []
     with open(_W["path"], "rb") as f:
@@ -306,6 +355,16 @@ def _parse_bloque(bounds):
             salteadas += 1
             continue
         ids.add(boletin_id)
+        # Nombres que se tragaron el tipo de juicio o la descripción ("Guzmán
+        # García Lorena. Aud. 272-B ..."): se corta el nombre y lo que sobra
+        # sirve de descripción si no hay otra (acuerdos.separar_parte). En
+        # CSV ya re-parseados no cambia nada.
+        sobrante = None
+        row[i_act] = quitar_marca_publicacion(row[i_act])
+        if row[i_dem]:
+            row[i_dem], sobrante = separar_parte(row[i_dem])
+        elif row[i_act]:
+            row[i_act], sobrante = separar_parte(row[i_act])
         m_anio = RE_ANIO.search(row[i_exp])
         if _W["con_empresas"]:
             fila = len(filas)
@@ -316,10 +375,20 @@ def _parse_bloque(bounds):
                     filas_empresas.append((fila, rol, nucleo, nombre))
             if emp_a or emp_d:
                 filas_partes.append((fila, int(otras_a), int(otras_d)))
+        valores = [(row[i] or None) if i is not None else None for i in idx]
+        # CSV anteriores a la columna cuaderno: el número viene con el resto
+        # pegado y se separa acá.
+        if i_cuad is not None:
+            cuaderno = row[i_cuad] or None
+        else:
+            valores[I_EXPEDIENTE], cuaderno = separar_expediente(valores[I_EXPEDIENTE])
         filas.append(
-            tuple((row[i] or None) if i is not None else None for i in idx)
+            tuple(valores)
             + (normalize_tipo(row[i_tipo] or None), int(m_anio.group(1)) if m_anio else None,
-               fecha_acuerdo_iso(row[i_facdo]) if i_facdo is not None else None)
+               fecha_acuerdo_iso(row[i_facdo]) if i_facdo is not None else None,
+               _tipo_acuerdo_fila(row, i_tacdo, i_raw, i_act_t, i_dem),
+               _descripcion_fila(row, i_desc, i_raw, i_act_t, i_dem) or descripcion_de_sobrante(sobrante),
+               cuaderno)
         )
 
     # El bloque se escribe en un SQLite propio en vez de devolver las filas:
@@ -561,6 +630,9 @@ SQL_ESTADISTICAS = """
                SUM(e.tipo_actuacion IN ('sentencia_definitiva', 'sentencia')) AS sentencias,
                SUM(e.tipo_actuacion = 'sentencia_interlocutoria') AS interlocutorias,
                SUM(e.tipo_actuacion = 'audiencia') AS audiencias,
+               SUM(e.tipo_acuerdo = 'prevencion') AS prevenciones,
+               SUM(e.tipo_acuerdo = 'negacion') AS negaciones,
+               SUM(e.tipo_acuerdo = 'admision') AS admisiones,
                COUNT(DISTINCT e.expediente) AS expedientes,
                SUM(CASE WHEN julianday(b.fecha_iso) - julianday(e.fecha_acuerdo) BETWEEN 0 AND 60
                         THEN julianday(b.fecha_iso) - julianday(e.fecha_acuerdo) END) AS demora_suma,
@@ -656,11 +728,66 @@ SQL_ESTADISTICAS_EMPRESAS = """
 
 def build_estadisticas(conn, log):
     log("Estadísticas de órganos y tipos de juicio...")
+    conn.commit()  # temp_store no se puede cambiar con una transacción abierta
     conn.execute("PRAGMA temp_store=FILE")
+    # Bases armadas antes de tipo_acuerdo (nov. 2026): la columna queda vacía
+    # y los conteos de prevenciones, negaciones y admisiones dan 0.
+    if not any(c[1] == "tipo_acuerdo" for c in conn.execute("PRAGMA table_info(entradas)")):
+        conn.execute("ALTER TABLE entradas ADD COLUMN tipo_acuerdo TEXT")
     conn.executescript(SQL_ESTADISTICAS)
     if conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'entradas_empresas'").fetchone():
         conn.executescript(SQL_ESTADISTICAS_EMPRESAS)
     conn.commit()
+
+
+def build_sivep(conn, log, sivep_path):
+    """Enlaces a la versión pública de la sentencia en el SIVEP del PJCDMX
+    (scraper/sivep_enlace.py, ver docs/sivep-versiones-publicas.md). Solo
+    los emparejamientos únicos. El enlace se guarda en sivep.sqlite con
+    claves estables (órgano, expediente, fecha del boletín) porque los id
+    de entradas cambian en cada build: acá se resuelven contra esta base.
+    La URL del PDF vence a los 10 minutos, así que se guarda lo necesario
+    para que el server pida una nueva (materia, juzgado, ejercicio,
+    trimestre y document_path)."""
+    log("Enlaces a versiones públicas del SIVEP...")
+    sv = sqlite3.connect(f"file:{sivep_path}?mode=ro", uri=True)
+    filas = sv.execute("""
+        SELECT l.organo, l.expediente, l.fecha_boletin, s.document_path, s.materia_cod, s.materia,
+               s.juzgado_cod, s.ejercicio, s.trimestre, s.tipo_juicio, s.fecha_emision
+        FROM enlaces l JOIN sentencias s USING (document_path)
+        WHERE l.resultado = 'unico'""").fetchall()
+    sv.close()
+    conn.executescript("""
+        DROP TABLE IF EXISTS sentencias_publicas;
+        CREATE TABLE sentencias_publicas (
+            entrada_id    INTEGER,  -- aviso de sentencia en esta base
+            document_path TEXT,     -- id estable en el gestor documental del PJCDMX
+            materia_cod   TEXT,     -- parámetros de la consulta al SIVEP
+            materia       TEXT,
+            juzgado_cod   TEXT,
+            ejercicio     INTEGER,
+            trimestre     TEXT,
+            tipo_juicio   TEXT,
+            fecha_emision TEXT
+        );
+    """)
+    q = """
+        SELECT e.id FROM entradas e JOIN boletines b ON b.id = e.boletin_id
+        WHERE (e.expediente = ? OR e.expediente BETWEEN ? || ' ' AND ? || ' ~')
+          AND COALESCE(e.sala, e.juzgado) = ? AND b.fecha_iso = ?
+          AND e.tipo_actuacion IN ('sentencia_definitiva', 'sentencia')
+        ORDER BY e.id LIMIT 1"""
+    n = perdidos = 0
+    for organo, exp, fecha, *resto in filas:
+        r = conn.execute(q, (exp, exp, exp, organo, fecha)).fetchone()
+        if not r:
+            perdidos += 1
+            continue
+        conn.execute("INSERT INTO sentencias_publicas VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (r[0], *resto))
+        n += 1
+    conn.execute("CREATE INDEX idx_sentencias_publicas ON sentencias_publicas (entrada_id)")
+    conn.commit()
+    log(f"  {n} enlaces ({perdidos} sin aviso en esta base)")
 
 
 def build_agregados_empresas(conn, log):
@@ -696,6 +823,7 @@ def recalcular_empresas(output, log, workers=None):
     # WAL mientras dura: los procesos leen la base mientras este escribe.
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=OFF")
+    hilos_sqlite(conn)
     conn.execute("PRAGMA cache_size=-2000000")
     conn.executescript("""
         DROP TABLE IF EXISTS empresas_fts;
@@ -772,6 +900,7 @@ def build_personas(output, log, workers=None):
     conn = sqlite3.connect(output)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=OFF")
+    hilos_sqlite(conn)
     conn.execute("PRAGMA cache_size=-2000000")
     conn.executescript("""
         DROP TABLE IF EXISTS personas_fts;
@@ -873,6 +1002,7 @@ def build_vocabulario(output, log):
     conn = sqlite3.connect(output)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=OFF")
+    hilos_sqlite(conn)
     frecuencia = {}
     for tabla in ("empresas", "personas"):
         existe = conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (tabla,)).fetchone()
@@ -937,6 +1067,11 @@ def main():
                         help="Tablas de desempeño por órgano y de tipos de juicio (/salas, /juzgados, /tipos)")
     parser.add_argument("--solo-estadisticas", action="store_true",
                         help="Rearmar solo las estadísticas de una base ya armada (--output)")
+    parser.add_argument("--sivep",
+                        help="sivep.sqlite con la tabla enlaces (scraper/sivep_enlace.py): "
+                             "agrega los enlaces a versiones públicas de sentencias")
+    parser.add_argument("--solo-sivep", action="store_true",
+                        help="Rearmar solo los enlaces al SIVEP de una base ya armada (--output, requiere --sivep)")
     parser.add_argument("--solo-vocabulario", action="store_true",
                         help="Rearmar solo el vocabulario de sugerencias de una base ya armada (--output)")
     parser.add_argument("--web", action="store_true",
@@ -950,12 +1085,15 @@ def main():
     args = parser.parse_args()
 
     output = Path(args.output)
-    log = lambda msg: print(msg, file=sys.stderr)
+    # Cada línea con el tiempo transcurrido, para ver qué etapa pesa.
+    t_inicio = time.monotonic()
+    log = lambda msg: print(f"[{time.monotonic() - t_inicio:6.0f} s] {msg}", file=sys.stderr)
 
     if args.agregados_empresas:
         conn = sqlite3.connect(output)
         conn.execute("PRAGMA cache_size=-2000000")
         conn.execute("PRAGMA temp_store=FILE")
+        hilos_sqlite(conn)
         build_agregados_empresas(conn, log)
         conn.close()
         log(f"Listo: {output}")
@@ -971,7 +1109,16 @@ def main():
     if args.solo_estadisticas:
         conn = sqlite3.connect(output)
         conn.execute("PRAGMA cache_size=-2000000")
+        hilos_sqlite(conn)
         build_estadisticas(conn, log)
+        conn.close()
+        log(f"Listo: {output}")
+        return
+    if args.solo_sivep:
+        if not args.sivep:
+            parser.error("--solo-sivep requiere --sivep")
+        conn = sqlite3.connect(output)
+        build_sivep(conn, log, args.sivep)
         conn.close()
         log(f"Listo: {output}")
         return
@@ -981,7 +1128,7 @@ def main():
         return
     if not args.dir:
         parser.error("--dir es obligatorio (salvo con --solo-empresas / --solo-personas / --solo-vocabulario / "
-                     "--solo-estadisticas / --agregados-empresas)")
+                     "--solo-estadisticas / --solo-sivep / --agregados-empresas)")
     data_dir = Path(args.dir)
 
     runs = find_runs(data_dir, args.since, args.exclude)
@@ -998,6 +1145,7 @@ def main():
     # sin journal ni fsync, con caché grande.
     conn.execute("PRAGMA journal_mode=OFF")
     conn.execute("PRAGMA synchronous=OFF")
+    hilos_sqlite(conn)
     conn.execute("PRAGMA cache_size=-2000000")  # ~2 GB
     conn.execute("PRAGMA temp_store=MEMORY")
     conn.execute("PRAGMA locking_mode=EXCLUSIVE")
@@ -1048,6 +1196,8 @@ def main():
         build_empresas(conn, log)
     if args.estadisticas:
         build_estadisticas(conn, log)
+    if args.sivep:
+        build_sivep(conn, log, args.sivep)
     populate_meta(conn)
     conn.commit()
 

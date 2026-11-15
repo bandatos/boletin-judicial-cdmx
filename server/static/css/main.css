@@ -95,7 +95,7 @@
 }
 
 .card-partes { font-size: 1rem; font-weight: 600; margin-bottom: .35rem; line-height: 1.4; }
-.card-vs { font-weight: 400; color: var(--fg-muted); font-size: .875rem; }
+
 
 .card-meta {
   display: flex;
@@ -106,10 +106,13 @@
   margin-top: .4rem;
 }
 
+/* Tipo de juicio: dato descriptivo, en neutro. El verde es de links y
+   botones, y una píldora verde parecía clickeable. */
 .tag {
-  background: #e1eadc;
-  color: var(--verde);
-  padding: .15rem .55rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--fg-muted);
+  padding: .1rem .55rem;
   border-radius: 999px;
   font-size: .875rem;
   white-space: nowrap;
@@ -142,14 +145,6 @@
 }
 .active-filter a { color: var(--accent); margin-left: .5rem; }
 
-.pdf-embed {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
-  margin: .75rem 0;
-}
-.pdf-fallback { font-size: .875rem; margin-bottom: 1rem; }
-.pdf-fallback a { color: var(--accent); }
 
 .related-links { list-style: none; margin-top: .5rem; }
 .related-links li { padding: .4rem 0; font-size: .9rem; color: var(--fg-muted); }
@@ -186,7 +181,7 @@
 @media (max-width: 600px) {
   #tipo, #anio { max-width: 100%; width: 100%; }
   #search-btn { width: 100%; }
-  .pdf-embed embed { height: 400px; }
+
 }
 
 /* ── Navegar por fecha ── */
@@ -332,9 +327,6 @@ body.pdf-open { margin-right: var(--pdf-w); }
 .mini-col span { font-size: .75rem; color: var(--fg-muted); margin-top: .2rem; }
 .tipos { list-style: none; }
 .tipos li { display: flex; justify-content: space-between; border-bottom: 1px solid var(--border); padding: .3rem 0; font-size: .88rem; }
-.expedientes-empresa { list-style: none; }
-.expedientes-empresa li { border-top: 1px solid var(--border); padding: .55rem 0; font-size: .88rem; }
-.expedientes-empresa a { color: var(--accent); }
 /* Paginador (mismo formato que sociedad-web-front, colores de Bandatos) */
 .pagesContainer-center { text-align: center; margin: 1.25rem 0; }
 .page {
@@ -539,7 +531,10 @@ mark { background: #f3dfa2; color: inherit; padding: 0 .1em; border-radius: 2px;
 }
 .boton-copiar:hover, .boton-guardar:hover, .alerta-maqueta summary:hover { background: var(--bg-soft); }
 .boton-guardar[aria-pressed="true"] { background: var(--verde); color: #fff; }
-.expediente-acciones { display: flex; flex-wrap: wrap; gap: .75rem; align-items: flex-start; margin-bottom: 1rem; }
+.expediente-acciones {
+  flex-basis: 100%; display: flex; flex-wrap: wrap; gap: .75rem; align-items: flex-start;
+  border-top: 1px solid var(--border); padding-top: .8rem;
+}
 .alerta-maqueta summary { list-style: none; display: inline-block; }
 .alerta-maqueta summary::-webkit-details-marker { display: none; }
 .alerta-maqueta[open] { flex-basis: 100%; }
@@ -554,8 +549,44 @@ mark { background: #f3dfa2; color: inherit; padding: 0 .1em; border-radius: 2px;
 .que-hacer h2 { font-size: 1.15rem; margin-bottom: .5rem; }
 .que-hacer ul { padding-left: 1.2rem; display: grid; gap: .4rem; }
 .expediente-view h2 { font-size: 1.15rem; margin: 1.5rem 0 .6rem; }
-.actuacion { font-size: .85rem; background: var(--bg-soft); border-radius: 2px; padding: .05rem .35rem; }
-.actuacion-sentencia { background: #e1eadc; color: var(--verde); font-weight: 600; }
+/* Etiquetas de actuación (views.js: actuacionClase). Contraste de texto
+   >= 6:1 en todas, y bordes >= 3:1 sobre el crema. El color acompaña al
+   texto, nunca lo reemplaza.
+   - sentencia definitiva / de sala: negro sólido, lo más visible
+   - interlocutoria: borde negro
+   - prevención: ámbar (pide hacer algo, con plazo)
+   - negación: rojo claro
+   - admisión, audiencia: neutros con borde o fondo
+   - acuerdo sin tipo: texto gris, sin caja */
+.actuacion {
+  display: inline-block; font-size: .85rem; line-height: 1.35; border-radius: 4px;
+  padding: .05rem .45rem; border: 1px solid transparent; white-space: nowrap;
+}
+.act-acuerdo { color: var(--fg-muted); padding-left: 0; padding-right: 0; }
+.act-audiencia { background: var(--bg-soft); color: var(--fg); }
+.act-admision { border-color: var(--fg-muted); color: var(--fg); }
+.act-prevencion { background: #f3e7c9; border-color: #a8730f; color: #6b4a08; font-weight: 600; }
+.act-negacion { background: #f6dede; border-color: var(--rojo); color: var(--rojo-oscuro); font-weight: 600; }
+.act-interlocutoria { border: 2px solid var(--negro); color: var(--negro); font-weight: 600; }
+.act-sentencia {
+  background: var(--negro); color: #fff; font-weight: 700; letter-spacing: .01em;
+  padding: .1rem .55rem;
+}
+.sentencia-destacada {
+  background: var(--bg-card); border: 2px solid var(--negro); border-radius: var(--radius);
+  padding: .9rem 1.1rem; margin: 1rem 0;
+}
+.sentencia-destacada h2 { margin: 0 0 .4rem; font-size: 1.1rem; }
+.sentencia-destacada h2 .actuacion { font-size: 1rem; vertical-align: .05em; }
+.sentencia-destacada p { margin: .35rem 0 0; font-size: .95rem; }
+.leyenda-actuaciones { margin: 0 0 1rem; font-size: .9rem; }
+.leyenda-actuaciones summary { cursor: pointer; color: var(--accent); }
+.leyenda-actuaciones dl { display: grid; grid-template-columns: max-content 1fr; gap: .45rem .8rem; margin: .7rem 0 .3rem; align-items: baseline; }
+.leyenda-actuaciones dd { margin: 0; }
+@media (max-width: 600px) {
+  .leyenda-actuaciones dl { grid-template-columns: 1fr; }
+  .leyenda-actuaciones dd { margin-bottom: .4rem; }
+}
 
 /* ── Gráficos por año o por mes ───────────────────────────────────────── */
 .pestanas-periodo { justify-content: flex-end; }
@@ -586,7 +617,7 @@ mark { background: #f3dfa2; color: inherit; padding: 0 .1em; border-radius: 2px;
 .mis-cabecera { display: flex; align-items: center; gap: .75rem; margin-bottom: .4rem; }
 .mis-apodo { flex: 1; max-width: 360px; padding: .3rem .6rem; border: 1px dashed var(--border); border-radius: var(--radius); font: inherit; font-size: .9rem; background: transparent; }
 .mis-apodo:focus { border-style: solid; }
-.mis-nuevo { background: var(--rojo); color: #fff; font-size: .75rem; font-weight: 600; padding: .1rem .5rem; border-radius: 999px; }
+.mis-nuevo { background: #f3dfa2; color: var(--negro); font-size: .75rem; font-weight: 600; padding: .1rem .5rem; border-radius: 999px; }
 .mis-quitar { margin-top: .6rem; font-size: .85rem; }
 .aviso-privacidad { margin-top: 1.5rem; font-size: .9rem; color: var(--fg-muted); }
 
@@ -598,7 +629,7 @@ mark { background: #f3dfa2; color: inherit; padding: 0 .1em; border-radius: 2px;
 .correo-cuerpo { padding: 1.2rem; display: grid; gap: .8rem; }
 .correo-caso { background: var(--bg-soft); border-radius: var(--radius); padding: .8rem 1rem; }
 .correo-partes { font-weight: 600; }
-.correo-actuacion { color: var(--verde); font-weight: 600; }
+.correo-actuacion { margin: .4rem 0; }
 .correo-ejemplo .boton { display: inline-block; background: var(--verde); color: #fff; padding: .55rem 1rem; border-radius: var(--radius); text-decoration: none; }
 .correo-legal, .correo-pie { font-size: .8rem; color: var(--fg-muted); }
 
@@ -609,17 +640,28 @@ mark { background: #f3dfa2; color: inherit; padding: 0 .1em; border-radius: 2px;
    que pone head.pug), para no mover los resultados. */
 .intencion, .intencion[hidden] { display: none; }
 html.js:not(.intencion-vista) #intencion:not([hidden]) { display: block; }
+/* Azul y borde punteado: es un pedido del sitio, no información del
+   expediente (el verde y el crema son del contenido). Contraste del texto
+   azul sobre el fondo: 6.6:1. */
 .intencion {
-  position: relative; border: 2px solid var(--verde); border-radius: var(--radius-lg); background: var(--bg-card);
+  --pedido: #24578f;
+  position: relative; border: 2px dashed var(--pedido); border-radius: var(--radius-lg); background: #edf3fa;
   padding: 1rem 2.75rem 1rem 1.25rem; margin: 1rem 0;
+}
+.intencion-etiqueta {
+  font-size: .75rem; font-weight: bold; text-transform: uppercase; letter-spacing: .05em; color: var(--pedido);
+  margin-bottom: .3rem;
 }
 .intencion h2 { font-size: 1.1rem; margin-bottom: .25rem; }
 .intencion-opciones { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .6rem; }
 .intencion-opciones button {
-  border: 2px solid var(--verde); border-radius: 22px; background: var(--bg-card); color: var(--verde);
+  border: 2px solid var(--pedido); border-radius: 22px; background: #fff; color: var(--pedido);
   padding: .4em 1em; font: inherit; font-size: .9rem; font-weight: bold; cursor: pointer;
 }
-.intencion-opciones button:hover { background: var(--verde); color: #fff; }
+.intencion-opciones button:hover { background: var(--pedido); color: #fff; }
+.intencion .entrevista-si, .intencion .entrevista-no { border-color: var(--pedido); }
+.intencion .entrevista-si { background: var(--pedido); }
+.intencion .entrevista-no { color: var(--pedido); }
 .intencion-cerrar {
   position: absolute; top: .5rem; right: .5rem; border: none; background: none; font-size: 1.1rem;
   cursor: pointer; color: var(--fg-muted); padding: .25rem .5rem;
@@ -664,3 +706,133 @@ html.entrevista-respondida .pdf-panel-invita { display: none; }
 .novedades-dia h2 { font-size: 1.05rem; margin-bottom: .4rem; }
 .novedades-dia ul { margin: 0; padding-left: 1.25rem; }
 .novedades-dia li { margin: .25rem 0; }
+
+/* Línea de tiempo de avisos en la ficha. Una línea vertical con un punto
+   por aviso. El punto toma el color de la etiqueta: negro relleno y más
+   grande para la sentencia, ámbar para la prevención, rojo para la
+   negación. Tres columnas: fecha, qué pasó, enlaces. */
+.linea-tiempo { list-style: none; margin: 1rem 0 1.5rem; position: relative; }
+.linea-tiempo::before {
+  content: ""; position: absolute; left: 7px; top: .9rem; bottom: .9rem; width: 2px; background: var(--border);
+}
+.linea-tiempo li {
+  position: relative; display: grid; grid-template-columns: 6.5rem 1fr auto; gap: .2rem 1rem;
+  align-items: baseline; padding: .55rem 0 .55rem 1.75rem; font-size: .92rem;
+}
+.linea-tiempo li::before {
+  content: ""; position: absolute; left: 2px; top: 1.05rem; width: 12px; height: 12px; border-radius: 50%;
+  background: var(--bg); border: 2px solid var(--fg-muted); box-sizing: border-box;
+}
+.linea-tiempo li.lt-sentencia::before { left: 0; top: .95rem; width: 16px; height: 16px; background: var(--negro); border-color: var(--negro); }
+.linea-tiempo li.lt-interlocutoria::before { border-color: var(--negro); border-width: 3px; }
+.linea-tiempo li.lt-prevencion::before { background: #f3e7c9; border-color: #a8730f; }
+.linea-tiempo li.lt-negacion::before { background: #f6dede; border-color: var(--rojo); }
+.lt-fecha { font-weight: 600; white-space: nowrap; }
+.lt-fecha a { color: var(--fg); text-decoration: none; }
+.lt-fecha a:hover { color: var(--rojo); text-decoration: underline; }
+.lt-que { color: var(--fg); }
+.lt-desc { color: var(--fg); }
+.lt-extra, .lt-tipo { color: var(--fg-muted); font-size: .85rem; }
+.lt-extra::before, .lt-tipo::before { content: " · "; }
+.lt-links { display: flex; gap: .9rem; justify-content: flex-end; font-size: .85rem; white-space: nowrap; }
+.lt-links a { color: var(--accent); }
+@media (max-width: 600px) {
+  .linea-tiempo li { grid-template-columns: 1fr auto; }
+  .lt-que { grid-column: 1 / -1; grid-row: 2; }
+}
+.avisos-textos { margin: 0 0 1.5rem; font-size: .9rem; }
+.avisos-textos summary { cursor: pointer; color: var(--accent); }
+.avisos-textos ol { list-style: none; margin-top: .6rem; }
+.avisos-textos li { padding: .4rem 0; border-bottom: 1px solid var(--border); color: var(--fg); }
+.avisos-textos li strong { margin-right: .4rem; }
+
+/* Último aviso en tarjetas y listas (búsqueda, empresas, personas). */
+.card-ultimo { margin-top: .45rem; font-size: .9rem; color: var(--fg); display: flex; flex-wrap: wrap; align-items: baseline; gap: .1rem .3rem; }
+.card-ultimo-etiqueta { color: var(--fg-muted); }
+.card-ultimo a, .avisos-dia a { color: var(--accent); }
+.marca-sentencia { white-space: nowrap; }
+.marca-sentencia .act-sentencia { font-size: .78rem; }
+.card-avisos li .actuacion, .avisos-dia .actuacion { font-size: .8rem; }
+
+/* Ficha: cabecera en tres grupos (qué expediente es, seguirlo, salidas
+   afuera) y encabezado de avisos. */
+.exp-cab {
+  background: var(--bg-card); border: 2px solid var(--verde); border-radius: var(--radius);
+  padding: 1.1rem 1.3rem; display: grid; gap: 1rem; margin-bottom: 1rem;
+}
+.exp-id { display: flex; align-items: center; gap: .6rem 1rem; flex-wrap: wrap; }
+.exp-etq { display: block; font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; color: var(--fg-muted); }
+.exp-num { font-size: 1.6rem; line-height: 1.1; }
+.exp-datos { display: grid; grid-template-columns: max-content 1fr; gap: .25rem 1rem; font-size: .95rem; margin: 0; }
+.exp-datos dt { color: var(--fg-muted); }
+.exp-datos dd { margin: 0; }
+.exp-organo-link { font-size: .8rem; color: var(--accent); white-space: nowrap; }
+/* Sentencia dentro de la caja, y una sola fila de acciones. */
+.exp-secretaria { color: var(--fg-muted); }
+.exp-sentencia { border-top: 1px solid var(--border); padding-top: .8rem; display: grid; gap: .4rem; }
+.exp-sentencia p { margin: 0; }
+.exp-sentencia-titulo { font-weight: 600; }
+.exp-acciones { border-top: 1px solid var(--border); padding-top: .8rem; display: grid; gap: .55rem; }
+/* Nivel 1: seguir el expediente. Guardar es la acción principal (relleno);
+   ya guardado pasa a borde, para que "Quitar" no parezca lo principal. */
+.exp-acciones-principales { display: flex; flex-wrap: wrap; gap: .6rem; align-items: flex-start; }
+.exp-acciones-principales .alerta-maqueta[open] { flex-basis: 100%; }
+.exp-acciones .boton-guardar, .exp-acciones .alerta-maqueta summary { font-size: .95rem; padding: .55rem 1.1rem; font-weight: 600; }
+.exp-acciones .boton-guardar { background: var(--verde); color: #fff; }
+.exp-acciones .boton-guardar:hover { background: var(--verde-claro); }
+.exp-acciones .boton-guardar[aria-pressed="true"] { background: var(--bg-card); color: var(--verde); }
+.exp-acciones .boton-guardar[aria-pressed="true"]:hover { background: var(--bg-soft); }
+/* Nivel 2: utilidades y salidas, como enlaces. */
+.exp-acciones-secundarias { display: flex; flex-wrap: wrap; gap: .3rem 1.4rem; font-size: .88rem; align-items: baseline; }
+.exp-acciones-secundarias a { color: var(--accent); }
+.boton-texto { border: 0; background: none; padding: 0; font: inherit; color: var(--accent); text-decoration: underline; cursor: pointer; }
+.boton-texto:hover { color: var(--rojo); background: none; }
+.exp-acciones-ayuda { font-size: .78rem; color: var(--fg-muted); margin: 0; line-height: 1.45; }
+.exp-acciones-ayuda strong { color: var(--fg); font-weight: 600; }
+.exp-grupo { border-top: 1px solid var(--border); padding-top: .8rem; display: flex; gap: .5rem 1rem; flex-wrap: wrap; align-items: flex-start; }
+.exp-grupo-t { font-size: .8rem; color: var(--fg-muted); min-width: 9rem; padding-top: .45rem; }
+.exp-seguir { display: flex; gap: .75rem 1.5rem; flex-wrap: wrap; flex: 1; }
+.exp-seguir-opcion { display: flex; flex-direction: column; gap: .3rem; max-width: 19rem; }
+.exp-seguir-opcion small { font-size: .78rem; color: var(--fg-muted); line-height: 1.35; }
+.exp-seguir-opcion .alerta-maqueta[open] { max-width: none; }
+.salidas { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: .75rem; margin: 0 0 1rem; }
+.salida { border: 1px solid var(--border); border-radius: var(--radius); padding: .75rem .9rem; background: var(--bg-card); font-size: .9rem; }
+.salida strong { display: block; margin-bottom: .15rem; }
+.salida a { color: var(--accent); }
+@media (max-width: 600px) { .exp-datos { grid-template-columns: 1fr; } .exp-datos dd { margin-bottom: .3rem; } }
+.expediente-view h2.avisos-titulo small { font-size: .85rem; font-weight: 400; color: var(--fg-muted); }
+.avisos-intro { font-size: .9rem; color: var(--fg-muted); margin: -.2rem 0 .5rem; max-width: 52rem; }
+
+/* Expediente en una lista (mixin expedienteItem): número y órgano primero,
+   partes, tipo y último aviso, y los avisos al desplegar. */
+.exp-item { border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-card); padding: .9rem 1.1rem; margin-bottom: .75rem; }
+.exp-item header { display: flex; flex-wrap: wrap; align-items: baseline; gap: .2rem .7rem; }
+.exp-item-num { font-weight: bold; font-size: 1.05rem; color: var(--fg); }
+.exp-item-num:hover { color: var(--rojo); }
+.exp-item-organo { color: var(--fg-muted); font-size: .9rem; }
+.exp-item-tipo { font-size: .9rem; }
+.exp-item-partes { margin: .3rem 0 .15rem; font-size: .95rem; line-height: 1.4; }
+.exp-item-partes a { color: var(--accent); }
+.exp-item-meta { font-size: .88rem; color: var(--fg-muted); margin: .2rem 0 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: .1rem .3rem; }
+.exp-item-meta a { color: var(--accent); }
+.exp-avisos { margin-top: .5rem; }
+.exp-avisos summary { cursor: pointer; color: var(--accent); font-size: .9rem; }
+.exp-avisos .linea-tiempo { margin: .5rem 0 .3rem; }
+.exp-avisos-lista { font-size: .9rem; }
+.exp-avisos-pie { font-size: .85rem; margin: 0; }
+.exp-avisos-pie a { color: var(--accent); }
+
+/* Etiqueta "vs" entre las partes (mixin vs). Neutra y chica: separa sin
+   competir con los nombres ni con las etiquetas de actuación. */
+.vs {
+  display: inline-block; font-size: .68em; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--fg-muted); background: var(--bg-soft); border: 1px solid var(--border); border-radius: 999px;
+  padding: .12em .55em; margin: 0 .2em; vertical-align: .18em; line-height: 1.2; white-space: nowrap;
+}
+
+/* Acciones de página (empresa, juzgado, desempeño): misma estructura en dos
+   niveles que la ficha del expediente. */
+.acciones-pagina { display: grid; gap: .55rem; margin: .6rem 0 1rem; }
+.boton-principal { background: var(--verde); color: #fff; border-color: var(--verde); font-weight: 600; padding: .55rem 1.1rem; text-decoration: none; }
+.boton-principal:hover { background: var(--verde-claro); color: #fff; }
+.alerta-empresa .nota { margin-top: .5rem; max-width: 40rem; }

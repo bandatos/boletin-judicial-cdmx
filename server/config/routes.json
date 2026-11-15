@@ -11,6 +11,10 @@
     "viewType": "function",
     "handler": "expediente"
   },
+  "/expediente/:idslug/avisos": {
+    "viewType": "function",
+    "handler": "avisosExpediente"
+  },
   "/juzgado/:slug": {
     "viewType": "function",
     "handler": "juzgado"
@@ -46,6 +50,14 @@
   "/api/expedientes": {
     "viewType": "function",
     "handler": "apiExpedientes"
+  },
+  "/api/aviso/:id": {
+    "viewType": "function",
+    "handler": "apiAviso"
+  },
+  "/sentencia-publica/:id": {
+    "viewType": "function",
+    "handler": "sentenciaPublica"
   },
   "/alertas/ejemplo": {
     "viewType": "function",

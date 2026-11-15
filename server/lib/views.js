@@ -6,10 +6,12 @@ const path = require('path');
 const pug = require('pug');
 const db = require('./db');
 const { expedienteHref, juzgadoHref, slugify } = require('./slug');
-const { getBoletinText, findExcerpt } = require('./raw-text');
+const { getBoletinText, findExcerpt, marcaDe } = require('./raw-text');
 const fechas = require('./fechas');
 const { getNovedades } = require('./novedades');
 const opiniones = require('./opinion');
+const { actuacion, actuacionClase, acuerdosExtra, esSentenciaFinal, etiqueta, expandirAbreviaturas, secretariaCorta } = require('./actuaciones');
+const sivep = require('./sivep');
 
 const TEMPLATES_DIR = path.join(__dirname, '..', 'templates');
 const isDev = process.env.NODE_ENV !== 'production';
@@ -122,11 +124,19 @@ const pugLocals = {
   juzgadoHref,
   fechaCorta: fechas.fechaCorta,
   fechaLarga: fechas.fechaLarga,
+  fechaMedia: fechas.fechaMedia,
+  tituloFicha: exp => `Abre la ficha del expediente ${exp || ''}: todos sus avisos, la sentencia si la hay y qué hacer con el número`,
   // Link al PDF del boletín en la página del aviso (#page=N lo entienden
   // los visores de Chrome y Firefox).
   pdfHref: r => (r.pagina ? `${r.pdf_url}#page=${r.pagina}` : r.pdf_url),
   // Qué se publicó en un aviso: "2 acuerdos", "Sentencia definitiva"...
   actuacion,
+  actuacionClase,
+  acuerdosExtra,
+  esSentenciaFinal,
+  etiqueta,
+  expandirAbreviaturas,
+  secretariaCorta,
   dias: d => (d == null ? '—' : `${num(Math.round(d))} día${Math.round(d) === 1 ? '' : 's'}`),
   // Demora de publicación: con un decimal (casi todas rondan 1 a 3 días).
   diasDecimal: d => (d == null ? '—' : `${new Intl.NumberFormat('es-MX', { maximumFractionDigits: 1 }).format(d)} días`),
@@ -134,20 +144,11 @@ const pugLocals = {
   tipoHref: tipo => `/tipos/${slugify(tipo)}`,
   slugify,
   // Orientación legal gratuita: el chatbot de Todo Derecho Vecino.
-  TDV_URL: 'https://bandatos.org/todo-derecho-vecino/',
+  // utm_source: para que Todo Derecho Vecino vea cuántas visitas llegan del
+  // boletín. Su página no acepta un texto precargado por la URL.
+  TDV_URL: 'https://bandatos.org/todo-derecho-vecino/?utm_source=boletin-judicial',
 };
 
-const ACTUACIONES = {
-  sentencia_definitiva: 'Sentencia definitiva',
-  sentencia_interlocutoria: 'Sentencia interlocutoria',
-  sentencia: 'Sentencia',
-  audiencia: 'Audiencia',
-};
-function actuacion(a) {
-  if (a.tipo_actuacion && ACTUACIONES[a.tipo_actuacion]) return ACTUACIONES[a.tipo_actuacion];
-  if (a.num_acdos) return `${a.num_acdos} acuerdo${a.num_acdos !== 1 ? 's' : ''}`;
-  return a.tipo_actuacion === 'acuerdo' ? 'Acuerdo' : null;
-}
 
 function renderTemplate(name, locals) {
   const fn = compile(name);
@@ -228,20 +229,11 @@ function expediente(req, params) {
     return { status: 404, html: renderTemplate('404', { req }) };
   }
 
-  // Texto original del aviso más reciente, leído del .txt de pdftotext ya
-  // guardado por el scraper (no se duplica en el sqlite).
-  const ultimoAviso = data.avisos[0];
-  let textoOriginal = null;
-  if (ultimoAviso) {
-    const fullText = getBoletinText(ultimoAviso.boletin_id);
-    textoOriginal = findExcerpt(fullText, { actora: data.actora, expediente: data.expediente });
-  }
-
   const empresasDelCaso = db.getEmpresasDeEntradas(data.avisos.map(a => a.id));
 
   return {
     status: 200,
-    html: renderTemplate('expediente', { req, expediente: data, textoOriginal, empresasDelCaso }),
+    html: renderTemplate('expediente', { req, expediente: data, empresasDelCaso }),
   };
 }
 
@@ -494,6 +486,64 @@ function alertaEjemplo(req) {
   return { status: 200, html: renderTemplate('alerta-ejemplo', { req, expediente: data }) };
 }
 
+// /expediente/:id/avisos: la línea de tiempo de un expediente, sin layout,
+// para el despliegue "Ver los N avisos" de las listas (behavior.js).
+function avisosExpediente(req, params) {
+  const id = parseInt(params.idslug, 10);
+  const data = Number.isInteger(id) ? db.getExpedienteById(id) : null;
+  if (!data) return { status: 404, html: '' };
+  return { status: 200, html: renderTemplate('avisos-parcial', { req, expediente: data }) };
+}
+
+// /api/aviso/:id: texto del aviso tal como sale en el boletín, leído del
+// .txt de pdftotext que guardó el scraper (no se duplica en el sqlite). La
+// ficha lo pide al desplegar cada aviso (?json=1). Sin JS, el link lleva a
+// la versión en texto plano.
+function apiAviso(req, params) {
+  const id = parseInt(params.id, 10);
+  const a = Number.isInteger(id) ? db.getAviso(id) : null;
+  const texto = a
+    ? findExcerpt(getBoletinText(a.boletin_id), { actora: a.actora, expediente: a.expediente, marca: marcaDe(a) })
+    : null;
+  // ?json=1 y no el Accept: el caché HTML del router guarda por URL.
+  if (req.query.json) {
+    return {
+      status: a ? 200 : 404,
+      headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'public, max-age=86400' },
+      html: JSON.stringify({ texto }),
+    };
+  }
+  return {
+    status: texto ? 200 : 404,
+    headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+    html: texto || 'No encontramos el texto de este aviso en el boletín.',
+  };
+}
+
+// /sentencia-publica/:id (id del aviso de sentencia): pide al SIVEP la URL
+// vigente del PDF y redirige. Si el SIVEP no responde, explica cómo
+// buscarlo a mano. No se cachea: la URL vence a los 10 minutos.
+const TRIMESTRES = { T01: 'primero', T02: 'segundo', T03: 'tercero', T04: 'cuarto' };
+async function sentenciaPublica(req, params) {
+  const id = parseInt(params.id, 10);
+  const s = Number.isInteger(id) ? db.getSentenciaPublica(id) : null;
+  if (!s) return { status: 404, html: renderTemplate('404', { req }) };
+  let url = null;
+  try {
+    url = await sivep.urlVigente(s);
+  } catch (err) {
+    console.error(`SIVEP: ${err.message}`);
+  }
+  if (url) return { status: 302, headers: { Location: url, 'Cache-Control': 'no-store' }, html: '' };
+  return {
+    status: 502,
+    html: renderTemplate('sentencia-publica', {
+      req, sentencia: s, sivepBase: sivep.BASE, trimestreTexto: TRIMESTRES[s.trimestre] || s.trimestre,
+      volver: expedienteHref({ id: s.entrada_id, actora: s.actora, expediente: s.expediente }),
+    }),
+  };
+}
+
 function novedades(req) {
   return { status: 200, html: renderTemplate('novedades', { req, dias: getNovedades() }) };
 }
@@ -538,6 +588,8 @@ const ROBOTS = [
   'Disallow: /api/',
   'Disallow: /mis-expedientes',
   'Disallow: /alertas',
+  // Cada visita consulta al SIVEP del Poder Judicial.
+  'Disallow: /sentencia-publica/',
   '',
 ].join('\n');
 
@@ -552,5 +604,5 @@ function health() {
 module.exports = {
   resaltar, robots, health, home, portada, personas, persona, juzgado, expediente, fecha, empresas, empresa, sources, novedades, opinion, renderTemplate, pugLocals,
   salas: organos('sala'), juzgados: organos('juzgado'), sala: organo('sala'), juzgadoDesempeno: organo('juzgado'),
-  tipos, tipo, misExpedientes, apiExpedientes, alertaEjemplo,
+  tipos, tipo, misExpedientes, apiExpedientes, alertaEjemplo, sentenciaPublica, apiAviso, avisosExpediente,
 };

@@ -34,40 +34,86 @@ function findBoletinTextPath(boletinId) {
   return null;
 }
 
+// Los últimos boletines leídos quedan en memoria: al desplegar varios avisos
+// de una ficha se piden seguido, y muchos son del mismo boletín.
+const CACHE_TEXTOS = 4;
+const cacheTextos = new Map();
+
 function getBoletinText(boletinId) {
+  if (cacheTextos.has(boletinId)) return cacheTextos.get(boletinId);
   const p = findBoletinTextPath(boletinId);
   if (!p) return null;
+  let texto = null;
   try {
     const buf = fs.readFileSync(p);
-    return (p.endsWith('.gz') ? zlib.gunzipSync(buf) : buf).toString('utf8');
+    texto = (p.endsWith('.gz') ? zlib.gunzipSync(buf) : buf).toString('utf8');
   } catch {
     return null;
   }
+  cacheTextos.set(boletinId, texto);
+  if (cacheTextos.size > CACHE_TEXTOS) cacheTextos.delete(cacheTextos.keys().next().value);
+  return texto;
 }
 
-// Ubica un extracto aproximado del aviso dentro del texto completo del
-// boletín (que tiene TODOS los avisos de ese día). No es exacto al 100%
-// (no se persiste el offset real del parseo), pero para mostrar "el texto
-// original de donde salió esto" alcanza: busca el nombre de la actora y
-// corta en el primer "Núm. Exp. <expediente>." que aparezca después.
-function findExcerpt(fullText, { actora, expediente }) {
+// Ubica el aviso dentro del texto completo del boletín (que tiene TODOS los
+// avisos de ese día). No se persiste el offset real del parseo, así que se
+// busca: cada aparición del número de expediente ("184/2025", o la toca
+// "84/2020/001") y, hacia atrás, el nombre de la actora. Gana la aparición
+// con la actora más cerca: un banco tiene decenas de avisos el mismo día, y
+// tomar la primera mención de su nombre mostraba el aviso de otro
+// expediente. El final es el punto después del número ("Núm. Exp. 184/2025.")
+// o, en el formato de las UGJ, la cola del conteo ("Núm. Exp. 6703/2026,
+// Prevención. 1 Acdo.").
+const MAX_AVISO = 900;
+
+// Si el expediente tiene más de un aviso ese día (una sentencia y "4
+// Acdos."), `marca` desempata: el texto del aviso tiene que contenerla.
+function marcaDe(aviso) {
+  if (!aviso) return null;
+  if ((aviso.tipo_actuacion || '').startsWith('sentencia')) return /\bSent\b/i;
+  if (aviso.tipo_actuacion === 'audiencia') return /\bAud/i;
+  if (aviso.num_acdos) return new RegExp(`\\b${aviso.num_acdos}\\s+Acdos?\\b`, 'i');
+  return null;
+}
+
+function findExcerpt(fullText, { actora, expediente, marca }) {
   if (!fullText || !actora) return null;
-
   const joined = fullText.replace(/\s+/g, ' ');
-  const idx = joined.indexOf(actora);
-  if (idx === -1) return null;
+  const numero = ((expediente || '').match(/\d+[/-]\d{4}(?:[/-]\d{1,3})?/) || [])[0];
 
-  let end = Math.min(idx + 1200, joined.length);
-  if (expediente) {
-    const needle = `Núm. Exp. ${expediente}`;
-    const expIdx = joined.indexOf(needle, idx);
-    if (expIdx !== -1) {
-      const dot = joined.indexOf('.', expIdx + needle.length);
-      end = dot !== -1 ? dot + 1 : expIdx + needle.length;
+  let mejor = null;
+  if (numero) {
+    for (let i = joined.indexOf(numero); i !== -1; i = joined.indexOf(numero, i + 1)) {
+      // Que no sea parte de otro número ("1184/2025" o "184/20251").
+      if (/\d/.test(joined[i - 1] || '') || /\d/.test(joined[i + numero.length] || '')) continue;
+      const desde = Math.max(0, i - MAX_AVISO);
+      const a = joined.lastIndexOf(actora, i);
+      if (a < desde) continue;
+      // Lo que sigue al número es de este aviso solo en el formato de las
+      // UGJ (", Prevención. 1 Acdo."). Si no, se corta en el número.
+      const despues = joined.slice(i + numero.length, i + numero.length + 120);
+      const colaUgj = (despues.match(/^,[^]*?\d+\s+(?:Acdos?|Audiencias?|Aud|Sent)\b\.?/) || [''])[0];
+      const tramo = joined.slice(a, i + numero.length) + colaUgj;
+      const c = { inicio: a, fin: i + numero.length, conMarca: Boolean(marca && marca.test(tramo)) };
+      if (!mejor || (c.conMarca && !mejor.conMarca)
+        || (c.conMarca === mejor.conMarca && c.fin - c.inicio < mejor.fin - mejor.inicio)) mejor = c;
     }
   }
-
-  return joined.slice(idx, end).trim();
+  if (!mejor) {
+    const a = joined.indexOf(actora);
+    if (a === -1) return null;
+    return joined.slice(a, Math.min(a + 600, joined.length)).trim();
+  }
+  let fin = mejor.fin;
+  const cola = joined.slice(fin, fin + 200);
+  const ugj = cola.match(/^,[^]*?\d+\s+(?:Acdos?|Audiencias?|Aud|Sent)\b\.?/);
+  if (ugj && !/Núm\. Exp\./.test(ugj[0])) fin += ugj[0].length;
+  else {
+    // El punto final, o un sufijo corto ("Tomo II.", "Principal.").
+    const m = cola.match(/^[^.]*\./);
+    if (m && m[0].length <= 25) fin += m[0].length;
+  }
+  return joined.slice(mejor.inicio, fin).trim();
 }
 
-module.exports = { getBoletinText, findExcerpt, DATA_DIR };
+module.exports = { getBoletinText, findExcerpt, marcaDe, DATA_DIR };

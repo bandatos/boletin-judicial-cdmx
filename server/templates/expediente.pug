@@ -3,10 +3,12 @@ include chrome.pug
 include mixins.pug
 
 - var titulo = expediente.demandada ? `${expediente.actora} vs. ${expediente.demandada}` : expediente.actora
-- var ultimoPdf = expediente.avisos.find(a => a.pdf_url)
 - var ultimo = expediente.avisos[0]
 - var organo = expediente.sala || expediente.juzgado
 - var referencia = [organo, `${expediente.sala ? 'toca' : 'expediente'} ${expediente.expediente}`].filter(Boolean).join(', ')
+- var sentencias = expediente.avisos.filter(esSentenciaFinal)
+- var hayTiposAcuerdo = expediente.avisos.some(a => a.tipo_acuerdo)
+- var hayInterlocutoria = expediente.avisos.some(a => a.tipo_actuacion === 'sentencia_interlocutoria')
 
 +head(`${titulo}: ${siteTitle}`, `Expediente ${expediente.expediente}: ${siteTitle}`, true)
   +siteHeader()
@@ -14,109 +16,148 @@ include mixins.pug
 
     .container.expediente-view
       p
-        a(href="/buscar") ← Volver al buscador
+        a(href="/buscar" title="Vuelve al buscador del Boletín Judicial") ← Volver al buscador
 
-      h1.expediente-titulo= titulo
+      h1.expediente-titulo
+        = expediente.actora
+        if expediente.demandada
+          +vs()
+          = expediente.demandada
 
-      //- Lo que la persona no sabía: el número y el órgano, para copiar.
-      section.expediente-numero(aria-labelledby="titulo-numero")
-        h2#titulo-numero.visualmente-oculto Número de expediente
-        .expediente-numero-dato
-          span.expediente-numero-etiqueta= expediente.sala ? 'Sala' : 'Juzgado'
-          strong= organo || '—'
-        .expediente-numero-dato
-          span.expediente-numero-etiqueta= expediente.sala ? 'Toca' : 'Expediente'
-          strong= expediente.expediente
-        button.boton-copiar(type="button" data-copiar=referencia) Copiar
-        .card-meta
+      //- Cabecera: qué expediente es (número, órgano con secretaría, tipo), su
+      //- sentencia si la tiene, y una sola fila de acciones: las del sitio
+      //- (copiar, guardar, correo) y las de afuera (Mi Tribunal, orientación).
+      - var primero = expediente.avisos[expediente.avisos.length - 1]
+      - var sentFicha = sentencias[0]
+      - var conVersion = sentencias.find(a => a.sentencia_publica)
+      - var secretaria = expediente.secretaria ? expediente.secretaria.replace(/^SECRETAR[IÍ]A\s*/i, '').replace(/[“”"]/g, '').trim() : null
+      section.exp-cab(aria-labelledby="titulo-numero")
+        .exp-id
+          span#titulo-numero.exp-etq= expediente.sala ? 'Toca' : 'Expediente'
+          strong.exp-num= expediente.expediente
+        //- Orden fijo en todo el sitio: expediente, tipo de juicio,
+        //- juzgado, secretaría.
+        dl.exp-datos
           if expediente.tipo_juicio
-            span.tag= expediente.tipo_juicio
-          if expediente.secretaria
-            span= expediente.secretaria
-          if expediente.anio
-            span Año #{expediente.anio}
+            dt Tipo de juicio
+            dd= expediente.tipo_juicio_norm || expediente.tipo_juicio
+          dt= expediente.sala ? 'Sala' : 'Juzgado'
+          dd
+            = organo || '—'
+            if secretaria
+              span.exp-secretaria  · Secretaría #{secretaria}
+            if hayEstadisticas && organo
+              = ' '
+              a.exp-organo-link(href=organoHref(organo, expediente.sala ? 'sala' : 'juzgado') data-accion="como_trabaja" title=`Sentencias, tiempos y actividad de ${organo} según el boletín`) (¿Cómo trabaja #{expediente.sala ? 'esta sala' : 'este juzgado'}?)
 
-      .expediente-acciones
-        button.boton-guardar(type="button" hidden
-          data-id=expediente.id data-titulo=titulo data-expediente=expediente.expediente
-          data-organo=organo data-ultima=(ultimo && ultimo.fecha_iso) || '') Guardar en Mis expedientes
-        details.alerta-maqueta
-          summary Recibir avisos por correo
-          //- Maqueta: el campo de correo no tiene name, así que nunca se
-          //- envía. El botón lleva a la vista previa del correo.
-          form(action="/alertas/ejemplo" method="GET")
-            input(type="hidden" name="id" value=expediente.id)
-            label(for="alerta-correo") Tu correo
-            .alerta-fila
-              input#alerta-correo(type="email" autocomplete="email" placeholder="nombre@correo.com")
-              button(type="submit") Avisarme
-            p.nota Vista previa: este servicio todavía no funciona y no guardamos tu correo. Al enviar verás cómo sería el aviso.
+        //- La sentencia, dentro de la caja: es el estado del expediente.
+        if sentFicha
+          .exp-sentencia
+            p.exp-sentencia-titulo
+              span.actuacion.act-sentencia= actuacion(sentFicha)
+              if sentFicha.fecha_iso
+                |  publicada en el boletín del #{fechaLarga(sentFicha.fecha_iso)}
+            if sentencias.length > 1
+              p Este #{expediente.sala ? 'toca' : 'expediente'} tiene #{num(sentencias.length)} avisos de sentencia, marcados en la lista de avisos.
+            if conVersion
+              p
+                +sentenciaLink(conVersion, 'Ver sentencia (versión pública)', 'boton-borde')
+              p.nota Es una copia sin nombres ni número de expediente que publica el Poder Judicial. La relacionamos con este #{expediente.sala ? 'toca' : 'expediente'} por el #{expediente.sala ? 'tribunal' : 'juzgado'}, el tipo de juicio y la fecha: es muy probable que sea esta, pero no es seguro. Si no corresponde, #[a(href="/opinion" data-accion="avisar_error_sentencia" title="Formulario para contarnos qué está mal") avísanos].
+            else
+              p.nota El Boletín Judicial solo informa que se dictó la sentencia, no lo que dice. Cuando la sentencia queda firme, el Poder Judicial sube una copia sin nombres (la "versión pública") al #[a(href="http://sivepj.poderjudicialcdmx.gob.mx:819/consulta/" target="_blank" rel="noopener" data-accion="sivep" title="Buscador de sentencias en versión pública del Poder Judicial de la CDMX (sitio externo)") Sistema de Versiones Públicas (SIVEP)], donde se busca por materia, #{expediente.sala ? 'sala' : 'juzgado'}, año y trimestre.
 
-      p.actualizacion
-        if ultimo && ultimo.fecha_iso
-          | Último aviso: #[strong= fechaLarga(ultimo.fecha_iso)].
-        if datosHasta
-          |  Revisamos hasta el boletín del #{fechaLarga(datosHasta)}.
+        //- Acciones en dos niveles: seguir el expediente (botones) y
+        //- utilidades y salidas a otros sitios (enlaces).
+        .exp-acciones
+          .exp-acciones-principales
+            button.boton-guardar(type="button" hidden
+              data-id=expediente.id data-titulo=titulo data-expediente=expediente.expediente
+              data-organo=organo data-ultima=(ultimo && ultimo.fecha_iso) || ''
+              title="Lo guarda en este navegador, sin cuenta. Al volver a Mis expedientes te marca los avisos nuevos") Guardar en Mis expedientes
+            details.alerta-maqueta
+              summary(title="Te escribiríamos con cada aviso nuevo. Todavía no funciona: es una vista previa") Recibir avisos por correo
+              //- Maqueta: el campo de correo no tiene name, así que nunca se
+              //- envía. El botón lleva a la vista previa del correo.
+              form(action="/alertas/ejemplo" method="GET")
+                input(type="hidden" name="id" value=expediente.id)
+                label(for="alerta-correo") Tu correo
+                .alerta-fila
+                  input#alerta-correo(type="email" autocomplete="email" placeholder="nombre@correo.com")
+                  button(type="submit") Avisarme
+                p.nota Vista previa: este servicio todavía no funciona y no guardamos tu correo. Al enviar verás cómo sería el aviso.
+          p.exp-acciones-ayuda
+            | #[strong Guardar]: queda en este navegador, sin cuenta, y al volver te marca los avisos nuevos.
+            |  #[strong Correo]: te escribiríamos con cada aviso nuevo (todavía no funciona).
+          .exp-acciones-secundarias
+            button.boton-copiar.boton-texto(type="button" data-copiar=referencia data-accion="copiar_numero" title="Copia el número y el juzgado para pegarlos donde los necesites") Copiar número y #{expediente.sala ? 'sala' : 'juzgado'}
+            a(href="https://www.poderjudicialcdmx.gob.mx/wp-content/uploads/mi-tribunal-pjcdmx-cnpcyf-info.pdf" target="_blank" rel="noopener" data-accion="mi_tribunal" title="Folleto del Poder Judicial sobre Mi Tribunal, la plataforma donde las partes consultan el expediente digital (PDF externo)") Leer los acuerdos en Mi Tribunal ↗
+            +enlaceTDV()
 
+      //- Pedido del sitio, antes de los avisos: arriba se ve, pero no
+      //- interrumpe los datos del expediente.
       +preguntaIntencion('expediente')
 
-      .aclaracion
-        p #[strong El boletín publica que hubo movimiento, no qué se decidió.] Cada aviso dice cuántos acuerdos hubo o si se dictó una sentencia, pero no su contenido. Para leerlo completo, consulta el expediente en Mi Tribunal si eres parte del juicio, o acude al #{expediente.sala ? 'tribunal' : 'juzgado'}.
+      h2.avisos-titulo
+        | Avisos (#{num(expediente.avisos.length)})
+        if primero && primero.fecha_iso && ultimo && ultimo.fecha_iso && primero.fecha_iso !== ultimo.fecha_iso
+          small  · del #{fechaCorta(primero.fecha_iso)} al #{fechaCorta(ultimo.fecha_iso)}
+        if datosHasta
+          small  · revisamos hasta el #{fechaCorta(datosHasta)}
+      p.avisos-intro Cada aviso es lo que el Boletín Judicial publicó ese día sobre este #{expediente.sala ? 'toca' : 'expediente'}: si hubo acuerdos, audiencia o sentencia y, a veces, una palabra sobre el tema. Lo que dice cada acuerdo no se publica, aunque de algunas sentencias sí hay una versión pública.
+      if sentencias.length || hayTiposAcuerdo || hayInterlocutoria
+        details.leyenda-actuaciones
+          summary Qué significa cada etiqueta
+          dl
+            if sentencias.length
+              dt: span.actuacion.act-sentencia Sentencia definitiva
+              dd Resuelve el juicio (o, en una sala, la apelación). Puede apelarse o quedar firme.
+            if hayInterlocutoria
+              dt: span.actuacion.act-interlocutoria Sentencia interlocutoria
+              dd Resuelve una cuestión dentro del juicio, sin terminarlo.
+            if expediente.avisos.some(a => a.tipo_acuerdo === 'prevencion')
+              dt: span.actuacion.act-prevencion Prevención
+              dd El juzgado pidió aclarar, corregir o completar algo, por lo general en un plazo corto.
+            if expediente.avisos.some(a => a.tipo_acuerdo === 'negacion')
+              dt: span.actuacion.act-negacion Negación
+              dd El juzgado desechó o no admitió lo que se pidió, o dijo que no ha lugar.
+            if expediente.avisos.some(a => a.tipo_acuerdo === 'admision')
+              dt: span.actuacion.act-admision Admisión
+              dd El juzgado admitió la demanda o radicó el asunto.
+          p.nota Las etiquetas salen de lo que publica el boletín. Si un aviso solo dice "1 acuerdo", el juzgado no publicó qué se acordó.
+      //- Línea de tiempo: un punto por aviso, del más reciente al más viejo.
+      //- Las partes, el número y el tipo de juicio ya están arriba: cada aviso
+      //- muestra solo lo que cambia (qué pasó y, si el juzgado lo escribió,
+      //- la descripción). El tipo de juicio aparece solo si es otro.
+      - var tipoFicha = expediente.tipo_juicio_norm || expediente.tipo_juicio
+      +lineaTiempo(expediente.avisos, tipoFicha)
 
-      section.que-hacer(aria-labelledby="titulo-que-hacer")
-        h2#titulo-que-hacer Qué hacer con este número
-        ul
-          li #[strong Si eres parte del juicio]: consulta el expediente digital en #[a(href="https://www.poderjudicialcdmx.gob.mx/wp-content/uploads/mi-tribunal-pjcdmx-cnpcyf-info.pdf" target="_blank" rel="noopener") Mi Tribunal], la plataforma del Poder Judicial de la Ciudad de México.
-          li #[strong En persona]: acude al #{expediente.sala ? 'tribunal' : 'juzgado'} con estos datos: #{referencia}.
-          li #[strong Si necesitas orientación]: #[a(href=TDV_URL target="_blank" rel="noopener") pregúntale a Todo Derecho Vecino], el asistente de Bandatos sobre derechos vecinales en la Ciudad de México. También puedes llevarle este número a una abogada o abogado.
-        if hayEstadisticas && organo
-          p.nota
-            a(href=organoHref(organo, expediente.sala ? 'sala' : 'juzgado')) Cómo trabaja #{expediente.sala ? 'esta sala' : 'este juzgado'}: sentencias y tiempos
-
-      h2 Avisos (#{num(expediente.avisos.length)})
-      ul.avisos-list
-        each a in expediente.avisos
-          li
-            strong
-              if a.fecha_iso
-                a(href=`/fecha/${a.fecha_iso}`)= fechaCorta(a.fecha_iso)
-              else
-                = a.fecha || '—'
-            if actuacion(a)
+      //- Los avisos tal como salieron, para verificar: se cargan al abrir
+      //- (behavior.js, /api/aviso/:id). Sin JS, cada link abre el texto plano.
+      details.avisos-textos
+        summary Ver los avisos tal como salieron en el boletín
+        ol
+          each a in expediente.avisos.slice(0, 60)
+            li(data-aviso=a.id)
+              strong= a.fecha_iso ? fechaCorta(a.fecha_iso) : (a.fecha || '—')
               = ' '
-              span.actuacion(class=(a.tipo_actuacion && a.tipo_actuacion.startsWith('sentencia') ? 'actuacion-sentencia' : null))= actuacion(a)
-            if a.tipo_juicio
-              |  · #{a.tipo_juicio}
-            if a.pdf_url
-              |  ·
-              = ' '
-              +pdfLink(a, a.pagina ? `Ver PDF del boletín (p. ${a.pagina})` : 'Ver PDF del boletín')
-
-      if ultimoPdf
-        h2 Boletín más reciente
-        .pdf-embed
-          embed(src=(ultimoPdf.pagina ? `${ultimoPdf.pdf_url}#page=${ultimoPdf.pagina}&toolbar=0` : `${ultimoPdf.pdf_url}#toolbar=0`) type="application/pdf" width="100%" height="600")
-        p.pdf-fallback
-          a(href=pdfHref(ultimoPdf) target="_blank" rel="noopener") Abrir el PDF en otra pestaña
-
-      if textoOriginal
-        h2 Texto del aviso en el boletín
-        p.raw-text-note Es el texto del aviso tal como sale en el PDF, no el del acuerdo. Extracto aproximado.
-        pre.raw-text= textoOriginal
+              span.aviso-texto-cuerpo
+                a(href=`/api/aviso/${a.id}` title="Texto del aviso tal como salió en el boletín") Ver texto
+        if expediente.avisos.length > 60
+          p.nota Se muestran los 60 más recientes. Los anteriores se pueden ver en el boletín de cada fecha.
 
       h2 Ver más
       ul.related-links
         each e in empresasDelCaso || []
           li
-            a(href=`/empresas/${e.slug}`)= `Todos los juicios de ${e.nombre}`
+            a(href=`/empresas/${e.slug}` title=`Expedientes de ${e.nombre} en el boletín`)= `Todos los juicios de ${e.nombre}`
         if expediente.tipo_juicio_norm
           li
-            a(href=(hayEstadisticas ? tipoHref(expediente.tipo_juicio_norm) : `/buscar?tipo=${encodeURIComponent(expediente.tipo_juicio_norm)}`))
+            a(href=(hayEstadisticas ? tipoHref(expediente.tipo_juicio_norm) : `/buscar?tipo=${encodeURIComponent(expediente.tipo_juicio_norm)}`) title=`Estadísticas y casos de juicios de tipo ${expediente.tipo_juicio_norm}`)
               = `Juicios de tipo ${expediente.tipo_juicio_norm}`
             |  (#{num(expediente.mismoTipo)} avisos)
         if expediente.juzgado
           li
-            a(href=juzgadoHref(expediente.juzgado))
+            a(href=juzgadoHref(expediente.juzgado) title=`Buscar otros casos de ${expediente.juzgado}`)
               = `Otros casos de ${expediente.juzgado}`
             |  (#{num(expediente.mismoJuzgado)})
 

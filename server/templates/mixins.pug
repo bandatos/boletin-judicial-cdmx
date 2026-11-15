@@ -1,50 +1,131 @@
+//- Enlace a Todo Derecho Vecino, igual en todo el sitio. Es un asistente
+//- para problemas vecinales (ruido, antros, construcciones, uso de suelo),
+//- no para cualquier juicio: el texto y el título lo dicen.
+mixin enlaceTDV(texto)
+  a(href=TDV_URL target="_blank" rel="noopener"
+    title="Todo Derecho Vecino, de Bandatos: describes tu problema vecinal (ruido, antros, construcciones, uso de suelo) y te propone una ruta para resolverlo. Gratis; la respuesta tarda de 30 a 60 segundos (otro sitio)")= texto || 'Orientación vecinal gratuita ↗'
+
+//- Etiqueta "vs" entre las partes, para distinguir dónde termina una y
+//- empieza la otra en nombres largos. El texto sigue siendo " vs. " para
+//- lectores de pantalla y para copiar.
+mixin vs()
+  = ' '
+  span.vs(aria-label="contra") vs.
+  = ' '
+
+//- Qué pasó en un aviso, igual en todas las páginas: la etiqueta (con su
+//- color, ver actuacionClase), lo que escribió el juzgado si lo escribió, y
+//- el cuaderno o tomo si no es el principal. Bases viejas: solo el conteo.
+mixin etiquetaAviso(a)
+  if etiqueta(a)
+    span.actuacion(class=actuacionClase(a))= etiqueta(a)
+  if a.descripcion && a.descripcion !== etiqueta(a)
+    = ' '
+    span.lt-desc= expandirAbreviaturas(a.descripcion)
+  if acuerdosExtra(a)
+    span.lt-extra= acuerdosExtra(a)
+  if a.cuaderno
+    span.lt-tipo= a.cuaderno
+
+//- Marca de que el expediente ya tiene sentencia definitiva, para listas.
+//- La fecha va dentro de la etiqueta: es la del boletín que publicó el
+//- aviso de sentencia.
+mixin marcaSentencia(fechaIso)
+  span.marca-sentencia
+    span.actuacion.act-sentencia(title=fechaIso ? `Sentencia publicada en el boletín del ${fechaMedia(fechaIso)}` : null)
+      | Sentencia
+      if fechaIso
+        |  #{fechaCorta(fechaIso).replace('.', '')}
+
+//- Línea de tiempo de avisos: un punto por aviso, del más reciente al más
+//- viejo. La usan la ficha y el despliegue de avisos de las listas
+//- (/expediente/:id/avisos). tipoFicha: el tipo de juicio del expediente,
+//- para mostrar el de cada aviso solo si es otro.
+mixin lineaTiempo(avisos, tipoFicha)
+  ol.linea-tiempo
+    each a in avisos
+      li(class=`lt-${actuacionClase(a).replace('act-', '')}`)
+        .lt-fecha
+          if a.fecha_iso
+            a(href=`/fecha/${a.fecha_iso}` title=`Todo lo que publicó el Boletín Judicial el ${fechaMedia(a.fecha_iso)}`)
+              time(datetime=a.fecha_iso)= fechaCorta(a.fecha_iso)
+          else
+            = a.fecha || '—'
+        .lt-que
+          +etiquetaAviso(a)
+          if (a.tipo_juicio_norm || a.tipo_juicio) && (a.tipo_juicio_norm || a.tipo_juicio) !== tipoFicha
+            span.lt-tipo= a.tipo_juicio
+        .lt-links
+          if a.sentencia_publica
+            +sentenciaLink(a, 'Ver sentencia')
+          if a.pdf_url
+            +pdfLink(a, a.pagina ? `Boletín p. ${a.pagina}` : 'Boletín')
+
+//- Un expediente en una lista (búsqueda, juzgado, empresa, persona). Mismo
+//- componente en todas: primero el número y el órgano (lo que identifica al
+//- expediente), después las partes (el bloque, que cambia según la página),
+//- el tipo de juicio con el último aviso, y los avisos, que se cargan al
+//- desplegar con la misma línea de tiempo de la ficha.
+//- Orden fijo en todo el sitio: expediente, tipo de juicio, juzgado,
+//- secretaría.
+//- x: { id, href, expediente, tipo, organo, secretaria, avisos, ultimo,
+//-      sentencia, encontrados }. encontrados: en la búsqueda, los avisos
+//- contados son los que coinciden con lo buscado, no todos los del
+//- expediente. La misma tarjeta en búsqueda, juzgado, persona y empresa.
+mixin expedienteItem(x)
+  article.exp-item
+    header
+      a.exp-item-num(href=x.href title=tituloFicha(x.expediente) data-accion="abrir_expediente") Exp. #{x.expediente || '—'}
+      if x.tipo
+        span.exp-item-tipo= x.tipo
+      span.exp-item-organo
+        = x.organo || '—'
+        if secretariaCorta(x.secretaria)
+          |  · #{secretariaCorta(x.secretaria)}
+      if x.sentencia
+        +marcaSentencia(x.sentencia)
+    if block
+      .exp-item-partes
+        block
+    //- Cuántos avisos y hasta cuándo, y la ficha para el detalle. La línea
+    //- de tiempo y los boletines están en la ficha. En la búsqueda los
+    //- avisos son los que coinciden con lo buscado ("encontrados").
+    - const hasta = x.ultimo && x.ultimo.fecha_iso ? fechaMedia(x.ultimo.fecha_iso) : '—'
+    - const enc = x.encontrados ? (x.avisos === 1 ? ' encontrado' : ' encontrados') : ''
+    p.exp-item-meta
+      if x.avisos === 1
+        | 1 aviso#{enc}, del #{hasta}
+      else
+        | #{num(x.avisos)} avisos#{enc} hasta el #{hasta}
+      |  · 
+      a(href=x.href title=tituloFicha(x.expediente) data-accion="ver_detalles") Ver detalles
+
 mixin resultCard(g, buscado)
-  .card
-    .card-partes
-      if g.demandada
-        b!= resaltar(g.actora, buscado)
-        span.card-vs &nbsp;vs.&nbsp;
-        b!= resaltar(g.demandada, buscado)
-      else
-        b!= resaltar(g.actora, buscado)
-    .card-meta
-      if g.tipo_juicio
-        span.tag= g.tipo_juicio
-      span Exp. #{g.expediente || '—'}
-      span= g.juzgado || '—'
-      if g.sala
-        span= g.sala
-      if g.fecha_iso
-        a(href=`/fecha/${g.fecha_iso}`)= fechaCorta(g.fecha_iso)
-      else
-        span= g.fecha || '—'
-    if g.avisos.length > 1
-      details.card-avisos
-        summary= num(g.avisos.length) + ' avisos'
-        ul
-          each a in g.avisos.slice().sort((x, y) => (y.boletin_id || 0) - (x.boletin_id || 0))
-            li
-              if a.fecha_iso
-                a(href=`/fecha/${a.fecha_iso}`)= fechaCorta(a.fecha_iso)
-              else
-                = a.fecha || '—'
-              if a.tipo_juicio
-                |  — #{a.tipo_juicio}
-              if a.pdf_url
-                |  —
-                = ' '
-                +pdfLink(a, 'PDF')
-    .card-links
-      a.card-detail-link(href=expedienteHref(g)) Ver expediente completo
-      if g.pdf_url
-        +pdfLink(g, 'Ver PDF del boletín')
+  - const avisosOrden = g.avisos.slice().sort((x, y) => String(y.fecha_iso || '').localeCompare(String(x.fecha_iso || '')) || y.id - x.id)
+  - const sentCard = avisosOrden.find(esSentenciaFinal)
+  +expedienteItem({ id: g.id, href: expedienteHref(g), expediente: g.expediente, tipo: g.tipo_juicio_norm || g.tipo_juicio, organo: g.sala || g.juzgado, secretaria: g.secretaria, avisos: g.avisos.length, encontrados: true, ultimo: avisosOrden[0] || g, sentencia: sentCard && sentCard.fecha_iso })
+    if g.demandada
+      b!= resaltar(g.actora, buscado)
+      +vs()
+      b!= resaltar(g.demandada, buscado)
+    else
+      b!= resaltar(g.actora, buscado)
 
 //- Link al PDF del boletín en la página del aviso. behavior.js lo abre en el
 //- panel lateral; con Ctrl o clic del medio sigue siendo un link común.
 mixin pdfLink(r, texto)
   a.ver-pdf(href=pdfHref(r) target="_blank" rel="noopener"
+    title=`Abre el Boletín Judicial${r.fecha_iso ? ` del ${fechaMedia(r.fecha_iso)}` : ''}${r.pagina ? `, página ${r.pagina}` : ''} (PDF oficial del Poder Judicial)`
     data-pdf=r.pdf_url data-pagina=r.pagina || ''
-    data-titulo=[r.fecha_iso && fechaCorta(r.fecha_iso), r.pagina && `p. ${r.pagina}`].filter(Boolean).join(' · '))= texto
+    data-titulo=['Boletín', r.fecha_iso && fechaCorta(r.fecha_iso), r.pagina && `p. ${r.pagina}`].filter(Boolean).join(' · '))= texto
+
+//- Versión pública de la sentencia (SIVEP), en el mismo panel que el
+//- boletín. /sentencia-publica/:id redirige a la URL vigente del PDF.
+mixin sentenciaLink(a, texto, clase)
+  a.ver-pdf(class=clase href=`/sentencia-publica/${a.id}` target="_blank" rel="noopener nofollow"
+    title="Abre la versión pública de la sentencia: una copia sin nombres que publica el Poder Judicial (PDF)"
+    data-pdf=`/sentencia-publica/${a.id}` data-pagina="" data-tipo="sentencia"
+    data-titulo=['Sentencia (versión pública)', a.fecha_iso && fechaCorta(a.fecha_iso)].filter(Boolean).join(' · '))= texto
 
 //- Avisos de un día (vista /fecha), en el orden del PDF.
 mixin avisosDia(rows)
@@ -58,13 +139,16 @@ mixin avisosDia(rows)
         div
           b= r.actora
           if r.demandada
-            |  vs. #{r.demandada}
+            +vs()
+            | #{r.demandada}
         .aviso-meta
-          = [r.tipo_juicio, r.expediente && `Exp. ${r.expediente}`, r.num_acdos && `${r.num_acdos} acdo${r.num_acdos > 1 ? 's' : ''}.`].filter(Boolean).join(' · ')
+          = [r.tipo_juicio, r.expediente && `Exp. ${r.expediente}`].filter(Boolean).join(' · ')
+          = ' · '
+          +etiquetaAviso(r)
           if r.pdf_url
             |  ·
             = ' '
-            +pdfLink(r, r.pagina ? `ver en PDF (p. ${r.pagina})` : 'ver PDF')
+            +pdfLink(r, r.pagina ? `ver boletín (p. ${r.pagina})` : 'ver boletín')
 
 //- Paginador con el formato del de sociedad-web-front (templates/buscador.pug):
 //- flechas, primera y última página, una ventana de 4 páginas alrededor de
@@ -179,35 +263,21 @@ mixin pestanas(grupo, pestanas, clase)
 //- Expediente de una empresa: la otra parte solo como empresas o "persona(s)
 //- física(s)" (estas páginas se indexan y no nombran personas).
 mixin expedienteEmpresa(x)
-  li
-    div
-      b= x.rol === 'actora' ? 'Actora' : 'Demandada'
-      |  en #{x.organo || 'órgano no identificado'} · Exp. #{x.expediente || '—'}
-    .aviso-meta
-      | #{x.rol === 'actora' ? 'contra' : 'demandada por'}
-      = ' '
-      if x.contraEmpresas.length
-        each c, i in x.contraEmpresas
-          if i
-            | ,
-            = ' '
-          a(href=`/empresas/${c.slug}`)= c.nombre
-        if x.contraPersonas
-          |  y persona(s) física(s)
-      else if x.contraPersonas
-        | persona(s) física(s)
-      else
-        | (sin contraparte en el aviso)
-    .aviso-meta
-      = [x.tipo_juicio, `${num(x.avisos)} aviso${x.avisos > 1 ? 's' : ''}`].filter(Boolean).join(' · ')
-      |  · último:
-      = ' '
-      if x.fecha_iso
-        a(href=`/fecha/${x.fecha_iso}`)= fechaCorta(x.fecha_iso)
-      if x.pdf_url
-        |  ·
-        = ' '
-        +pdfLink(x, x.pagina ? `PDF (p. ${x.pagina})` : 'PDF')
+  +expedienteItem({ id: x.ultimo_id, href: expedienteHref({ id: x.ultimo_id, expediente: x.expediente }), expediente: x.expediente, tipo: x.tipo_juicio, organo: x.organo, secretaria: x.secretaria, avisos: x.avisos, ultimo: x, sentencia: x.sentencia && x.sentencia.fecha_iso })
+    b= x.rol === 'actora' ? 'Actora' : 'Demandada'
+    = x.rol === 'actora' ? ', contra ' : ', demandada por '
+    if x.contraEmpresas.length
+      each c, i in x.contraEmpresas
+        if i
+          | ,
+          = ' '
+        a(href=`/empresas/${c.slug}` title=`Todos los juicios de ${c.nombre} en el boletín`)= c.nombre
+      if x.contraPersonas
+        |  y persona(s) física(s)
+    else if x.contraPersonas
+      | persona(s) física(s)
+    else
+      | (sin contraparte en el aviso)
 
 //- Pregunta de intención, una vez por navegador: se muestra por CSS según
 //- la clase que pone head.pug antes de pintar, y behavior.js maneja las
@@ -222,6 +292,7 @@ mixin preguntaIntencion(lugar)
   - const titulo = enEmpresa ? '¿Por qué consultas esta empresa?' : lugar === 'expediente' ? '¿Para qué consultas este expediente?' : '¿Para qué estás buscando?'
   section#intencion.intencion(aria-labelledby="intencion-titulo")
     button.intencion-cerrar(type="button" aria-label="Cerrar") ✕
+    p.intencion-etiqueta Pregunta del equipo de Bandatos
     .intencion-pregunta
       h2#intencion-titulo= titulo
       p.nota Nos ayuda a mejorar el sitio. Es anónimo y solo te lo preguntamos una vez.
@@ -234,6 +305,7 @@ mixin preguntaIntencion(lugar)
       +formOpinion('pregunta', { conNo: true })
   section#reoferta.intencion.reoferta(aria-labelledby="reoferta-titulo")
     button.intencion-cerrar(type="button" aria-label="Cerrar") ✕
+    p.intencion-etiqueta Pregunta del equipo de Bandatos
     h2#reoferta-titulo ¿Nos cuentas tu experiencia?
     p.nota Hace unos días nos contaste para qué usas el sitio. Si nos das más detalles, podemos seguir mejorándolo. Es anónimo.
     +formOpinion('reoferta', { conNo: true })

@@ -9,8 +9,15 @@ include mixins.pug
     if heading
       .container.page-heading
         h1= heading
-        p
-          a(href="/buscar") ← Buscar en todos los juzgados
+        //- Acciones del juzgado (página de búsqueda dentro de un juzgado).
+        .acciones-pagina
+          .exp-acciones-secundarias
+            if hayEstadisticas
+              a(href=organoHref(heading, 'juzgado') data-accion="como_trabaja" title=`Sentencias, tiempos y actividad de ${heading} según el boletín`) Cómo trabaja este juzgado
+            if datosHasta
+              a(href=`/fecha/${datosHasta}?organo=${slugify(heading)}` data-accion="ultimo_boletin" title=`Lo que publicó ${heading} en el boletín del ${fechaMedia(datosHasta)}`) Lo publicado en el último boletín
+            button.boton-copiar.boton-texto(type="button" data-copiar=heading data-accion="copiar_juzgado" title="Copia el nombre del juzgado") Copiar nombre del juzgado
+            a(href="/buscar" data-accion="buscar_todos" title="Buscar en todos los juzgados y salas") Buscar en todos los juzgados
 
     if !heading
       h1.visualmente-oculto Buscar avisos

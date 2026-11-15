@@ -41,6 +41,17 @@ include mixins.pug
           else
             | Puede incluir juicios de otras personas con el mismo nombre.
 
+      //- Acciones, en dos niveles como en la ficha del expediente.
+      if esEmpresa
+        .acciones-pagina
+          .exp-acciones-principales
+            details.alerta-maqueta.alerta-empresa
+              summary(title="Te escribiríamos cuando esta empresa aparezca en un juicio nuevo. Todavía no funciona") Recibir avisos de nuevos juicios por correo
+              p.nota Todavía no funciona. Estamos viendo cuánta gente lo quiere: abrir esto ya nos sirve para saberlo, y no guardamos ningún dato tuyo.
+          .exp-acciones-secundarias
+            button.boton-copiar.boton-texto(type="button" data-copiar="url" data-accion="copiar_enlace" title="Copia la dirección de esta página para compartirla") Copiar enlace a esta página
+            +enlaceTDV()
+
       if esEmpresa
         +preguntaIntencion('empresa')
 
@@ -75,7 +86,7 @@ include mixins.pug
         if esEmpresa
           if !expedientes.filas.length
             p Sin expedientes.
-          ol.expedientes-empresa
+          .expedientes-empresa
             each x in expedientes.filas
               +expedienteEmpresa(x)
         else

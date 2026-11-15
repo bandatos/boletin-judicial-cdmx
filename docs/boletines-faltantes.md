@@ -52,3 +52,7 @@ de las fechas de la tabla, con su número de boletín.
   revisaron los boletines que el índice lista.
 - Boletines anteriores al 3 de octubre de 2016, que el índice del portal no
   incluye.
+
+## Boletín 4172 (4 de noviembre de 2026)
+
+Bajado el 15 de noviembre de 2026. El PDF (Tomo CCV, Núm. 186) solo trae el índice con el Tribunal de Disciplina Judicial, avisos y edictos. No hay secciones de salas ni de juzgados, así que el parser no encuentra avisos y no es un error de lectura. `[hipotesis]` fue un día sin publicación de acuerdos de los órganos jurisdiccionales (suspensión de labores o similar). Se prueba con los acuerdos del Consejo de la Judicatura de esas fechas.

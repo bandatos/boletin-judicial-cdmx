@@ -10,14 +10,14 @@ mixin siteHeader(activo)
       img.logo(src=asset('img/bandatos-logo.webp') alt="Bandatos" width="110" height="52" fetchpriority="high")
       span.producto= siteTitle
     nav.menu
-      a(href="/buscar" class=(activo === 'buscar' ? 'activo' : '')) Buscar
-      a(href="/mis-expedientes" class=(activo === 'mis' ? 'activo' : '')) Mis expedientes
-      a(href="/empresas" class=(activo === 'empresas' ? 'activo' : '')) Empresas
+      a(href="/buscar" class=(activo === 'buscar' ? 'activo' : '') title="Buscar juicios por nombre o número de expediente") Buscar
+      a(href="/mis-expedientes" class=(activo === 'mis' ? 'activo' : '') title="Los expedientes que guardaste en este navegador") Mis expedientes
+      a(href="/empresas" class=(activo === 'empresas' ? 'activo' : '') title="Empresas que aparecen en juicios y sus expedientes") Empresas
       if hayEstadisticas
-        a(href="/tipos" class=(activo === 'tipos' ? 'activo' : '')) Tipos de juicio
-        a(href="/salas" class=(activo === 'desempeno' ? 'activo' : '')) Desempeño
-      a(href="/fecha" class=(activo === 'fecha' ? 'activo' : '')) Por fecha
-      a(href="/sources" class=(activo === 'fuentes' ? 'activo' : '')) Fuentes
+        a(href="/tipos" class=(activo === 'tipos' ? 'activo' : '') title="Estadísticas por tipo de juicio") Tipos de juicio
+        a(href="/salas" class=(activo === 'desempeno' ? 'activo' : '') title="Sentencias y tiempos de salas y juzgados") Desempeño
+      a(href="/fecha" class=(activo === 'fecha' ? 'activo' : '') title="Lo que publicó el boletín cada día") Por fecha
+      a(href="/sources" class=(activo === 'fuentes' ? 'activo' : '') title="De dónde vienen los datos y cómo se procesan") Fuentes
 
 //- Barra de migas. items: [[texto, href], ..., [texto]]
 mixin breadcrumbs(items)
@@ -39,18 +39,18 @@ mixin siteFooter()
         #[strong= siteTitle] es un proyecto de Todo Derecho Vecino, dentro de
         #[a(href="https://bandatos.org" target="_blank" rel="noopener") Bandatos],
         con datos del Boletín Judicial del Poder Judicial de la Ciudad de México ·
-        #[a(href="/sources") de dónde vienen los datos] ·
-        #[a(href="/novedades") novedades] ·
-        #[a(href="/opinion") danos tu opinión]
+        #[a(href="/sources" title="Fuentes y método") de dónde vienen los datos] ·
+        #[a(href="/novedades" title="Cambios recientes del sitio") novedades] ·
+        #[a(href="/opinion" title="Formulario anónimo para contarnos qué te sirvió o qué falta") danos tu opinión]
       if datosHasta
         p.datos-hasta Datos hasta el boletín del #[strong= fechaLarga(datosHasta)].
 
-  aside#pdf-panel(aria-label="PDF del boletín" hidden)
+  aside#pdf-panel(aria-label="Documento" hidden)
     .pdf-panel-bar
       span#pdf-panel-title
       a#pdf-panel-open(href="#" target="_blank" rel="noopener") Abrir en pestaña nueva
-      button#pdf-panel-close(type="button" aria-label="Cerrar PDF") ✕
-    iframe#pdf-frame(title="PDF del boletín")
+      button#pdf-panel-close(type="button" aria-label="Cerrar documento") ✕
+    iframe#pdf-frame(title="Documento")
     //- Invitación a opinar para quien abre el PDF (la mayor intención). El
     //- botón despliega el formulario debajo del PDF. Se oculta por CSS si ya
     //- envió o rechazó la invitación (head.pug).

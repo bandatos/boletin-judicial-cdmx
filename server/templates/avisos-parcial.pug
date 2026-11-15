@@ -1,0 +1,7 @@
+include mixins.pug
+
+//- Avisos de un expediente para el despliegue de las listas
+//- (/expediente/:id/avisos, behavior.js). Sin layout.
++lineaTiempo(expediente.avisos, expediente.tipo_juicio_norm || expediente.tipo_juicio)
+p.exp-avisos-pie
+  a(href=expedienteHref(expediente)) Ir a la ficha del expediente

@@ -334,6 +334,41 @@ CNPCyF no traen conteo sino una descripción corta de lo acordado
 `ponencia`: el número de `Sent. Pon 2` (o `Sent. Cump. Ejec. Amp. Pon. 2.`)
 en las sentencias de sala. El boletín no publica el nombre del magistrado.
 
+### Tipo de acuerdo (nov. 2026)
+
+Feedback de un abogado: los tipos que importan son acuerdo, prevención,
+negación y sentencia, y la sentencia es el más importante. Cada acuerdo
+guarda `tipo_acuerdo` (`acuerdos.tipo_acuerdo`): `prevencion`, `negacion`,
+`admision` o NULL. Sale de la descripción corta que algunos órganos ponen
+entre el tipo de juicio y la cola (`Ord. Civil Prevención. 1 Acdo.`,
+`Ord. Mercantil Desechamiento. 1 Acdo.`) o después del número en el formato
+CNPCyF (`Núm. Exp. 6703/2026, Prevención. 1 Acdo.`). Hasta octubre esas
+palabras solo estaban en `STOP_WORDS` de `normalize_tipo.py`, para cortar el
+tipo de juicio, y se perdían.
+
+- Solo mira el tramo después de la demandada y del último `vs.` (avisos
+  fusionados), y antes de la cola. Así no lo engañan nombres como
+  "Instituto de Prevención Social" o "Desechables S.A.".
+- Negación: `Desech*`, `No Ha Lugar`, `No (Se) Admite`, `(Se) Niega`,
+  `Improcedente`, `Inadmisible`. Va primero: "No Se Admite" no es admisión.
+- Prevención: `Prevención`, `Previene`, `Prev.`. "No Desahogó la Prevención"
+  queda como prevención: el boletín no dice qué se resolvió después.
+- Admisión: `Admisión`, `Admisorio`, `Se Admite`, `Radicación`. No cuenta si
+  lo que se admite es una prueba, un recurso, una apelación, un incidente o
+  un exhorto.
+- NULL no quiere decir que no haya sido una prevención: muchos juzgados no
+  publican la descripción. En el boletín 4115 (22/09/2026) hay unos 220
+  avisos por tipo de 16,183. En una muestra de 10 boletines por año, las
+  menciones de prevención pasan de unas 130 (2017) a unas 1,500 (2023 a
+  2026). `[hipotesis]` más órganos publican la descripción, no hay más
+  prevenciones. Se prueba contando por órgano y año.
+
+Casos reales en `scraper/test_tipo_acuerdo.py` (`python3
+scraper/test_tipo_acuerdo.py`). Si el CSV no trae la columna (corridas
+anteriores), `build_db.py` la calcula desde `raw_text`, así que un build
+nuevo la tiene aunque no haya re-parseo. `organo_mes` suma `prevenciones`,
+`negaciones` y `admisiones`.
+
 ### Variante con conteo después de "Núm. Exp." (resuelto)
 
 Descubierto durante la verificación del fix de arriba: en variantes más
@@ -353,3 +388,15 @@ un segundo grupo opcional que lo consume cuando está presente;
 - **Variantes de encabezado de sección**: el regex de juzgado cubre ordinales hasta Quincuagésimo; si existen juzgados con numeración mayor habrá que ampliarlos.
 - **CANONICAL_TIPOS incompleta**: cubre los ~90 tipos más frecuentes: si aparecen tipos de juicio legítimos pero poco frecuentes que no están en la lista, quedan sin normalizar (visibles tal cual, no se pierden, solo no se agrupan).
 - **Tercer formato de terminador, sin cubrir**: incidentes de "cuaderno de amparo" listados sin "Vs." usan un formato compacto propio, sin `Acdo.`/`Sent.`/`Audiencia.` como palabra clave (`Div. Sin Causa Inc. de Las Consecuencias de Div. No Convenidas 23152024- 00 Aut del 4`). Como ninguno de los dos terminadores actuales matchea, estas notas se acumulan sin cortarse hasta la próxima entrada válida — hoy terminan fusionadas dentro de la entrada previa o siguiente (`actora` anormalmente larga, con varias repeticiones del mismo caso). Bajo volumen, no se abordó en esta ronda.
+
+### Número de expediente y cuaderno (nov. 2026)
+
+El boletín pega al número lo que sigue en el aviso: `1002/2017 Tomo II`, `153/2024 Inc`, `744/2023 Principal Tomo Dos`, `101/2026 Amparo 667/2026 Quejosa...` y, en las UGJ, la descripción después de una coma (`39974/2026, Emplazar`). Hasta octubre todo eso quedaba en `expediente`, y como la ficha agrupa por ese texto exacto, un mismo expediente quedaba repartido en varias fichas: en la base de septiembre a noviembre de 2026, el 38 % de los avisos traía texto pegado y 127 mil de 545 mil fichas eran pedazos de otras.
+
+`acuerdos.separar_expediente` deja en `expediente` solo el número (N/AAAA, o la toca N/AAAA/NNN, con guiones pasados a barras) y guarda el resto en `cuaderno` (el tomo o cuaderno del mismo expediente, que la ficha muestra en cada aviso). Después de la coma de las UGJ no hay cuaderno: es la descripción, y la toma `descripcion`. `build_db.py` lo aplica también a los CSV anteriores. Casos en `test_tipo_acuerdo.py`.
+
+### Nombres de partes con el resto del aviso pegado (nov. 2026)
+
+Hay avisos donde el nombre de una parte se tragó el tipo de juicio o la descripción. Pasa cuando el boletín escribe la descripción antes del tipo ("Guzmán García Lorena. Aud. 272-B no Publ. ... Especial Familiar. 1 Audiencia.") o cuando no hay "vs." y el tipo se reconoce recién al final ("Pérez Vargas Saúl y Hernández Villegas Brenda. Especial Familiar Señalamiento ... Div."). También el tipo solo, pegado a la demandada ("Pérez Espino Mildred. Ejecutivo Mercantil"). En la corrida de noviembre de 2026 eran unos 35 mil de 935 mil nombres.
+
+`acuerdos.separar_parte` corta el nombre en el primer punto seguido de un tipo de juicio reconocido o de una palabra que abre una descripción ("Aud.", "Acdo.", "Prevención", "Señalamiento", "Se Tiene"...). Lo que sobra sirve de descripción si no hay otra. Es conservador con los nombres de empresas, que también tienen puntos ("S.A. de C.V. Institución de Banca Múltiple"). `acuerdos.quitar_marca_publicacion` quita "NO PUBLICADO" / "MAL PUBLICADO" del principio de la actora (2,772 avisos en la misma base). Las dos se aplican en `poc._row` y en `build_db.py` (CSV anteriores). Casos en `test_tipo_acuerdo.py`.

@@ -362,6 +362,10 @@ def _tipo_actuacion(text, subseccion):
         return "sentencia_interlocutoria"
     return subseccion if subseccion and subseccion.startswith("sentencia") else "sentencia"
 
+from acuerdos import (descripcion, descripcion_de_sobrante, quitar_marca_publicacion,  # noqa: E402  (ver acuerdos.py)
+                      separar_expediente, separar_parte, tipo_acuerdo)
+
+
 RE_VS = re.compile(r"\s+vs\.\s+", re.IGNORECASE)
 
 # Tipo de juicio + num_acdos al final de la entrada, antes de Núm. Exp.
@@ -931,7 +935,17 @@ RE_ARRASTRE_ACTORA = re.compile(
 def _row(boletin_id, fecha_raw, ctx, actora, demandada, tipo_juicio, num_acdos, expediente, raw_text):
     if actora:
         actora = RE_ARRASTRE_ACTORA.sub("", actora) or actora
-    actora = actora or None
+    actora = quitar_marca_publicacion(actora) or None
+    # Nombre que se tragó el tipo de juicio o la descripción: se corta, y lo
+    # que sobra sirve de descripción si no hay otra (acuerdos.separar_parte).
+    sobrante = None
+    if demandada:
+        demandada, sobrante = separar_parte(demandada)
+    elif actora:
+        actora, sobrante = separar_parte(actora)
+    # Número limpio como clave del expediente, el resto ("Tomo II", "Inc")
+    # como cuaderno (ver acuerdos.separar_expediente).
+    expediente, cuaderno = separar_expediente(expediente)
     return {
         "boletin_id": boletin_id,
         "fecha": fecha_raw,
@@ -941,8 +955,11 @@ def _row(boletin_id, fecha_raw, ctx, actora, demandada, tipo_juicio, num_acdos, 
         "tipo_juicio": tipo_juicio,
         "num_acdos": num_acdos,
         "expediente": expediente,
+        "cuaderno": cuaderno,
         "tipo_actuacion": _tipo_actuacion(raw_text, ctx.get("subseccion")),
         "ponencia": int(m_pon.group(1)) if (m_pon := RE_PONENCIA.search(raw_text or "")) else None,
+        "tipo_acuerdo": tipo_acuerdo(raw_text, demandada),
+        "descripcion": descripcion(raw_text, demandada) or descripcion_de_sobrante(sobrante),
         "raw_text": raw_text,
     }
 
