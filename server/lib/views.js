@@ -9,6 +9,7 @@ const { expedienteHref, juzgadoHref, slugify } = require('./slug');
 const { getBoletinText, findExcerpt } = require('./raw-text');
 const fechas = require('./fechas');
 const { getNovedades } = require('./novedades');
+const opiniones = require('./opinion');
 
 const TEMPLATES_DIR = path.join(__dirname, '..', 'templates');
 const isDev = process.env.NODE_ENV !== 'production';
@@ -497,6 +498,27 @@ function novedades(req) {
   return { status: 200, html: renderTemplate('novedades', { req, dias: getNovedades() }) };
 }
 
+// /opinion: GET muestra el formulario (pie de página y destino sin JS);
+// POST lo recibe. Con JS (Accept: application/json) responde JSON; sin JS,
+// redirige a la página con el aviso de enviado o la vuelve a mostrar con el
+// error y lo escrito.
+async function opinion(req) {
+  if (req.method !== 'POST') {
+    return { status: 200, html: renderTemplate('opinion', { req, enviado: req.query.enviado === '1' }) };
+  }
+  const r = await opiniones.recibir(req, req.body || {});
+  const json = /application\/json/.test(req.headers.accept || '');
+  if (json) {
+    return {
+      status: r.ok ? 200 : (r.error === 'limite' ? 429 : r.error === 'envio' ? 502 : 400),
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      html: JSON.stringify(r.ok ? { ok: true } : { ok: false, error: r.error, mensaje: opiniones.MENSAJES[r.error] }),
+    };
+  }
+  if (r.ok) return { status: 303, headers: { Location: '/opinion?enviado=1' }, html: '' };
+  return { status: 400, html: renderTemplate('opinion', { req, error: opiniones.MENSAJES[r.error], valores: r.datos }) };
+}
+
 function sources(req) {
   return { status: 200, html: renderTemplate('sources', { req, stats: db.getStats() }) };
 }
@@ -528,7 +550,7 @@ function health() {
 }
 
 module.exports = {
-  resaltar, robots, health, home, portada, personas, persona, juzgado, expediente, fecha, empresas, empresa, sources, novedades, renderTemplate, pugLocals,
+  resaltar, robots, health, home, portada, personas, persona, juzgado, expediente, fecha, empresas, empresa, sources, novedades, opinion, renderTemplate, pugLocals,
   salas: organos('sala'), juzgados: organos('juzgado'), sala: organo('sala'), juzgadoDesempeno: organo('juzgado'),
   tipos, tipo, misExpedientes, apiExpedientes, alertaEjemplo,
 };

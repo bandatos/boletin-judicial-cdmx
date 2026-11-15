@@ -135,6 +135,7 @@ function eventoGa(nombre, params) {
 // búsquedas tardan uno o dos segundos en el server).
 (function () {
   document.addEventListener('submit', function (e) {
+    if (e.target.matches && e.target.matches('form.opinion')) return; // tiene su propio estado
     var boton = e.target.querySelector('button[type="submit"]');
     if (!boton || boton.getAttribute('aria-busy') === 'true') return;
     boton.setAttribute('aria-busy', 'true');
@@ -338,19 +339,6 @@ function eventoGa(nombre, params) {
     eventoGa('intencion_reofrecida');
   }
 
-  // Link al formulario con la respuesta a la pregunta ya marcada: opciones
-  // de la primera pregunta del formulario y su id de campo.
-  var OPCIONES_FORM = {
-    propio: 'Revisar un juicio propio',
-    conocido: 'Revisar el juicio de alguien que conozco',
-    empresa: 'Averiguar sobre una empresa o un inmueble',
-    trabajo: 'Por trabajo (casos de clientes, periodismo, investigación)'
-  };
-  var conRespuesta = function (link) {
-    var texto = OPCIONES_FORM[leer('boletin-intencion')];
-    if (texto && link.href.indexOf('entry.') < 0) link.href += '&entry.1051725648=' + encodeURIComponent(texto);
-  };
-
   document.addEventListener('click', function (e) {
     if (!e.target.closest) return;
     var opcion = caja && e.target.closest('#intencion button[data-valor]');
@@ -358,39 +346,90 @@ function eventoGa(nombre, params) {
       guardar('boletin-intencion', opcion.getAttribute('data-valor'));
       guardar('boletin-intencion-fecha', String(Date.now()));
       eventoGa('intencion', { valor: opcion.getAttribute('data-valor') });
-      caja.querySelector('.entrevista-texto').textContent = opcion.getAttribute('data-invita');
       caja.querySelector('.intencion-pregunta').hidden = true;
       caja.querySelector('.intencion-gracias').hidden = false;
-      caja.querySelector('.entrevista-si').focus();
+      caja.querySelector('textarea').focus();
       return;
     }
     var cerrar = e.target.closest('.intencion-cerrar');
     if (cerrar) {
       var franja = cerrar.closest('.intencion');
-      // Cerrar la pregunta sin responder la marca como cerrada. Cerrar la
-      // invitación (después de responder o en la reoferta) es un "no".
+      // Cerrar la pregunta sin responder la marca como cerrada. Cerrar el
+      // formulario sin enviarlo (después de responder o en la reoferta) es
+      // un "no"; después de enviarlo, solo se cierra.
       if (franja === caja && !caja.querySelector('.intencion-pregunta').hidden) {
         guardar('boletin-intencion', 'cerrada');
         eventoGa('intencion_cerrada');
-      } else {
+      } else if (leer('boletin-entrevista') !== 'si') {
         guardar('boletin-entrevista', 'no');
         eventoGa('entrevista_rechazada', { lugar: franja === caja ? 'pregunta' : 'reoferta' });
       }
       franja.hidden = true;
       return;
     }
-    var si = e.target.closest('.entrevista-si');
-    if (si) {
-      conRespuesta(si);
-      guardar('boletin-entrevista', 'si');
-      eventoGa('entrevista_click', { lugar: si.closest('.entrevista').getAttribute('data-lugar') });
+    var abrir = e.target.closest('.opinion-abrir');
+    if (abrir) {
+      var destino = document.getElementById(abrir.getAttribute('aria-controls'));
+      destino.hidden = !destino.hidden;
+      abrir.setAttribute('aria-expanded', String(!destino.hidden));
+      if (!destino.hidden) destino.querySelector('textarea').focus();
       return;
     }
     var no = e.target.closest('.entrevista-no');
     if (no) {
       guardar('boletin-entrevista', 'no');
-      eventoGa('entrevista_rechazada', { lugar: no.closest('.entrevista').getAttribute('data-lugar') });
+      eventoGa('entrevista_rechazada', { lugar: no.closest('form').getAttribute('data-lugar') });
       no.closest('.intencion').hidden = true;
     }
+  });
+
+  // Formulario de opinión (form-opinion.pug): se envía sin salir de la
+  // página. Sin fetch, el navegador lo manda a /opinion como cualquier form.
+  var empezados = {};
+  document.addEventListener('focusin', function (e) {
+    var form = e.target.closest && e.target.closest('form.opinion');
+    if (!form || empezados[form.getAttribute('data-lugar')]) return;
+    empezados[form.getAttribute('data-lugar')] = true;
+    eventoGa('opinion_empezada', { lugar: form.getAttribute('data-lugar') });
+  });
+
+  document.addEventListener('submit', function (e) {
+    var form = e.target;
+    if (!form.matches || !form.matches('form.opinion') || typeof fetch !== 'function') return;
+    e.preventDefault();
+    var lugar = form.getAttribute('data-lugar');
+    var error = form.querySelector('.opinion-error');
+    var mostrarError = function (texto) { error.textContent = texto; error.hidden = false; };
+    var valor = function (nombre) { return form.elements[nombre].value.trim(); };
+    var conContacto = !!(valor('nombre') || valor('contacto'));
+    if (!valor('bueno') && !valor('falta')) return mostrarError('Escribe algo en al menos uno de los dos campos.');
+    if (conContacto && !form.elements.acepto.checked) return mostrarError('Para dejarnos tus datos, marca que aceptas que te contactemos.');
+    var intencion = leer('boletin-intencion');
+    if (intencion && intencion !== 'cerrada') form.elements.intencion.value = intencion;
+    var boton = form.querySelector('button[type=submit]');
+    boton.disabled = true;
+    boton.textContent = 'Enviando…';
+    error.hidden = true;
+    fetch(form.action, {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams(new FormData(form)).toString()
+    }).then(function (r) { return r.json(); }).then(function (r) {
+      if (!r.ok) { var x = new Error(r.mensaje); x.delServer = true; throw x; }
+      guardar('boletin-entrevista', 'si');
+      eventoGa('opinion_enviada', { lugar: lugar, con_contacto: conContacto ? 'si' : 'no' });
+      form.hidden = true;
+      var gracias = form.nextElementSibling;
+      gracias.hidden = false;
+      var franja = form.closest('.intencion');
+      if (franja) {
+        Array.prototype.forEach.call(franja.querySelectorAll('h2, .nota'), function (n) { if (!form.contains(n)) n.hidden = true; });
+      }
+    }).catch(function (err) {
+      eventoGa('opinion_error', { lugar: lugar });
+      mostrarError(err.delServer && err.message ? err.message : 'No se pudo enviar. Intenta de nuevo en unos minutos.');
+      boton.disabled = false;
+      boton.textContent = 'Enviar';
+    });
   });
 })();

@@ -1,0 +1,20 @@
+include head.pug
+include chrome.pug
+include mixins.pug
+
+//- /opinion: el formulario de opinión en su propia página (link del pie y
+//- destino del envío sin JavaScript). Ver lib/opinion.js.
++head(`Danos tu opinión: ${siteTitle}`, `Cuéntanos qué te sirvió y qué te faltó de ${siteTitle}.`, true)
+  +siteHeader()
+  +breadcrumbs([[siteTitle, '/'], ['Danos tu opinión']])
+  main#contenido
+    .container.opinion-view
+      h1 Danos tu opinión
+      if enviado
+        p.opinion-enviado ¡Gracias! Lo leemos todo.
+        p
+          a(href="/buscar") Volver al buscador
+      else
+        p Cuéntanos qué te sirvió y qué te faltó. Es anónimo y puedes llenar uno solo de los campos.
+        +formOpinion('pagina', { error, valores })
+  +siteFooter()

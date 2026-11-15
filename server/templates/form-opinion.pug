@@ -1,0 +1,39 @@
+//- Formulario de opinión: lo recibe POST /opinion (lib/opinion.js), que lo
+//- reenvía al formulario de Google. Con JS se envía sin salir de la página
+//- (behavior.js), sin JS va y vuelve a /opinion. Puede haber varios en la
+//- misma página (franja, reoferta, panel del PDF): los id llevan el lugar.
+//- opts.conNo: botón "No, gracias". opts.valores: lo escrito, si hubo error.
+mixin formOpinion(lugar, opts)
+  - const o = opts || {}
+  - const v = o.valores || {}
+  - const id = k => `op-${lugar}-${k}`
+  form.opinion(action="/opinion" method="POST" data-lugar=lugar)
+    input(type="hidden" name="lugar" value=lugar)
+    input(type="hidden" name="intencion" value=v.intencion)
+    .opinion-trampa(aria-hidden="true")
+      label(for=id('sitio')) No llenes este campo
+      input(id=id('sitio') name="sitio" tabindex="-1" autocomplete="off")
+    label(for=id('bueno')) ¿Qué te sirvió?
+    textarea(id=id('bueno') name="bueno" rows="3" maxlength="2000")= v.bueno
+    label(for=id('falta')) ¿Qué te faltó o qué cambiarías?
+    textarea(id=id('falta') name="falta" rows="3" maxlength="2000")= v.falta
+    details.opinion-entrevista(open=!!(v.nombre || v.contacto))
+      summary ¿Platicamos 20 minutos? (opcional)
+      p.nota Por videollamada, teléfono o WhatsApp. Si participas, te invitamos a nuestros encuentros y al grupo de personas usuarias que nos ayudan a mejorar la plataforma.
+      .opinion-fila
+        div
+          label(for=id('nombre')) Nombre
+          input(id=id('nombre') name="nombre" maxlength="120" autocomplete="name" value=v.nombre)
+        div
+          label(for=id('contacto')) Correo o WhatsApp
+          input(id=id('contacto') name="contacto" maxlength="200" autocomplete="email" value=v.contacto)
+      label.opinion-acepto
+        input(type="checkbox" name="acepto" value="si" checked=v.acepto === 'si')
+        |  Acepto que Bandatos use estos datos para contactarme para la entrevista y para invitarme a sus encuentros y al grupo de personas usuarias.
+      p.nota No publicamos ni compartimos tus datos, y los borramos cuando termine el estudio. Para borrarlos antes, escribe a cdmx.bandatos@gmail.com.
+    p.opinion-error(role="alert" hidden=!o.error)= o.error
+    .entrevista-botones
+      button.entrevista-si(type="submit") Enviar
+      if o.conNo
+        button.entrevista-no(type="button") No, gracias
+  p.opinion-gracias(role="status" hidden) ¡Gracias! Lo leemos todo.

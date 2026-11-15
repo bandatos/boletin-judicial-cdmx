@@ -536,12 +536,13 @@ test('sin GA en desarrollo y tests', async () => {
   assert.doesNotMatch((await get('/')).body, /googletagmanager/);
 });
 
-test('la búsqueda con resultados trae la pregunta de intención, con el formulario de entrevista', async () => {
+test('la búsqueda con resultados trae la pregunta de intención, con el formulario de opinión', async () => {
   const { body } = await get('/buscar?q=thebart');
   assert.match(body, /<section class="intencion" id="intencion"/);
   assert.match(body, /localStorage\.getItem\('boletin-intencion'\)/);
   assert.match(body, /data-valor="propio"/);
-  assert.match(body, /docs\.google\.com\/forms\/d\/e\/[^"]+\/viewform/);
+  assert.match(body, /<form class="opinion" action="\/opinion" method="POST" data-lugar="pregunta"/);
+  assert.doesNotMatch(body, /docs\.google\.com/);
   const vacia = await get('/buscar?q=zzzzqqqq');
   assert.doesNotMatch(vacia.body, /id="intencion"/);
 });
@@ -585,7 +586,111 @@ test('parsear de novedades: solo lo de debajo de la marca, días sin líneas fue
 test('la ficha de expediente trae la pregunta de intención y la invitación con botones', async () => {
   const { body } = await get('/expediente/2');
   assert.match(body, /¿Para qué consultas este expediente\?/);
-  assert.match(body, /class="entrevista-si"[^>]*>Sí, les cuento/);
+  assert.match(body, /data-lugar="reoferta"/);
   assert.match(body, /id="reoferta"/);
-  assert.match(body, /class="pdf-panel-invita entrevista" data-lugar="pdf"/);
+  assert.match(body, /<form class="opinion"[^>]*data-lugar="pdf"/);
+  assert.match(body, /id="op-pdf-bueno"/);
+});
+
+// ── Formulario de opinión: el server reenvía a un Google simulado ──
+let google;
+const recibidos = [];
+let googleFalla = false;
+test.before(async () => {
+  google = http.createServer((req, res) => {
+    let b = '';
+    req.on('data', c => { b += c; });
+    req.on('end', () => { recibidos.push(new URLSearchParams(b)); res.writeHead(googleFalla ? 500 : 200); res.end('ok'); });
+  });
+  await new Promise(r => google.listen(0, '127.0.0.1', r));
+  process.env.OPINION_FORM_URL = `http://127.0.0.1:${google.address().port}/formResponse`;
+});
+test.after(() => google.close());
+
+let ipFalsa = 0;
+async function opinar(campos, { json = true } = {}) {
+  const res = await fetch(base + '/opinion', {
+    method: 'POST',
+    redirect: 'manual',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Forwarded-For': `10.0.0.${++ipFalsa}`, ...(json ? { Accept: 'application/json' } : {}) },
+    body: new URLSearchParams(campos).toString(),
+  });
+  return { status: res.status, location: res.headers.get('location'), body: await res.text() };
+}
+
+test('POST /opinion reenvía a Google con los campos del formulario', async () => {
+  recibidos.length = 0;
+  const r = await opinar({ bueno: ' Encontré mi juicio ', falta: 'Alertas', intencion: 'trabajo', nombre: 'Ana', contacto: 'ana@x.org', acepto: 'si', lugar: 'pregunta' });
+  assert.equal(r.status, 200);
+  assert.deepEqual(JSON.parse(r.body), { ok: true });
+  const g = recibidos[0];
+  assert.equal(g.get('entry.' + parseInt('77b91c72', 16)), 'Encontré mi juicio');
+  assert.equal(g.get('entry.' + parseInt('3e439be7', 16)), 'Alertas');
+  assert.equal(g.get('entry.' + parseInt('3eb00f50', 16)), 'Por trabajo (casos de clientes, periodismo, investigación)');
+  assert.equal(g.get('entry.' + parseInt('1bfe728e', 16)), 'Ana');
+  assert.equal(g.get('entry.' + parseInt('792af782', 16)), 'Acepto');
+});
+
+test('POST /opinion: "otro" va como opción Otro de Google', async () => {
+  recibidos.length = 0;
+  await opinar({ falta: 'x', intencion: 'otro' });
+  const id = 'entry.' + parseInt('3eb00f50', 16);
+  assert.equal(recibidos[0].get(id), '__other_option__');
+  assert.equal(recibidos[0].get(id + '.other_option_response'), 'Otra cosa');
+});
+
+test('POST /opinion rechaza vacío, contacto sin consentimiento y textos largos, sin reenviar', async () => {
+  recibidos.length = 0;
+  assert.equal((await opinar({ bueno: '  ' })).status, 400);
+  const sinOk = await opinar({ bueno: 'x', contacto: '555' });
+  assert.equal(sinOk.status, 400);
+  assert.equal(JSON.parse(sinOk.body).error, 'consentimiento');
+  assert.equal((await opinar({ bueno: 'x'.repeat(2001) })).status, 400);
+  assert.equal(recibidos.length, 0);
+});
+
+test('POST /opinion con el campo trampa responde bien y no reenvía', async () => {
+  recibidos.length = 0;
+  const r = await opinar({ bueno: 'spam', sitio: 'http://spam' });
+  assert.equal(r.status, 200);
+  assert.equal(recibidos.length, 0);
+});
+
+test('POST /opinion limita los envíos por IP', async () => {
+  const { excedeLimite } = require('../lib/opinion');
+  const ip = 'prueba-limite';
+  for (let i = 0; i < 5; i++) assert.equal(excedeLimite(ip, 1000 + i), false);
+  assert.equal(excedeLimite(ip, 2000), true);
+  assert.equal(excedeLimite(ip, 1000 + 3600 * 1000 + 10), false);
+});
+
+test('POST /opinion avisa si Google falla', async () => {
+  googleFalla = true;
+  try {
+    const r = await opinar({ bueno: 'x' });
+    assert.equal(r.status, 502);
+    assert.equal(JSON.parse(r.body).error, 'envio');
+  } finally { googleFalla = false; }
+});
+
+test('sin JS: POST /opinion redirige a la página de gracias, y con error vuelve con lo escrito', async () => {
+  const ok = await opinar({ bueno: 'x' }, { json: false });
+  assert.equal(ok.status, 303);
+  assert.equal(ok.location, '/opinion?enviado=1');
+  assert.match((await get('/opinion?enviado=1')).body, /¡Gracias! Lo leemos todo\./);
+  const mal = await opinar({ bueno: 'mi texto', nombre: 'Ana' }, { json: false });
+  assert.equal(mal.status, 400);
+  assert.match(mal.body, /marca que aceptas/);
+  assert.match(mal.body, />mi texto<\/textarea>/);
+});
+
+test('GET /opinion muestra el formulario, linkeado desde el pie; otros métodos y rutas no aceptan POST', async () => {
+  const { status, body } = await get('/opinion');
+  assert.equal(status, 200);
+  assert.match(body, /data-lugar="pagina"/);
+  assert.match(body, /name="robots" content="noindex"/);
+  assert.match((await get('/novedades')).body, /href="\/opinion"/);
+  assert.equal((await fetch(base + '/buscar', { method: 'POST', body: 'q=x' })).status, 405);
+  assert.equal((await fetch(base + '/opinion', { method: 'PUT', body: 'q=x' })).status, 405);
+  assert.equal((await fetch(base + '/opinion', { method: 'POST', body: 'x'.repeat(9000) }).catch(() => ({ status: 413 }))).status, 413);
 });

@@ -52,6 +52,10 @@ boletinjudicial.bandatos.org. Lo anterior está en el historial de git.
 
 <!-- novedades -->
 
+## 2026-11-15
+
+- Puedes contarnos tu experiencia sin salir del sitio: en la búsqueda, las fichas, el panel del PDF o desde el pie.
+
 ## 2026-11-12
 
 - Ahora puedes contarnos de forma anónima tu experiencia con el sitio para ayudarnos a mejorarlo.

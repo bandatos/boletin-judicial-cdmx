@@ -68,6 +68,22 @@ function matchRoute(pathname) {
   return null;
 }
 
+// Cuerpo de los POST (solo formularios urlencoded), con tope de tamaño.
+const MAX_CUERPO = 8 * 1024;
+function leerCuerpo(req) {
+  return new Promise((resolve, reject) => {
+    let tam = 0;
+    const partes = [];
+    req.on('data', c => {
+      tam += c.length;
+      if (tam > MAX_CUERPO) { reject(Object.assign(new Error('cuerpo grande'), { status: 413 })); req.destroy(); return; }
+      partes.push(c);
+    });
+    req.on('end', () => resolve(Object.fromEntries(new URLSearchParams(Buffer.concat(partes).toString('utf8')))));
+    req.on('error', reject);
+  });
+}
+
 async function requestListener(req, res) {
   const start = Date.now();
   res.on('finish', () => logRequest(req, res.statusCode, Date.now() - start));
@@ -91,6 +107,21 @@ async function requestListener(req, res) {
 
     req.query = Object.fromEntries(url.searchParams);
     req.params = params;
+
+    // Solo las rutas con "post": true aceptan POST; el resto, solo GET/HEAD.
+    if (req.method === 'POST' && route.post) {
+      try {
+        req.body = await leerCuerpo(req);
+      } catch (err) {
+        res.writeHead(err.status || 400, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('Pedido inválido');
+        return;
+      }
+    } else if (req.method !== 'GET' && req.method !== 'HEAD') {
+      res.writeHead(405, { 'Content-Type': 'text/plain; charset=utf-8', Allow: route.post ? 'GET, HEAD, POST' : 'GET, HEAD' });
+      res.end('Método no permitido');
+      return;
+    }
 
     const clave = req.method === 'GET' && route.handler !== 'health' ? `${url.pathname}${url.search}` : null;
     let result = usarCache && clave ? desdeCache(clave) : null;

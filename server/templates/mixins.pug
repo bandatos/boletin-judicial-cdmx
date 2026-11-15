@@ -211,40 +211,29 @@ mixin expedienteEmpresa(x)
 
 //- Pregunta de intención, una vez por navegador: se muestra por CSS según
 //- la clase que pone head.pug antes de pintar, y behavior.js maneja las
-//- respuestas. Después de responder, invitación a una entrevista con el
-//- texto según la respuesta (data-invita). La respuesta queda marcada en el
-//- formulario (OPCIONES_FORM en behavior.js). Si no contesta la invitación, se
-//- le ofrece una sola vez más, a los 3 días o más (#reoferta).
+//- respuestas. Después de responder, la misma franja muestra el formulario
+//- de opinión (formOpinion), con la respuesta adjunta. Si no lo envía ni lo
+//- rechaza, se le ofrece una sola vez más, a los 3 días o más (#reoferta).
 //- lugar: 'busqueda' (por defecto), 'empresa' o 'expediente'. Mismo valor en
 //- GA para respuestas equivalentes, y tipo_pagina dice desde dónde.
 mixin preguntaIntencion(lugar)
   - const enEmpresa = lugar === 'empresa'
-  - const invita = '¿Nos cuentas más sobre tu experiencia con el sitio? Nos ayuda a seguir mejorando la plataforma.'
   - const opciones = enEmpresa ? [['propio', 'Tengo un juicio con esta empresa'], ['empresa', 'Quiero saber cómo es antes de contratar, comprar o rentar'], ['trabajo', 'Trabajo (casos de clientes, periodismo, investigación)'], ['otro', 'Otra cosa']] : [['propio', 'Mi propio juicio'], ['conocido', 'El de alguien que conozco'], ['empresa', 'Una empresa o un inmueble'], ['trabajo', 'Trabajo (casos de clientes, periodismo, investigación)'], ['otro', 'Otra cosa']]
   - const titulo = enEmpresa ? '¿Por qué consultas esta empresa?' : lugar === 'expediente' ? '¿Para qué consultas este expediente?' : '¿Para qué estás buscando?'
   section#intencion.intencion(aria-labelledby="intencion-titulo")
-    button.intencion-cerrar(type="button" aria-label="Cerrar la pregunta") ✕
+    button.intencion-cerrar(type="button" aria-label="Cerrar") ✕
     .intencion-pregunta
       h2#intencion-titulo= titulo
       p.nota Nos ayuda a mejorar el sitio. Es anónimo y solo te lo preguntamos una vez.
       .intencion-opciones
         each o in opciones
-          button(type="button" data-valor=o[0] data-invita=invita)= o[1]
+          button(type="button" data-valor=o[0])= o[1]
     .intencion-gracias(hidden)
-      h2 ¡Gracias!
-      +invitacionEntrevista('pregunta', invita)
+      h2 ¡Gracias! ¿Nos cuentas más sobre tu experiencia?
+      p.nota Nos ayuda a seguir mejorando la plataforma. Es anónimo y puedes llenar uno solo de los campos.
+      +formOpinion('pregunta', { conNo: true })
   section#reoferta.intencion.reoferta(aria-labelledby="reoferta-titulo")
-    button.intencion-cerrar(type="button" aria-label="Cerrar la invitación") ✕
+    button.intencion-cerrar(type="button" aria-label="Cerrar") ✕
     h2#reoferta-titulo ¿Nos cuentas tu experiencia?
-    +invitacionEntrevista('reoferta', 'Hace unos días nos contaste para qué usas el sitio. Si nos das más detalles de tu experiencia, podemos seguir mejorando la plataforma.')
-
-//- Invitación a opinar (con entrevista opcional): texto, qué ofrecemos y dos botones. El link
-//- lleva al formulario de Google, behavior.js le agrega la respuesta marcada.
-mixin invitacionEntrevista(lugar, texto)
-  - const formEntrevista = 'https://docs.google.com/forms/d/e/1FAIpQLScdxU6Y8GRpRIr5dO7NRKtDNW4O2BaZB8tKNhkBO5q7g8UNPw/viewform?usp=pp_url'
-  .entrevista(data-lugar=lugar)
-    p.entrevista-texto= texto
-    p.nota Es un formulario breve y anónimo.
-    .entrevista-botones
-      a.entrevista-si(href=formEntrevista target="_blank" rel="noopener") Sí, les cuento
-      button.entrevista-no(type="button") No, gracias
+    p.nota Hace unos días nos contaste para qué usas el sitio. Si nos das más detalles, podemos seguir mejorándolo. Es anónimo.
+    +formOpinion('reoferta', { conNo: true })

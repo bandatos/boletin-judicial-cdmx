@@ -1,0 +1,19 @@
+{
+  "_comentario": "Formulario de Google al que el server reenvía las opiniones (lib/opinion.js). Los ids son los questionId de la API de Forms (hex): el campo es entry.<decimal>. Si se borra y se vuelve a crear una pregunta del formulario cambia su id y hay que actualizarlo acá.",
+  "formResponse": "https://docs.google.com/forms/d/e/1FAIpQLScdxU6Y8GRpRIr5dO7NRKtDNW4O2BaZB8tKNhkBO5q7g8UNPw/formResponse",
+  "campos": {
+    "bueno": "77b91c72",
+    "falta": "3e439be7",
+    "intencion": "3eb00f50",
+    "nombre": "1bfe728e",
+    "contacto": "5980dc64",
+    "acepto": "792af782"
+  },
+  "intencion": {
+    "propio": "Revisar un juicio propio",
+    "conocido": "Revisar el juicio de alguien que conozco",
+    "empresa": "Averiguar sobre una empresa o un inmueble",
+    "trabajo": "Por trabajo (casos de clientes, periodismo, investigación)"
+  },
+  "acepto": "Acepto"
+}

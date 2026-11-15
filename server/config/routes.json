@@ -75,6 +75,11 @@
     "viewType": "function",
     "handler": "tipo"
   },
+  "/opinion": {
+    "viewType": "function",
+    "handler": "opinion",
+    "post": true
+  },
   "/novedades": {
     "viewType": "function",
     "handler": "novedades"

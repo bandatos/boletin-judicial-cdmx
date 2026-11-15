@@ -636,9 +636,28 @@ html.js:not(.intencion-vista) #intencion:not([hidden]) { display: block; }
 /* Segunda oportunidad: una vez, 3 días después de responder (head.pug). */
 .reoferta, .reoferta[hidden] { display: none; }
 html.js.entrevista-reofrecer .reoferta:not([hidden]) { display: block; }
-.pdf-panel-invita { margin: 0; padding: .5rem .75rem; border-top: 1px solid var(--border); font-size: .875rem; }
-.pdf-panel-invita .entrevista-si { border: 0; background: none; color: var(--accent); padding: 0; font-size: inherit; text-decoration: underline; }
+.pdf-panel-invita { margin: 0; padding: .5rem .75rem; border-top: 1px solid var(--border); font-size: .875rem; max-height: 55vh; overflow-y: auto; }
+.pdf-panel-invita p { margin: 0; }
+.opinion-abrir { border: 0; background: none; color: var(--accent); padding: 0; font: inherit; text-decoration: underline; cursor: pointer; }
 html.entrevista-respondida .pdf-panel-invita { display: none; }
+
+/* ── Formulario de opinión (form-opinion.pug) ── */
+.opinion { margin-top: .6rem; }
+.opinion label { display: block; font-weight: 600; font-size: .9rem; margin: .6rem 0 .2rem; }
+.opinion textarea, .opinion input:not([type=checkbox]) {
+  width: 100%; box-sizing: border-box; font: inherit; font-size: 1rem; padding: .5rem .6rem;
+  border: 1px solid var(--border); border-radius: var(--radius); background: #fff;
+}
+.opinion textarea { resize: vertical; min-height: 4.5rem; }
+.opinion-trampa { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+.opinion-entrevista { margin-top: .75rem; }
+.opinion-entrevista summary { cursor: pointer; color: var(--verde); font-weight: 600; }
+.opinion-fila { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 0 .75rem; }
+.opinion .opinion-acepto { display: flex; gap: .5rem; align-items: flex-start; font-weight: normal; }
+.opinion-acepto input { margin-top: .25rem; }
+.opinion-error { color: #a4161a; font-weight: 600; margin: .5rem 0 0; }
+.opinion-gracias, .opinion-enviado { font-weight: 600; color: var(--verde); margin: .5rem 0 0; }
+.opinion-view { max-width: 40rem; }
 
 /* ── Novedades ── */
 .novedades-dia { margin: 1.5rem 0; }

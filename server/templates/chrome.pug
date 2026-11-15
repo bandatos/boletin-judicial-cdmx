@@ -1,6 +1,8 @@
 //- chrome.pug — encabezado y pie compartidos. El sitio es un proyecto de
 //- Todo Derecho Vecino, dentro de Bandatos.
 
+include form-opinion.pug
+
 mixin siteHeader(activo)
   a.saltar(href="#contenido") Saltar al contenido
   header.site-header
@@ -38,7 +40,8 @@ mixin siteFooter()
         #[a(href="https://bandatos.org" target="_blank" rel="noopener") Bandatos],
         con datos del Boletín Judicial del Poder Judicial de la Ciudad de México ·
         #[a(href="/sources") de dónde vienen los datos] ·
-        #[a(href="/novedades") novedades]
+        #[a(href="/novedades") novedades] ·
+        #[a(href="/opinion") danos tu opinión]
       if datosHasta
         p.datos-hasta Datos hasta el boletín del #[strong= fechaLarga(datosHasta)].
 
@@ -48,11 +51,15 @@ mixin siteFooter()
       a#pdf-panel-open(href="#" target="_blank" rel="noopener") Abrir en pestaña nueva
       button#pdf-panel-close(type="button" aria-label="Cerrar PDF") ✕
     iframe#pdf-frame(title="PDF del boletín")
-    //- Invitación a opinar para quien abre el PDF (la mayor intención).
-    //- Se oculta por CSS si ya contestó la invitación (head.pug).
-    p.pdf-panel-invita.entrevista(data-lugar="pdf")
-      | ¿Nos cuentas tu experiencia con el buscador? Nos ayuda a seguir mejorándolo.
-      = ' '
-      a.entrevista-si(href="https://docs.google.com/forms/d/e/1FAIpQLScdxU6Y8GRpRIr5dO7NRKtDNW4O2BaZB8tKNhkBO5q7g8UNPw/viewform?usp=pp_url" target="_blank" rel="noopener") Sí, les cuento
+    //- Invitación a opinar para quien abre el PDF (la mayor intención). El
+    //- botón despliega el formulario debajo del PDF. Se oculta por CSS si ya
+    //- envió o rechazó la invitación (head.pug).
+    .pdf-panel-invita
+      p
+        | ¿Nos cuentas tu experiencia con el buscador? Nos ayuda a seguir mejorándolo.
+        = ' '
+        button.opinion-abrir(type="button" aria-expanded="false" aria-controls="pdf-panel-opinion") Sí, les cuento
+      #pdf-panel-opinion(hidden)
+        +formOpinion('pdf')
 
   script(src=asset('js/behavior.js') defer)
