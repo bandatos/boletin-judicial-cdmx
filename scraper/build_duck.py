@@ -340,7 +340,7 @@ SQL_PARTES_DDL = {
 }
 
 
-def _escribir(db, conn, tabla, ddl, consulta, orden=None):
+def _escribir(db, conn, tabla, ddl, consulta, orden=None, esquema="s"):
     """Crea `tabla` en SQLite (conn, base adjunta en DuckDB como s) y la
     llena desde DuckDB."""
     conn.execute(f"DROP TABLE IF EXISTS {tabla}")
@@ -351,7 +351,7 @@ def _escribir(db, conn, tabla, ddl, consulta, orden=None):
     # escribe: se pasa a BIGINT.
     tipos = dict(db.execute(f"SELECT column_name, column_type FROM (DESCRIBE {consulta})").fetchall())
     expr = [f"CAST({c} AS BIGINT)" if tipos.get(c) == "HUGEINT" else c for c in cols]
-    db.execute(f"INSERT INTO s.{tabla} ({', '.join(cols)}) SELECT {', '.join(expr)} FROM ({consulta})"
+    db.execute(f"INSERT INTO {esquema}.{tabla} ({', '.join(cols)}) SELECT {', '.join(expr)} FROM ({consulta})"
                + (f" ORDER BY {orden}" if orden else ""))
 
 
@@ -399,6 +399,7 @@ def build_completo(args, output, runs, log, bd):
     t0 = time.monotonic()
     db.execute(f"ATTACH '{output}' AS s (TYPE sqlite)")
     db.execute("CREATE OR REPLACE TABLE bol AS SELECT id, fecha_iso FROM s.boletines")
+    db.execute("DETACH s")
     union = lambda tabla: " UNION ALL ".join(
         f"SELECT {k} AS rango, * FROM read_parquet('{r[tabla]}')" for k, r in enumerate(rutas))
     cols = ", ".join(bd.COLS_CARGA)
@@ -420,33 +421,85 @@ def build_completo(args, output, runs, log, bd):
     total = db.execute("SELECT COUNT(*) FROM e").fetchone()[0]
     salteadas = db.execute("SELECT COUNT(*) FROM filas").fetchone()[0] - total
     log(f"  {total:,} avisos ({salteadas:,} de boletines que ya estaban en una corrida más nueva o fuera de rango)")
-    # De a una corrida, para no ordenar los 35M avisos con sus textos juntos.
-    for k, r in enumerate(rutas):
-        db.execute(f"""INSERT INTO s.entradas (id, {cols})
-                       SELECT e.id, {', '.join('f.' + c for c in bd.COLS_CARGA)}
-                       FROM read_parquet('{r['filas']}') f JOIN e ON e.rango = {k} AND e.fila = f.fila
-                       ORDER BY e.id""")
-    db.execute("DETACH s")
-    log(f"  escritos en la base: {time.monotonic() - t0:.0f} s")
+    fts_src = output.with_name(output.name + ".fts_src.sqlite")
+    fts_archivo = str(output.with_name(output.name + ".fts.sqlite"))
+    agg_path = output.with_name(output.name + ".agregados.sqlite")
+    for f in (fts_src, Path(fts_archivo), agg_path):
+        f.unlink(missing_ok=True)
 
-    # SQLite: índices y FTS, mientras DuckDB calcula los agregados.
-    def sqlite_lado():
-        c = sqlite3.connect(output)
-        c.execute("PRAGMA journal_mode=OFF")
-        c.execute("PRAGMA synchronous=OFF")
-        bd.hilos_sqlite(c)
-        bd.cache_sqlite(c)
+    # Tres trabajos a la vez, cada uno escribe su propio archivo (SQLite
+    # admite un solo escritor por archivo). Cada hilo usa su propia conexión
+    # a DuckDB (cursor) y su propio alias para el archivo que escribe.
+    def escribir_avisos(c, alias, columnas):
+        """Avisos de e con columnas del Parquet, de a una corrida (para no
+        ordenar los 35M avisos con sus textos juntos)."""
+        for k, r in enumerate(rutas):
+            c.execute(f"""INSERT INTO {alias}.entradas (id, {', '.join(columnas)})
+                          SELECT e.id, {', '.join('f.' + x for x in columnas)}
+                          FROM read_parquet('{r['filas']}') f JOIN e ON e.rango = {k} AND e.fila = f.fila
+                          ORDER BY e.id""")
+
+    def lado_fts():
+        """El índice de búsqueda se arma desde un archivo chico con solo las
+        columnas que indexa, sin esperar a la base ni a sus índices. Corre
+        en un programa aparte (no con fork: copiar este proceso con DuckDB
+        en varios hilos puede dejar la copia trabada en un candado)."""
         t = time.monotonic()
-        bd.create_indexes(c, args.indices_server, args.web)
-        bd.populate_boletin_ranges(c, log)
-        bd.populate_meta(c)
-        c.commit()
+        f = sqlite3.connect(fts_src)
+        f.execute("CREATE TABLE entradas (id INTEGER PRIMARY KEY, actora TEXT, demandada TEXT, tipo_juicio TEXT)")
+        f.commit()
+        f.close()
+        c = db.cursor()
+        c.execute(f"ATTACH '{fts_src}' AS sf (TYPE sqlite)")
+        escribir_avisos(c, "sf", ["actora", "demandada", "tipo_juicio"])
+        c.execute("DETACH sf")
         c.close()
+        log(f"  textos para la búsqueda: {time.monotonic() - t:.0f} s")
+        t = time.monotonic()
+        p = subprocess.run([sys.executable, "-c", "import sys, build_db; build_db.armar_fts(sys.argv[1], sys.argv[2])",
+                            str(fts_src), fts_archivo], cwd=Path(bd.__file__).resolve().parent)
+        if p.returncode:
+            raise RuntimeError(f"la etapa FTS terminó con código {p.returncode}")
+        fts_src.unlink()
+        log(f"  fts: {time.monotonic() - t:.0f} s")
+
+    def lado_base():
+        """Los avisos en la base y, después, sus índices (SQLite)."""
+        t = time.monotonic()
+        c = db.cursor()
+        c.execute(f"ATTACH '{output}' AS sb (TYPE sqlite)")
+        escribir_avisos(c, "sb", bd.COLS_CARGA)
+        c.execute("DETACH sb")
+        c.close()
+        log(f"  avisos escritos en la base: {time.monotonic() - t:.0f} s")
+        t = time.monotonic()
+        s_ = sqlite3.connect(output)
+        s_.execute("PRAGMA journal_mode=OFF")
+        s_.execute("PRAGMA synchronous=OFF")
+        bd.hilos_sqlite(s_)
+        bd.cache_sqlite(s_)
+        bd.create_indexes(s_, args.indices_server, args.web)
+        bd.populate_boletin_ranges(s_, log)
+        bd.populate_meta(s_)
+        s_.commit()
+        s_.close()
         log(f"  índices (SQLite): {time.monotonic() - t:.0f} s")
 
-    hilo_sqlite = threading.Thread(target=sqlite_lado)
-    hilo_sqlite.start()
+    errores = []
 
+    def en_hilo(nombre, trabajo):
+        def correr():
+            try:
+                trabajo()
+            except BaseException as ex:  # se informa al juntar los hilos
+                errores.append((nombre, ex))
+        h = threading.Thread(target=correr, name=nombre)
+        h.start()
+        return h
+
+    hilos = [en_hilo("fts", lado_fts), en_hilo("base", lado_base)]
+
+    # Mientras tanto, los agregados en DuckDB (en el hilo principal).
     log("Agregados (DuckDB)...")
     t0 = time.monotonic()
     tipos = [t for t, si in ((agregados.TIPO_EMPRESA, args.empresas), (agregados.TIPO_PERSONA, args.personas)) if si]
@@ -468,51 +521,35 @@ def build_completo(args, output, runs, log, bd):
     filas_personas = _personas(db) if args.personas else []
     log(f"  personas ({len(filas_personas):,}): {time.monotonic() - t0:.0f} s")
 
-    # FTS en su propio proceso y archivo (lee la base terminada).
-    hilo_sqlite.join()
-    fts_archivo = str(output.with_name(output.name + ".fts.sqlite"))
-    # Como programa aparte y no con fork: copiar este proceso con DuckDB
-    # corriendo en varios hilos puede dejar la copia trabada en un candado
-    # que algún hilo tenía tomado (pasó con la base completa).
-    t_fts = time.monotonic()
-    proc_fts = subprocess.Popen([sys.executable, "-c", "import sys, build_db; build_db.armar_fts(sys.argv[1], sys.argv[2])",
-                                 str(output), fts_archivo], cwd=Path(bd.__file__).resolve().parent)
-
-    # Escribir los agregados en un archivo aparte mientras el FTS lee la
-    # base, y juntarlos al final.
-    log("Escribiendo agregados...")
+    # Los agregados, en un archivo aparte (la base la está escribiendo el
+    # otro hilo); se juntan al final.
     t0 = time.monotonic()
-    agg_path = output.with_name(output.name + ".agregados.sqlite")
-    agg_path.unlink(missing_ok=True)
     agg = sqlite3.connect(agg_path)
     agg.execute("PRAGMA journal_mode=OFF")
     agg.execute("PRAGMA synchronous=OFF")
-    db.execute(f"ATTACH '{agg_path}' AS s (TYPE sqlite)")
+    db.execute(f"ATTACH '{agg_path}' AS sa (TYPE sqlite)")
+    escribir = lambda tabla, ddl, consulta, orden=None: _escribir(db, agg, tabla, ddl, consulta, orden, "sa")
     if tipos:
-        _escribir(db, agg, "partes_nombres", SQL_PARTES_DDL["partes_nombres"], "SELECT * FROM partes_nombres", "id")
-        _escribir(db, agg, "partes_avisos", SQL_PARTES_DDL["partes_avisos"], "SELECT * FROM partes_avisos",
-                  "nombre_id, entrada_id, rol")
+        escribir("partes_nombres", SQL_PARTES_DDL["partes_nombres"], "SELECT * FROM partes_nombres", "id")
+        escribir("partes_avisos", SQL_PARTES_DDL["partes_avisos"], "SELECT * FROM partes_avisos",
+                 "nombre_id, entrada_id, rol")
     if args.empresas:
-        _escribir(db, agg, "entradas_partes", SQL_PARTES_DDL["entradas_partes"], "SELECT * FROM entradas_partes",
-                  "entrada_id")
-    _escribir(db, agg, "resumen_anio_tipo", "CREATE TABLE resumen_anio_tipo (anio INT, tipo TEXT, n INT)",
-              "SELECT * FROM resumen_anio_tipo")
-    _escribir(db, agg, "resumen_juzgado", "CREATE TABLE resumen_juzgado (juzgado TEXT, n INT)",
-              "SELECT * FROM resumen_juzgado")
+        escribir("entradas_partes", SQL_PARTES_DDL["entradas_partes"], "SELECT * FROM entradas_partes", "entrada_id")
+    escribir("resumen_anio_tipo", "CREATE TABLE resumen_anio_tipo (anio INT, tipo TEXT, n INT)",
+             "SELECT * FROM resumen_anio_tipo")
+    escribir("resumen_juzgado", "CREATE TABLE resumen_juzgado (juzgado TEXT, n INT)", "SELECT * FROM resumen_juzgado")
     if args.estadisticas:
         for t in ("organo_mes", "ponencia_mes", "tipo_mes", "tipo_organo", "duracion_expedientes",
                   "organo_duracion", "tipo_duracion"):
-            _escribir(db, agg, t, _ddl(agregados.SQL_ESTADISTICAS_TABLAS, t), f"SELECT * FROM {t}",
-                      "organo, expediente" if t == "duracion_expedientes" else None)
+            escribir(t, _ddl(agregados.SQL_ESTADISTICAS_TABLAS, t), f"SELECT * FROM {t}",
+                     "organo, expediente" if t == "duracion_expedientes" else None)
     if args.empresas:
-        _escribir(db, agg, "empresas", _ddl(agregados.SQL_EMPRESAS_TABLAS, "empresas"),
-                  "SELECT * FROM empresas_final", "id")
-        _escribir(db, agg, "entradas_empresas", _ddl(agregados.SQL_EMPRESAS_TABLAS, "entradas_empresas"),
-                  "SELECT * FROM entradas_empresas", "entrada_id")
+        escribir("empresas", _ddl(agregados.SQL_EMPRESAS_TABLAS, "empresas"), "SELECT * FROM empresas_final", "id")
+        escribir("entradas_empresas", _ddl(agregados.SQL_EMPRESAS_TABLAS, "entradas_empresas"),
+                 "SELECT * FROM entradas_empresas", "entrada_id")
         for t in ("empresas_tipos", "empresas_anios", "empresas_meses", "empresas_expedientes", "tipo_empresa"):
-            _escribir(db, agg, t, _ddl(agregados.SQL_EMPRESAS_TABLAS, t), f"SELECT * FROM {t}")
-    db.execute("DETACH s")
-    db.close()
+            escribir(t, _ddl(agregados.SQL_EMPRESAS_TABLAS, t), f"SELECT * FROM {t}")
+    db.execute("DETACH sa")
     if args.personas:
         agg.executescript("""
             CREATE TABLE personas (
@@ -537,11 +574,13 @@ def build_completo(args, output, runs, log, bd):
         """)
     agg.commit()
     agg.close()
-    log(f"  escritos: {time.monotonic() - t0:.0f} s")
+    log(f"  agregados escritos: {time.monotonic() - t0:.0f} s")
 
-    if proc_fts.wait():
-        raise RuntimeError(f"la etapa FTS terminó con código {proc_fts.returncode}")
-    log(f"  fts: {time.monotonic() - t_fts:.0f} s")
+    for h in hilos:
+        h.join()
+    db.close()
+    if errores:
+        raise RuntimeError("; ".join(f"{n}: {e!r}" for n, e in errores)) from errores[0][1]
 
     conn = sqlite3.connect(output)
     conn.execute("PRAGMA synchronous=OFF")
