@@ -433,24 +433,26 @@ def build_completo(args, output, runs, log, bd):
     # Tres trabajos a la vez, cada uno escribe su propio archivo (SQLite
     # admite un solo escritor por archivo). Cada hilo usa su propia conexión
     # a DuckDB (cursor) y su propio alias para el archivo que escribe.
-    db.execute("CREATE OR REPLACE TABLE elegidos AS SELECT DISTINCT rango, boletin_id FROM e")
+    # Corrimiento entre el número de fila del Parquet y el id del aviso, por
+    # tramo de filas elegidas: id = fila + corrimiento. Es una tabla chica
+    # (un renglón por tramo de boletines elegidos de cada corrida).
+    db.execute("""
+        CREATE OR REPLACE TABLE corrimientos AS
+            SELECT rango, MIN(fila) AS desde, MAX(fila) AS hasta, id - fila AS corrimiento
+            FROM e GROUP BY rango, id - fila
+    """)
 
     def escribir_avisos(c, alias, columnas):
-        """Los avisos elegidos, corrida por corrida y en el orden del
-        Parquet (el de las filas), sin id: SQLite los numera 1, 2, 3... en
-        ese orden, que es el mismo de e.id (row_number por corrida y fila).
-        Así no hay que cruzar con e ni ordenar: se lee en streaming."""
-        c.execute("SET SESSION preserve_insertion_order = true")  # solo en este cursor
+        """Los avisos elegidos de cada corrida con su id explícito (fila +
+        corrimiento de su tramo), sin cruzar con e ni ordenar. El id no
+        depende del orden en que DuckDB lea el Parquet: con los archivos
+        grandes lo lee en paralelo y no lo conserva (pasó: un boletín quedó
+        repartido entre ids lejanos)."""
         for k, r in enumerate(rutas):
-            # Lista literal: un IN (SELECT ...) se vuelve un cruce, y los
-            # cruces no conservan el orden (pasó: avisos de un boletín
-            # mezclados con los de otro).
-            ids = [b for (b,) in c.execute(f"SELECT boletin_id FROM elegidos WHERE rango = {k} ORDER BY 1").fetchall()]
-            if not ids:
-                continue
-            c.execute(f"""INSERT INTO {alias}.entradas ({', '.join(columnas)})
-                          SELECT {', '.join(columnas)} FROM read_parquet('{r['filas']}')
-                          WHERE boletin_id IN ({', '.join(map(str, ids))})""")
+            c.execute(f"""INSERT INTO {alias}.entradas (id, {', '.join(columnas)})
+                          SELECT f.fila + t.corrimiento, {', '.join('f.' + x for x in columnas)}
+                          FROM read_parquet('{r['filas']}') f
+                          JOIN corrimientos t ON t.rango = {k} AND f.fila BETWEEN t.desde AND t.hasta""")
 
     def lado_fts():
         """El índice de búsqueda se arma desde un archivo chico con solo las
@@ -493,6 +495,17 @@ def build_completo(args, output, runs, log, bd):
         bd.cache_sqlite(s_)
         bd.create_indexes(s_, args.indices_server, args.web)
         bd.populate_boletin_ranges(s_, log)
+        # Control: los boletines con avisos no contiguos tienen que ser los
+        # mismos que espera la numeración de e (si la escritura hubiera
+        # desordenado ids, aparecerían más).
+        en_base = s_.execute("SELECT COUNT(*) FROM boletines WHERE n_entradas > 0 "
+                             "AND entrada_hasta - entrada_desde + 1 != n_entradas").fetchone()[0]
+        c = db.cursor()
+        esperados = c.execute("SELECT COUNT(*) FROM (SELECT boletin_id FROM e GROUP BY boletin_id "
+                              "HAVING MAX(id) - MIN(id) + 1 != COUNT(*))").fetchone()[0]
+        c.close()
+        if en_base != esperados:
+            raise RuntimeError(f"{en_base} boletines con avisos no contiguos en la base y {esperados} en la numeración")
         bd.populate_meta(s_)
         s_.commit()
         s_.close()
