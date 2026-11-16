@@ -16,6 +16,11 @@ COPY server/package.json server/package-lock.json ./
 RUN npm ci --omit=dev
 
 FROM node:24-bookworm-slim
+# Para la corrida diaria (scraper/diario.py, tarea programada de Coolify):
+# Python con requests y bs4 para bajar boletines, y pdftotext.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends python3 python3-requests python3-bs4 poppler-utils ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
 ENV NODE_ENV=production \
     PORT=3000 \
     HOST=0.0.0.0 \
@@ -26,6 +31,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY server/ ./
 # Novedades del sitio (/novedades), en la raíz del repo.
 COPY CHANGELOG.md ./
+COPY scraper/*.py ./scraper/
 # static-server.js escribe los .min.css/.min.js al lado de los originales.
 RUN chown -R node:node /app/static
 USER node

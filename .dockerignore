@@ -2,6 +2,8 @@
 *
 !server/
 !CHANGELOG.md
+# Scraper, para la corrida diaria (scraper/diario.py). Solo el código.
+!scraper/*.py
 server/node_modules
 server/test
 server/static/**/*.min.*

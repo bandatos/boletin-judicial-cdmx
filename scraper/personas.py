@@ -21,7 +21,13 @@ quedan juntas, y una misma persona publicada en otro orden ("Juan García
 Pérez") queda separada.
 """
 
-import re
+# PCRE2 (paquete pypcre) si está instalado: mismos resultados que `re` en la
+# detección de empresas y personas (verificado en 40 mil y 190 mil campos) y
+# alrededor de 1.5 veces más rápido. Sin el paquete, `re`.
+try:
+    import pcre as re
+except ImportError:
+    import re
 import unicodedata
 
 import empresas as emp
@@ -194,23 +200,55 @@ yuliana yulissa yunuen yuriana yuridia yuridiana yuriko yuritzi yvette yvonne za
 zenaida zoe zoraida zuleica zuleima zulema zuleyma zuriel zurisadai
 """.split())
 
+class _SinMarcas(dict):
+    """Tabla para str.translate: cada carácter, descompuesto (NFD) y sin sus
+    marcas diacríticas. Se arma a medida que aparecen caracteres nuevos.
+    Da lo mismo que normalizar el texto entero con NFD y filtrar las marcas
+    (la descomposición es carácter por carácter), pero sin recorrer el
+    texto en Python: antes era un tercio del tiempo de las personas."""
+
+    def __missing__(self, cp):
+        r = "".join(c for c in unicodedata.normalize("NFD", chr(cp)) if unicodedata.category(c) != "Mn")
+        self[cp] = r
+        return r
+
+
+_SIN_MARCAS = _SinMarcas()
+RE_NO_ALFANUM = re.compile(r"[^a-z0-9ñ ]+")
+RE_ESPACIOS = re.compile(r"\s+")
+
+
 def normalizar(nombre):
-    s = unicodedata.normalize("NFD", str(nombre or ""))
-    s = "".join(c for c in s if unicodedata.category(c) != "Mn").lower()
-    s = re.sub(r"[^a-z0-9ñ ]+", " ", s)
-    return re.sub(r"\s+", " ", s).strip()
+    s = str(nombre or "").translate(_SIN_MARCAS).lower()
+    s = RE_NO_ALFANUM.sub(" ", s)
+    return RE_ESPACIOS.sub(" ", s).strip()
 
 
 def limpiar(trozo):
-    """Saca del trozo lo que no es el nombre. Devuelve "" si no queda nada."""
-    t = emp.RE_Y_OTROS.sub("", trozo.strip())
-    t = RE_ACDO_INICIAL.sub("", t)
+    """Saca del trozo lo que no es el nombre. Devuelve "" si no queda nada.
+    Cada sustitución corre solo si el texto puede tenerla (chequeo barato
+    con str antes de la regex): el resultado es el mismo."""
+    t = trozo.strip()
+    bajo = t.lower()
+    if "otr" in bajo or "coag" in bajo:
+        t = emp.RE_Y_OTROS.sub("", t)
+    if t[:1] in _INICIO_ACDO or t[:3].lower() == "pon":
+        t = RE_ACDO_INICIAL.sub("", t)
     m = RE_FIN_NOMBRE.search(t)
     if m:
         t = t[:m.start()]
-    t = RE_SUCESION_PREVIA.sub("", t.strip())
-    t = RE_SUCESION.sub("", t)
-    return RE_Y_FINAL.sub("", t.strip(" ,.;:-"))
+    t = t.strip()
+    if "suc" in t.lower():
+        t = RE_SUCESION_PREVIA.sub("", t)
+        t = RE_SUCESION.sub("", t)
+    t = t.strip(" ,.;:-")
+    if t[-2:] in (" y", " e", "\ty", "\te") or t[-2:-1].isspace():
+        t = RE_Y_FINAL.sub("", t)
+    return t
+
+
+# Primer carácter con el que puede empezar lo que saca RE_ACDO_INICIAL.
+_INICIO_ACDO = set(" \t\n,.;:-0123456789")
 
 
 def es_nombre(t):

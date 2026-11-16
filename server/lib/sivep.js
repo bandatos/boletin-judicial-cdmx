@@ -6,7 +6,7 @@
 // URL sino los parámetros de la consulta (materia, juzgado, ejercicio,
 // trimestre) y el documentPath, que es estable. Al hacer clic se repite la
 // consulta (un POST xajax, sin captcha) y se redirige a la URL nueva.
-// Ver docs/sivep-versiones-publicas.md.
+// Ver private-docs/sivep-versiones-publicas.md.
 
 const http = require('http');
 

@@ -5,7 +5,7 @@ sentencia del boletín usando solo la metadata del SIVEP, sin OCR.
 
 La "fecha de emisión" del SIVEP sigue dos convenciones, mezcladas incluso
 dentro de un mismo juzgado y año (medido contra los emparejamientos con OCR
-de sivep_match.py, ver docs/sivep-versiones-publicas.md):
+de sivep_match.py, ver private-docs/sivep-versiones-publicas.md):
   - la fecha del boletín que publicó el aviso (la mayoría), o
   - la fecha de la sentencia, que es la del "ACUERDOS DEL ..." del aviso
     (fecha_acuerdo), publicado de 1 a 3 días hábiles después.

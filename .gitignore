@@ -8,3 +8,6 @@ build_db_*/
 cruces/*.gz
 cruces/*.csv
 *.log
+
+# Documentación interna, no se publica
+private-docs/

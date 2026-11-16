@@ -18,6 +18,7 @@ from collections import deque
 from multiprocessing import Pool
 import json
 import re
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -40,6 +41,16 @@ csv.field_size_limit(10**9)
 
 RE_ANIO = re.compile(r"/(\d{4})\b")
 
+
+
+# Memoria: en el server (7 GB, compartidos con el sitio) la corrida diaria
+# baja la caché de SQLite y corre las etapas de a una (ver diario.py).
+CACHE_MB = int(os.environ.get("BUILD_CACHE_MB", "2000"))
+ETAPAS_A_LA_VEZ = int(os.environ.get("BUILD_ETAPAS_A_LA_VEZ", "0")) or None
+
+
+def cache_sqlite(conn, fraccion=1.0):
+    conn.execute(f"PRAGMA cache_size=-{int(CACHE_MB * 1000 * fraccion)}")
 
 
 def hilos_sqlite(conn):
@@ -138,9 +149,9 @@ def create_indexes(conn, indices_server=False, web=False):
         # del server. El sitio estático no filtra por juzgado y este índice
         # es ~14% de la base que baja el navegador.
         conn.execute("CREATE INDEX IF NOT EXISTS idx_expediente ON entradas (juzgado, expediente)")
+    if not indices_server:
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_anio ON entradas (anio)")
     conn.executescript("""
-        CREATE INDEX IF NOT EXISTS idx_anio
-            ON entradas (anio);
 
         CREATE INDEX IF NOT EXISTS idx_tipo_juicio_norm
             ON entradas (tipo_juicio_norm);
@@ -156,6 +167,9 @@ def create_indexes(conn, indices_server=False, web=False):
             CREATE INDEX IF NOT EXISTS idx_expediente_num ON entradas (expediente);
             CREATE INDEX IF NOT EXISTS idx_anio_tipo ON entradas (anio, tipo_juicio_norm);
         """)
+        # idx_anio queda cubierto por idx_anio_tipo (empieza por anio): en la
+        # base del server sobra, y armarlo es otro recorrido de 35M filas.
+        conn.execute("DROP INDEX IF EXISTS idx_anio")
 
 
 def create_fts(conn):
@@ -290,9 +304,10 @@ BLOQUE = 16 * 1024 * 1024  # bytes de CSV por tarea (con 64 MB una corrida chica
 _W = {}
 
 
-def _init_worker(csv_path, col, loaded, en_rango, tmp_dir, con_empresas=False):
+def _init_worker(csv_path, col, loaded, en_rango, tmp_dir, con_empresas=False, con_personas=False,
+                 precalc=False):
     _W.update(path=csv_path, col=col, loaded=loaded, en_rango=en_rango, tmp_dir=tmp_dir,
-              con_empresas=con_empresas)
+              con_empresas=con_empresas, con_personas=con_personas, precalc=precalc)
 
 
 def _tipo_acuerdo_fila(row, i_tacdo, i_raw, i_actuacion, i_dem):
@@ -315,23 +330,78 @@ def _descripcion_fila(row, i_desc, i_raw, i_actuacion, i_dem):
     return descripcion(row[i_raw], row[i_dem] or None)
 
 
-def _parse_bloque(bounds):
-    """Lee y transforma las filas que EMPIEZAN dentro de [start, end) del CSV.
-    Cada fila ocupa exactamente una línea (ningún campo lleva saltos de
-    línea), así que se puede cortar el archivo en cualquier "\n"."""
-    start, end = bounds
-    col, loaded, en_rango = _W["col"], _W["loaded"], _W["en_rango"]
-    idx = [col.get(k) for k in FIELDS]
-    i_bol, i_tipo, i_exp = col["boletin_id"], col["tipo_juicio"], col["expediente"]
-    i_facdo = col.get("fecha_acuerdo")
-    # CSV anteriores a las columnas tipo_acuerdo y descripcion: se calculan
-    # desde raw_text.
-    i_tacdo, i_raw, i_act_t = col.get("tipo_acuerdo"), col.get("raw_text"), col.get("tipo_actuacion")
-    i_desc = col.get("descripcion")
-    i_cuad = col.get("cuaderno")
+# ── Cálculo por aviso, guardado por corrida (entradas.precalc.csv) ───────
+# Lo caro de la carga es el análisis en Python de cada aviso (nombres,
+# número, tipo de acuerdo, descripción, empresas, personas): ~1 ms por
+# aviso, casi 30 min para 35M. Da siempre lo mismo para los avisos viejos,
+# así que la primera vez que se procesa una corrida se guarda en
+# <corrida>/entradas.precalc.csv, con un sello de la versión del código. Los
+# builds siguientes lo leen mientras el sello coincida.
+PRECALC_COLS = COLS_CARGA + ["empresas", "partes", "personas", "fecha_iso"]
+PRECALC_ARCHIVO = "entradas.precalc.csv"
 
+
+def precalc_version():
+    """Sello del código que produce el precálculo: si cambia cualquiera de
+    estos módulos o la función derivar, el precálculo se rehace."""
+    import hashlib
+    import inspect
+    h = hashlib.sha256()
+    base = Path(__file__).resolve().parent
+    for nombre in ("acuerdos.py", "empresas.py", "personas.py", "normalize_tipo.py"):
+        h.update((base / nombre).read_bytes())
+    h.update(inspect.getsource(derivar).encode())
+    h.update(",".join(PRECALC_COLS).encode())
+    return h.hexdigest()[:16]
+
+
+def derivar(row, col):
+    """Todo lo que la carga calcula de un aviso del CSV del scraper.
+    Devuelve (valores en el orden de COLS_CARGA, empresas [(rol, núcleo,
+    nombre)], partes (otras_actora, otras_demandada) o None, personas
+    [(1|2, núcleo, nombre)], fecha ISO del boletín)."""
+    i_act, i_dem, i_exp, i_tipo = col["actora"], col["demandada"], col["expediente"], col["tipo_juicio"]
+    i_facdo = col.get("fecha_acuerdo")
+    i_tacdo, i_raw, i_act_t = col.get("tipo_acuerdo"), col.get("raw_text"), col.get("tipo_actuacion")
+    i_desc, i_cuad, i_fecha_raw = col.get("descripcion"), col.get("cuaderno"), col.get("fecha")
+    # Nombres que se tragaron el tipo de juicio o la descripción ("Guzmán
+    # García Lorena. Aud. 272-B ..."): se corta el nombre y lo que sobra
+    # sirve de descripción si no hay otra (acuerdos.separar_parte).
+    sobrante = None
+    row[i_act] = quitar_marca_publicacion(row[i_act])
+    if row[i_dem]:
+        row[i_dem], sobrante = separar_parte(row[i_dem])
+    elif row[i_act]:
+        row[i_act], sobrante = separar_parte(row[i_act])
+    m_anio = RE_ANIO.search(row[i_exp])
+    emp_a, otras_a = emp.partes(row[i_act])
+    emp_d, otras_d = emp.partes(row[i_dem])
+    empresas = [(rol, nucleo, nombre) for rol, lista in (("actora", emp_a), ("demandada", emp_d))
+                for nucleo, nombre in lista]
+    partes = (int(otras_a), int(otras_d)) if (emp_a or emp_d) else None
+    personas = [(k, n, nombre) for k, campo in ((1, row[i_act]), (2, row[i_dem]))
+                for n, nombre in set(pers.personas(campo))]
+    valores = [(row[i] or None) if i is not None else None for i in (col.get(k) for k in FIELDS)]
+    # CSV anteriores a la columna cuaderno: el número viene con el resto
+    # pegado y se separa acá.
+    if i_cuad is not None:
+        cuaderno = row[i_cuad] or None
+    else:
+        valores[I_EXPEDIENTE], cuaderno = separar_expediente(valores[I_EXPEDIENTE])
+    valores = tuple(valores) + (
+        normalize_tipo(row[i_tipo] or None), int(m_anio.group(1)) if m_anio else None,
+        fecha_acuerdo_iso(row[i_facdo]) if i_facdo is not None else None,
+        _tipo_acuerdo_fila(row, i_tacdo, i_raw, i_act_t, i_dem),
+        _descripcion_fila(row, i_desc, i_raw, i_act_t, i_dem) or descripcion_de_sobrante(sobrante),
+        cuaderno,
+    )
+    fecha = fecha_iso(row[i_fecha_raw]) if i_fecha_raw is not None else None
+    return valores, empresas, partes, personas, fecha
+
+
+def _leer_lineas(path, start, end):
     lineas = []
-    with open(_W["path"], "rb") as f:
+    with open(path, "rb") as f:
         f.seek(start - 1)
         f.readline()  # termina la línea que empezó antes de `start`
         while f.tell() < end:
@@ -339,6 +409,23 @@ def _parse_bloque(bounds):
             if not linea:
                 break
             lineas.append(linea.decode("utf-8"))
+    return lineas
+
+
+def _parse_bloque(bounds):
+    """Lee y transforma las filas que EMPIEZAN dentro de [start, end) del CSV.
+    Cada fila ocupa exactamente una línea (ningún campo lleva saltos de
+    línea), así que se puede cortar el archivo en cualquier "\n".
+
+    Con _W["precalc"] el archivo es el precálculo de la corrida y no se
+    calcula nada. Si no, se calcula cada aviso (también los que se saltean,
+    para que el precálculo quede completo) y el bloque se escribe además en
+    una parte del precálculo."""
+    start, end = bounds
+    col, loaded, en_rango = _W["col"], _W["loaded"], _W["en_rango"]
+    usar_precalc = _W.get("precalc", False)
+    i_bol = col["boletin_id"]
+    lineas = _leer_lineas(_W["path"], start, end)
 
     filas, ids, salteadas = [], set(), 0
     # Con --empresas: (fila, rol, núcleo, nombre) por cada empresa detectada,
@@ -346,50 +433,46 @@ def _parse_bloque(bounds):
     # del lado de la actora o la demandada quedan partes que no son empresa
     # (personas). Solo el indicador: los nombres de personas no se guardan.
     filas_empresas, filas_partes = [], []
-    i_act, i_dem = col["actora"], col["demandada"]
+    # Con --personas: las personas del bloque, ya agregadas por (núcleo,
+    # nombre). Así no hay que releer los 35M avisos de la base después.
+    acum_personas = {}
+    precalc = []
+    n_cols = len(COLS_CARGA)
     for row in csv.reader(lineas):
         boletin_id = int(row[i_bol])
-        if en_rango is not None and boletin_id not in en_rango:
-            continue
-        if boletin_id in loaded:
-            salteadas += 1
-            continue
-        ids.add(boletin_id)
-        # Nombres que se tragaron el tipo de juicio o la descripción ("Guzmán
-        # García Lorena. Aud. 272-B ..."): se corta el nombre y lo que sobra
-        # sirve de descripción si no hay otra (acuerdos.separar_parte). En
-        # CSV ya re-parseados no cambia nada.
-        sobrante = None
-        row[i_act] = quitar_marca_publicacion(row[i_act])
-        if row[i_dem]:
-            row[i_dem], sobrante = separar_parte(row[i_dem])
-        elif row[i_act]:
-            row[i_act], sobrante = separar_parte(row[i_act])
-        m_anio = RE_ANIO.search(row[i_exp])
-        if _W["con_empresas"]:
-            fila = len(filas)
-            emp_a, otras_a = emp.partes(row[i_act])
-            emp_d, otras_d = emp.partes(row[i_dem])
-            for rol, lista in (("actora", emp_a), ("demandada", emp_d)):
-                for nucleo, nombre in lista:
-                    filas_empresas.append((fila, rol, nucleo, nombre))
-            if emp_a or emp_d:
-                filas_partes.append((fila, int(otras_a), int(otras_d)))
-        valores = [(row[i] or None) if i is not None else None for i in idx]
-        # CSV anteriores a la columna cuaderno: el número viene con el resto
-        # pegado y se separa acá.
-        if i_cuad is not None:
-            cuaderno = row[i_cuad] or None
+        if usar_precalc:
+            if (en_rango is not None and boletin_id not in en_rango) or boletin_id in loaded:
+                salteadas += boletin_id in loaded
+                continue
+            valores = tuple(v or None for v in row[:n_cols])
+            empresas = json.loads(row[n_cols])
+            partes = json.loads(row[n_cols + 1])
+            personas = json.loads(row[n_cols + 2])
+            fecha = row[n_cols + 3] or None
         else:
-            valores[I_EXPEDIENTE], cuaderno = separar_expediente(valores[I_EXPEDIENTE])
-        filas.append(
-            tuple(valores)
-            + (normalize_tipo(row[i_tipo] or None), int(m_anio.group(1)) if m_anio else None,
-               fecha_acuerdo_iso(row[i_facdo]) if i_facdo is not None else None,
-               _tipo_acuerdo_fila(row, i_tacdo, i_raw, i_act_t, i_dem),
-               _descripcion_fila(row, i_desc, i_raw, i_act_t, i_dem) or descripcion_de_sobrante(sobrante),
-               cuaderno)
-        )
+            valores, empresas, partes, personas, fecha = derivar(row, col)
+            precalc.append(valores + (json.dumps(empresas, ensure_ascii=False), json.dumps(partes),
+                                      json.dumps(personas, ensure_ascii=False), fecha))
+            if (en_rango is not None and boletin_id not in en_rango) or boletin_id in loaded:
+                salteadas += boletin_id in loaded
+                continue
+        ids.add(boletin_id)
+        fila = len(filas)
+        if _W["con_empresas"]:
+            for rol, nucleo, nombre in empresas:
+                filas_empresas.append((fila, rol, nucleo, nombre))
+            if partes:
+                filas_partes.append((fila, partes[0], partes[1]))
+        if _W["con_personas"]:
+            for k, n, nombre in {(k, n, nombre) for k, n, nombre in personas}:
+                a = acum_personas.get((n, nombre))
+                if a is None:
+                    a = acum_personas[(n, nombre)] = [0, 0, 0, fecha, fecha]
+                a[0] += 1
+                a[k] += 1
+                a[3] = min(filter(None, (a[3], fecha)), default=None)
+                a[4] = max(filter(None, (a[4], fecha)), default=None)
+        filas.append(valores)
 
     # El bloque se escribe en un SQLite propio en vez de devolver las filas:
     # pasarlas serializadas al proceso principal costaba casi tanto como
@@ -405,13 +488,22 @@ def _parse_bloque(bounds):
         c.executemany("INSERT INTO filas_empresas VALUES (?, ?, ?, ?)", filas_empresas)
         c.execute("CREATE TABLE filas_partes (fila, otras_actora, otras_demandada)")
         c.executemany("INSERT INTO filas_partes VALUES (?, ?, ?)", filas_partes)
+    if _W["con_personas"]:
+        c.execute("CREATE TABLE filas_personas (nucleo, nombre, n, act, dem, desde, hasta)")
+        c.executemany("INSERT INTO filas_personas VALUES (?, ?, ?, ?, ?, ?, ?)",
+                      [(n, nombre, *a) for (n, nombre), a in acum_personas.items()])
     c.commit()
     c.close()
-    return shard, len(filas), ids, salteadas
+    parte = None
+    if precalc:
+        parte = os.path.join(_W["tmp_dir"], f"precalc_{start}.csv")
+        with open(parte, "w", newline="") as f:
+            csv.writer(f).writerows(precalc)
+    return shard, len(filas), ids, salteadas, parte
 
 
 def load_entradas(conn, csv_path, loaded, log, en_rango=None, workers=None, tmp_dir=None,
-                  con_empresas=False):
+                  con_empresas=False, con_personas=False):
     """Carga las entradas de un run salteando los boletines que ya cargó un
     run anterior (`loaded`, se actualiza). Los runs se pisan entre sí (el
     histórico repite boletines de los runs de 2026) y sin esto cada boletín
@@ -434,11 +526,21 @@ def load_entradas(conn, csv_path, loaded, log, en_rango=None, workers=None, tmp_
             log("    sin boletines nuevos, se saltea")
             return 0
 
-    with open(csv_path, newline="") as f:
+    # Precálculo de la corrida, si existe y es de esta versión del código.
+    precalc_path = csv_path.parent / PRECALC_ARCHIVO
+    sello_path = csv_path.parent / (PRECALC_ARCHIVO + ".version")
+    version = precalc_version()
+    usar_precalc = (precalc_path.exists() and sello_path.exists()
+                    and sello_path.read_text().strip() == version
+                    and precalc_path.stat().st_mtime >= csv_path.stat().st_mtime)
+    origen = precalc_path if usar_precalc else csv_path
+    log(f"    {'precálculo guardado' if usar_precalc else 'calculando (y guardando el precálculo)'}")
+
+    with open(origen, newline="") as f:
         col = {name: i for i, name in enumerate(next(csv.reader(f)))}
-    with open(csv_path, "rb") as f:
+    with open(origen, "rb") as f:
         inicio_datos = len(f.readline())
-    total_bytes = csv_path.stat().st_size
+    total_bytes = origen.stat().st_size
     bloques = [(s, min(s + BLOQUE, total_bytes)) for s in range(inicio_datos, total_bytes, BLOQUE)]
 
     workers = workers or max(1, (os.cpu_count() or 2) - 1)
@@ -448,14 +550,18 @@ def load_entradas(conn, csv_path, loaded, log, en_rango=None, workers=None, tmp_
 
     with tempfile.TemporaryDirectory(prefix="build_db_", dir=tmp_dir) as tmp, \
             Pool(workers, initializer=_init_worker,
-                 initargs=(str(csv_path), col, frozenset(loaded), en_rango, tmp, con_empresas)) as pool:
+                 initargs=(str(origen), col, frozenset(loaded), en_rango, tmp, con_empresas,
+                           con_personas, usar_precalc)) as pool:
         # Como mucho 2 bloques pendientes por proceso, para no llenar el
         # disco temporal si los procesos van más rápido que la copia.
         it = iter(bloques)
         pendientes = deque(pool.apply_async(_parse_bloque, (b,))
                            for b in itertools.islice(it, 2 * workers))
+        partes_precalc = []
         while pendientes:
-            shard, n, ids, salteadas = pendientes.popleft().get()
+            shard, n, ids, salteadas, parte = pendientes.popleft().get()
+            if parte:
+                partes_precalc.append(parte)
             siguiente = next(it, None)
             if siguiente:
                 pendientes.append(pool.apply_async(_parse_bloque, (siguiente,)))
@@ -469,12 +575,26 @@ def load_entradas(conn, csv_path, loaded, log, en_rango=None, workers=None, tmp_
                                  "FROM bloque.filas_empresas", (base,))
                     conn.execute("INSERT INTO entradas_partes SELECT ? + fila + 1, otras_actora, otras_demandada "
                                  "FROM bloque.filas_partes", (base,))
+                if con_personas:
+                    conn.execute("INSERT INTO personas_stage SELECT * FROM bloque.filas_personas")
                 conn.commit()
                 conn.execute("DETACH DATABASE bloque")
             os.remove(shard)
             new_ids.update(ids)
             counts["inserted"] += n
             counts["skipped"] += salteadas
+
+        # Juntar las partes del precálculo en el orden del CSV y sellarlo.
+        if not usar_precalc and partes_precalc:
+            tmp_precalc = precalc_path.with_suffix(".csv.tmp")
+            with open(tmp_precalc, "w", newline="") as out:
+                csv.writer(out).writerow(PRECALC_COLS)
+                for parte in partes_precalc:
+                    with open(parte) as f:
+                        shutil.copyfileobj(f, out)
+                    os.remove(parte)
+            os.replace(tmp_precalc, precalc_path)
+            sello_path.write_text(version + "\n")
 
     loaded |= new_ids
     if counts["skipped"]:
@@ -538,7 +658,6 @@ def build_empresas(conn, log):
         INSERT INTO entradas_empresas
             SELECT DISTINCT e.id, s.entrada_id, s.rol
             FROM emp_stage s JOIN empresas e ON e.nucleo = s.nucleo;
-        DROP TABLE emp_stage;
         DROP TABLE nombres;
         CREATE INDEX idx_ee_empresa ON entradas_empresas (empresa_id, entrada_id);
         CREATE INDEX idx_ee_entrada ON entradas_empresas (entrada_id);
@@ -559,16 +678,22 @@ def build_empresas(conn, log):
         );
         INSERT INTO empresas_fts(rowid, nombre) SELECT id, nombre FROM empresas;
     """)
+    # La tabla intermedia se borra solo si está en esta base (en el build en
+    # paralelo está en el archivo .staging, adjunto de solo lectura).
+    if conn.execute("SELECT 1 FROM main.sqlite_master WHERE name = 'emp_stage'").fetchone():
+        conn.execute("DROP TABLE main.emp_stage")
     log(f"  {len(filas)} empresas con al menos {MIN_AVISOS_EMPRESA} avisos")
     build_agregados_empresas(conn, log)
 
 
+# "main.": en las etapas en paralelo la base va adjunta y ya puede tener
+# estas tablas (build incremental); sin esquema, el DROP iría a ella.
 SQL_AGREGADOS_EMPRESAS = """
     -- Lo que muestra /empresas/:slug, precalculado: con cientos de miles de
     -- avisos por empresa (bancos) agregarlo en cada visita tardaba ~35 s.
-    DROP TABLE IF EXISTS empresas_tipos;
-    DROP TABLE IF EXISTS empresas_anios;
-    DROP TABLE IF EXISTS empresas_expedientes;
+    DROP TABLE IF EXISTS main.empresas_tipos;
+    DROP TABLE IF EXISTS main.empresas_anios;
+    DROP TABLE IF EXISTS main.empresas_expedientes;
     CREATE TABLE empresas_tipos AS
         SELECT ee.empresa_id, COALESCE(en.tipo_juicio_norm, 'Sin tipo reconocido') AS tipo, COUNT(*) AS n
         FROM entradas_empresas ee JOIN entradas en ON en.id = ee.entrada_id
@@ -583,7 +708,7 @@ SQL_AGREGADOS_EMPRESAS = """
         -- entradas (año del expediente) y SQLite agruparía por esa.
         GROUP BY ee.empresa_id, substr(b.fecha_iso, 1, 4);
     CREATE INDEX idx_empresas_anios ON empresas_anios (empresa_id, anio);
-    DROP TABLE IF EXISTS empresas_meses;
+    DROP TABLE IF EXISTS main.empresas_meses;
     CREATE TABLE empresas_meses AS
         SELECT ee.empresa_id, substr(b.fecha_iso, 1, 7) AS mes, COUNT(*) AS n
         FROM entradas_empresas ee
@@ -611,12 +736,12 @@ SQL_AGREGADOS_EMPRESAS = """
 # de publicación: los gráficos se ven por año o por mes. Mide lo que publica
 # el boletín, no la carga de trabajo (no hay ingresos ni personal).
 SQL_ESTADISTICAS = """
-    DROP TABLE IF EXISTS organo_mes;
-    DROP TABLE IF EXISTS ponencia_mes;
-    DROP TABLE IF EXISTS organo_duracion;
-    DROP TABLE IF EXISTS tipo_duracion;
-    DROP TABLE IF EXISTS tipo_mes;
-    DROP TABLE IF EXISTS tipo_organo;
+    DROP TABLE IF EXISTS main.organo_mes;
+    DROP TABLE IF EXISTS main.ponencia_mes;
+    DROP TABLE IF EXISTS main.organo_duracion;
+    DROP TABLE IF EXISTS main.tipo_duracion;
+    DROP TABLE IF EXISTS main.tipo_mes;
+    DROP TABLE IF EXISTS main.tipo_organo;
 
     -- Demora de publicación: días entre la fecha del acuerdo ("ACUERDOS
     -- DEL ...") y la del boletín. Fuera de 0 a 60 días se descarta: son
@@ -716,7 +841,7 @@ SQL_ESTADISTICAS = """
 
 # Con las tablas de empresas: quiénes litigan cada tipo de juicio.
 SQL_ESTADISTICAS_EMPRESAS = """
-    DROP TABLE IF EXISTS tipo_empresa;
+    DROP TABLE IF EXISTS main.tipo_empresa;
     CREATE TABLE tipo_empresa AS
         SELECT en.tipo_juicio_norm AS tipo, ee.empresa_id, ee.rol, COUNT(*) AS avisos
         FROM entradas_empresas ee JOIN entradas en ON en.id = ee.entrada_id
@@ -742,7 +867,7 @@ def build_estadisticas(conn, log):
 
 def build_sivep(conn, log, sivep_path):
     """Enlaces a la versión pública de la sentencia en el SIVEP del PJCDMX
-    (scraper/sivep_enlace.py, ver docs/sivep-versiones-publicas.md). Solo
+    (scraper/sivep_enlace.py, ver private-docs/sivep-versiones-publicas.md). Solo
     los emparejamientos únicos. El enlace se guarda en sivep.sqlite con
     claves estables (órgano, expediente, fecha del boletín) porque los id
     de entradas cambian en cada build: acá se resuelven contra esta base.
@@ -824,7 +949,7 @@ def recalcular_empresas(output, log, workers=None):
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=OFF")
     hilos_sqlite(conn)
-    conn.execute("PRAGMA cache_size=-2000000")
+    cache_sqlite(conn)
     conn.executescript("""
         DROP TABLE IF EXISTS empresas_fts;
         DROP TABLE IF EXISTS entradas_empresas;
@@ -889,7 +1014,7 @@ def _personas_de_rango(bounds):
     return [(n, nombre, *a) for (n, nombre), a in acum.items()]
 
 
-def build_personas(output, log, workers=None):
+def build_personas(output, log, workers=None, desde_carga=False):
     """Tablas personas / personas_fts para /personas del server (noindex).
 
     A diferencia de empresas no hay tabla de unión aviso-persona (serían
@@ -901,28 +1026,40 @@ def build_personas(output, log, workers=None):
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=OFF")
     hilos_sqlite(conn)
-    conn.execute("PRAGMA cache_size=-2000000")
-    conn.executescript("""
-        DROP TABLE IF EXISTS personas_fts;
-        DROP TABLE IF EXISTS personas;
-        DROP TABLE IF EXISTS personas_stage;
-        CREATE TABLE personas_stage (nucleo TEXT, nombre TEXT, n INTEGER, act INTEGER, dem INTEGER,
-                                     desde TEXT, hasta TEXT);
-    """)
-    max_id = conn.execute("SELECT MAX(id) FROM entradas").fetchone()[0] or 0
-    paso = 200_000
-    rangos = [(a, min(a + paso - 1, max_id)) for a in range(1, max_id + 1, paso)]
-    workers = workers or max(1, (os.cpu_count() or 2) - 1)
-    log(f"Personas de {max_id:,} avisos en {len(rangos)} rangos...")
-    hechos = 0
-    with Pool(workers, initializer=_init_personas_worker, initargs=(str(output),)) as pool:
-        for filas in pool.imap_unordered(_personas_de_rango, rangos):
-            conn.executemany("INSERT INTO personas_stage VALUES (?, ?, ?, ?, ?, ?, ?)", filas)
-            conn.commit()
-            hechos += 1
-            if hechos % 20 == 0:
-                log(f"  {hechos}/{len(rangos)} rangos")
+    cache_sqlite(conn)
+    if desde_carga:
+        # Build completo con --personas: la tabla intermedia ya se llenó
+        # durante la carga.
+        conn.executescript("DROP TABLE IF EXISTS personas_fts; DROP TABLE IF EXISTS personas;")
+        log("Personas (juntadas durante la carga)...")
+    else:
+        conn.executescript("""
+            DROP TABLE IF EXISTS personas_fts;
+            DROP TABLE IF EXISTS personas;
+            DROP TABLE IF EXISTS personas_stage;
+            CREATE TABLE personas_stage (nucleo TEXT, nombre TEXT, n INTEGER, act INTEGER, dem INTEGER,
+                                         desde TEXT, hasta TEXT);
+        """)
+        max_id = conn.execute("SELECT MAX(id) FROM entradas").fetchone()[0] or 0
+        paso = 200_000
+        rangos = [(a, min(a + paso - 1, max_id)) for a in range(1, max_id + 1, paso)]
+        workers = workers or max(1, (os.cpu_count() or 2) - 1)
+        log(f"Personas de {max_id:,} avisos en {len(rangos)} rangos...")
+        hechos = 0
+        with Pool(workers, initializer=_init_personas_worker, initargs=(str(output),)) as pool:
+            for filas in pool.imap_unordered(_personas_de_rango, rangos):
+                conn.executemany("INSERT INTO personas_stage VALUES (?, ?, ?, ?, ?, ?, ?)", filas)
+                conn.commit()
+                hechos += 1
+                if hechos % 20 == 0:
+                    log(f"  {hechos}/{len(rangos)} rangos")
 
+    agrupar_personas(conn, log)
+
+
+def agrupar_personas(conn, log):
+    """Arma personas y personas_fts desde personas_stage (en esta base o en
+    un archivo adjunto)."""
     conn.executescript("""
         CREATE TABLE personas (
             id             INTEGER PRIMARY KEY,
@@ -939,8 +1076,9 @@ def build_personas(output, log, workers=None):
             SELECT nucleo, nombre, SUM(n) AS n, SUM(act) AS act, SUM(dem) AS dem,
                    MIN(desde) AS desde, MAX(hasta) AS hasta
             FROM personas_stage GROUP BY nucleo, nombre;
-        DROP TABLE personas_stage;
     """)
+    if conn.execute("SELECT 1 FROM main.sqlite_master WHERE name = 'personas_stage'").fetchone():
+        conn.execute("DROP TABLE main.personas_stage")
 
     def por_nucleo():
         actual, fila = None, None
@@ -1038,6 +1176,175 @@ def find_runs(data_dir, since=None, exclude=()):
     return [r for r in runs if r.parent.name not in exclude]
 
 
+# ── Etapas en paralelo ────────────────────────────────────────────────────
+def _etapa_paralela(trabajo):
+    """Corre una etapa en su propio archivo SQLite. La base (`b`) y las
+    tablas intermedias (`st`) se adjuntan de solo lectura: las consultas sin
+    esquema las encuentran ahí, y lo que se crea queda en el archivo de la
+    etapa."""
+    etapa, base, staging, archivo = trabajo
+    t0 = time.monotonic()
+    Path(archivo).unlink(missing_ok=True)
+    conn = sqlite3.connect(archivo)
+    conn.execute("PRAGMA journal_mode=OFF")
+    conn.execute("PRAGMA synchronous=OFF")
+    hilos_sqlite(conn)
+    cache_sqlite(conn, 0.5)
+    conn.execute("ATTACH DATABASE ? AS b", (f"file:{base}?mode=ro",))
+    if Path(staging).exists():
+        conn.execute("ATTACH DATABASE ? AS st", (f"file:{staging}?mode=ro",))
+    nada = lambda msg: None
+    if etapa == "fts":
+        # Sin contenido propio: en la base se define con content='entradas'
+        # y se le copian estas tablas internas (_data, _idx, _docsize).
+        conn.executescript("""
+            CREATE VIRTUAL TABLE entradas_fts USING fts5(
+                actora, demandada, tipo_juicio, content='', detail=none
+            );
+            INSERT INTO entradas_fts(rowid, actora, demandada, tipo_juicio)
+                SELECT id, actora, demandada, tipo_juicio FROM b.entradas;
+            INSERT INTO entradas_fts(entradas_fts) VALUES('optimize');
+        """)
+    elif etapa == "empresas":
+        build_empresas(conn, nada)
+    elif etapa == "estadisticas":
+        conn.execute("PRAGMA temp_store=FILE")
+        conn.executescript(SQL_ESTADISTICAS)
+    elif etapa == "personas":
+        agrupar_personas(conn, nada)
+        conn = sqlite3.connect(archivo)
+    conn.commit()
+    conn.close()
+    return etapa, time.monotonic() - t0
+
+
+# Tablas internas de FTS5: se copian con su tabla virtual, no por separado.
+RE_SOMBRA_FTS = re.compile(r"_(?:data|idx|docsize|config|content)$")
+
+
+def _juntar(conn, etapa, archivo, log):
+    """Copia a la base lo que armó una etapa en paralelo."""
+    t0 = time.monotonic()
+    conn.execute("ATTACH DATABASE ? AS w", (archivo,))
+    objetos = conn.execute(
+        "SELECT type, name, tbl_name, sql FROM w.sqlite_master WHERE sql IS NOT NULL ORDER BY rowid").fetchall()
+    virtuales = {n for t, n, _, sql in objetos if t == "table" and sql.upper().startswith("CREATE VIRTUAL")}
+    sombras = {n for t, n, _, _ in objetos for v in virtuales if t == "table" and n.startswith(v + "_")}
+    for tipo, nombre, _, sql in objetos:
+        if tipo == "table" and nombre not in virtuales and nombre not in sombras:
+            conn.execute(f"DROP TABLE IF EXISTS main.{nombre}")
+            conn.execute(sql)
+            conn.execute(f"INSERT INTO main.{nombre} SELECT * FROM w.{nombre}")
+    for tipo, nombre, tabla, sql in objetos:
+        if tipo == "index" and tabla not in virtuales and tabla not in sombras:
+            conn.execute(sql)
+    if etapa == "fts":
+        create_fts(conn)
+        for sufijo in ("data", "idx", "docsize"):
+            conn.execute(f"DELETE FROM main.entradas_fts_{sufijo}")
+            conn.execute(f"INSERT INTO main.entradas_fts_{sufijo} SELECT * FROM w.entradas_fts_{sufijo}")
+    else:
+        # empresas_fts / personas_fts apuntan a su tabla de contenido: se
+        # definen en la base y se rearman (son chicas).
+        for tipo, nombre, _, sql in objetos:
+            if nombre in virtuales:
+                conn.execute(f"DROP TABLE IF EXISTS main.{nombre}")
+                conn.execute(sql)
+                conn.execute(f"INSERT INTO main.{nombre}({nombre}) VALUES('rebuild')")
+    conn.commit()
+    conn.execute("DETACH DATABASE w")
+    log(f"  {etapa} copiada a la base: {time.monotonic() - t0:.0f} s")
+
+
+# ── Build incremental ─────────────────────────────────────────────────────
+def build_incremental(args, output, runs, log):
+    """Suma a una base ya armada solo los boletines que no tiene.
+
+    Las entradas nuevas se insertan con los índices ya creados y se suman a
+    la búsqueda por texto. Empresas, personas y estadísticas se rearman
+    enteras desde el estado (<base>.estado.sqlite: todas las detecciones de
+    empresas y personas, también las que aparecen una sola vez), así el
+    resultado es el mismo que el de un build completo. Corren en paralelo y
+    son lo que más tarda."""
+    estado = output.with_name(output.name + ".estado.sqlite")
+    if not output.exists() or not estado.exists():
+        sys.exit(f"--incremental necesita {output} y {estado}: correr antes un build completo con este código.")
+    log(f"Sumando a {output}...")
+    conn = sqlite3.connect(output)
+    conn.execute("PRAGMA synchronous=OFF")
+    hilos_sqlite(conn)
+    cache_sqlite(conn)
+    conn.execute("PRAGMA temp_store=MEMORY")
+    max_id_antes = conn.execute("SELECT COALESCE(MAX(id), 0) FROM entradas").fetchone()[0]
+    loaded = {r[0] for r in conn.execute("SELECT id FROM boletines WHERE n_entradas > 0")}
+    runs = list(reversed(runs))
+    for csv_path in runs:
+        index_path = csv_path.parent / "index.json"
+        if index_path.exists():
+            load_index(conn, index_path)
+    conn.execute("ATTACH DATABASE ? AS st", (str(estado),))
+    total = 0
+    for csv_path in runs:
+        log(f"  {csv_path.parent.name}...")
+        n = load_entradas(conn, csv_path, loaded, log, None, workers=args.workers, tmp_dir=str(output.parent),
+                          con_empresas=args.empresas, con_personas=args.personas)
+        total += n
+        log(f"    {n} entradas nuevas")
+    conn.commit()
+    conn.execute("DETACH DATABASE st")
+    if not total:
+        log("No hay boletines nuevos.")
+        conn.close()
+        return
+
+    log("Rangos y búsqueda por texto de lo nuevo...")
+    conn.execute("""
+        UPDATE boletines SET n_entradas = agg.n, entrada_desde = agg.desde, entrada_hasta = agg.hasta
+        FROM (SELECT boletin_id, COUNT(*) AS n, MIN(id) AS desde, MAX(id) AS hasta
+              FROM entradas WHERE id > ? GROUP BY boletin_id) AS agg
+        WHERE agg.boletin_id = boletines.id
+    """, (max_id_antes,))
+    conn.execute("""
+        INSERT INTO entradas_fts(rowid, actora, demandada, tipo_juicio)
+        SELECT id, actora, demandada, tipo_juicio FROM entradas WHERE id > ?
+    """, (max_id_antes,))
+    populate_meta(conn)
+    conn.commit()
+    conn.close()
+
+    etapas = [e for e, si in (("empresas", args.empresas), ("estadisticas", args.estadisticas),
+                              ("personas", args.personas)) if si]
+    if etapas:
+        log(f"Etapas en paralelo: {', '.join(etapas)}...")
+        trabajos = [(e, str(output), str(estado), str(output.with_name(f"{output.name}.{e}.sqlite")))
+                    for e in etapas]
+        with Pool(min(len(trabajos), ETAPAS_A_LA_VEZ or len(trabajos))) as pool:
+            for etapa, segundos in pool.imap_unordered(_etapa_paralela, trabajos):
+                log(f"  {etapa}: {segundos:.0f} s")
+        conn = sqlite3.connect(output)
+        conn.execute("PRAGMA synchronous=OFF")
+        hilos_sqlite(conn)
+        cache_sqlite(conn)
+        for etapa, _, _, archivo in trabajos:
+            _juntar(conn, etapa, archivo, log)
+            os.remove(archivo)
+        if args.estadisticas and args.empresas:
+            conn.executescript(SQL_ESTADISTICAS_EMPRESAS)
+        if args.sivep:
+            build_sivep(conn, log, args.sivep)
+        conn.commit()
+        conn.close()
+    if args.empresas or args.personas:
+        build_vocabulario(output, log)
+    log(f"Total: {total} entradas nuevas.")
+    # Sin compactar: las tablas rearmadas dejan páginas libres que el
+    # próximo incremental reusa. Compactar 20 GB tarda ~7 min.
+    conn = sqlite3.connect(output)
+    libres, paginas = conn.execute("PRAGMA freelist_count").fetchone()[0], conn.execute("PRAGMA page_count").fetchone()[0]
+    conn.close()
+    log(f"Páginas libres: {100 * libres / max(paginas, 1):.0f} % (se compacta con VACUUM si hace falta).")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dir", help="Directorio raíz de datos (data/)")
@@ -1070,6 +1377,9 @@ def main():
     parser.add_argument("--sivep",
                         help="sivep.sqlite con la tabla enlaces (scraper/sivep_enlace.py): "
                              "agrega los enlaces a versiones públicas de sentencias")
+    parser.add_argument("--incremental", action="store_true",
+                        help="Sumar a una base ya armada (--output) solo los boletines que no tiene. Requiere "
+                             "el archivo <base>.estado.sqlite que deja el build completo")
     parser.add_argument("--solo-sivep", action="store_true",
                         help="Rearmar solo los enlaces al SIVEP de una base ya armada (--output, requiere --sivep)")
     parser.add_argument("--solo-vocabulario", action="store_true",
@@ -1091,7 +1401,7 @@ def main():
 
     if args.agregados_empresas:
         conn = sqlite3.connect(output)
-        conn.execute("PRAGMA cache_size=-2000000")
+        cache_sqlite(conn)
         conn.execute("PRAGMA temp_store=FILE")
         hilos_sqlite(conn)
         build_agregados_empresas(conn, log)
@@ -1108,7 +1418,7 @@ def main():
         return
     if args.solo_estadisticas:
         conn = sqlite3.connect(output)
-        conn.execute("PRAGMA cache_size=-2000000")
+        cache_sqlite(conn)
         hilos_sqlite(conn)
         build_estadisticas(conn, log)
         conn.close()
@@ -1137,6 +1447,11 @@ def main():
         sys.exit(1)
 
     log(f"Encontrados {len(runs)} runs en {data_dir}")
+    if args.incremental:
+        build_incremental(args, output, runs, log)
+        size_mb = output.stat().st_size / 1e6
+        log(f"\nListo: {output} ({size_mb:.1f} MB)")
+        return
     log(f"Generando {output}...")
 
     output.unlink(missing_ok=True)
@@ -1146,14 +1461,22 @@ def main():
     conn.execute("PRAGMA journal_mode=OFF")
     conn.execute("PRAGMA synchronous=OFF")
     hilos_sqlite(conn)
-    conn.execute("PRAGMA cache_size=-2000000")  # ~2 GB
+    cache_sqlite(conn)
     conn.execute("PRAGMA temp_store=MEMORY")
     conn.execute("PRAGMA locking_mode=EXCLUSIVE")
 
     create_schema(conn)
+    # Tablas intermedias (empresas y personas por aviso) en un archivo aparte:
+    # en la base final dejaban páginas vacías al borrarlas, y compactarla
+    # costaba ~7 min. Además, así las etapas en paralelo las leen sin tocar
+    # la base.
+    staging = output.with_name(output.name + ".staging.sqlite")
+    staging.unlink(missing_ok=True)
+    conn.execute("ATTACH DATABASE ? AS st", (str(staging),))
+    if args.empresas:
+        conn.execute("CREATE TABLE st.emp_stage (entrada_id INTEGER, rol TEXT, nucleo TEXT, nombre TEXT)")
     if args.empresas:
         conn.executescript("""
-            CREATE TABLE emp_stage (entrada_id INTEGER, rol TEXT, nucleo TEXT, nombre TEXT);
             -- Por aviso con alguna empresa: si del lado de la actora o de la
             -- demandada hay partes que no son empresa. Solo el indicador,
             -- para mostrar "persona física" sin el nombre.
@@ -1180,44 +1503,72 @@ def main():
 
     total = 0
     loaded = set()
+    if args.personas:
+        # Las personas se juntan durante la carga (ver _parse_bloque).
+        conn.execute("CREATE TABLE st.personas_stage (nucleo TEXT, nombre TEXT, n INTEGER, act INTEGER, "
+                     "dem INTEGER, desde TEXT, hasta TEXT)")
     for csv_path in runs:
         run_dir = csv_path.parent
         log(f"  {run_dir.name}...")
 
         n = load_entradas(conn, csv_path, loaded, log, en_rango, workers=args.workers, tmp_dir=str(output.parent),
-                          con_empresas=args.empresas)
+                          con_empresas=args.empresas, con_personas=args.personas)
         total += n
         log(f"    {n} entradas")
+
+    conn.commit()
+    conn.execute("DETACH DATABASE st")
 
     log("Índices...")
     create_indexes(conn, args.indices_server, args.web)
     populate_boletin_ranges(conn, log)
-    if args.empresas:
-        build_empresas(conn, log)
-    if args.estadisticas:
-        build_estadisticas(conn, log)
-    if args.sivep:
-        build_sivep(conn, log, args.sivep)
     populate_meta(conn)
     conn.commit()
-
-    log(f"\nTotal: {total} entradas. Construyendo índice FTS5...")
-    create_fts(conn)
-    populate_fts(conn)
-    conn.commit()
-
-    log("Optimizando...")
-    conn.execute("INSERT INTO entradas_fts(entradas_fts) VALUES('optimize')")
-    conn.commit()
-    if not args.sin_vacuum:
-        log("Compactando...")
-        conn.execute("VACUUM")
     conn.close()
+
+    # Etapas independientes en paralelo, cada una en su propio archivo: leen
+    # la base (que no se modifica mientras tanto) y escriben aparte. Después
+    # se copian a la base.
+    etapas = ["fts"]
+    if args.empresas:
+        etapas.append("empresas")
+    if args.estadisticas:
+        etapas.append("estadisticas")
     if args.personas:
-        # Después de cerrar: los procesos leen la base mientras se escribe.
-        build_personas(output, log, workers=args.workers)
+        etapas.append("personas")
+    log(f"Etapas en paralelo: {', '.join(etapas)}...")
+    trabajos = [(e, str(output), str(staging), str(output.with_name(f"{output.name}.{e}.sqlite"))) for e in etapas]
+    with Pool(min(len(trabajos), ETAPAS_A_LA_VEZ or len(trabajos))) as pool:
+        for etapa, segundos in pool.imap_unordered(_etapa_paralela, trabajos):
+            log(f"  {etapa}: {segundos:.0f} s")
+
+    conn = sqlite3.connect(output)
+    conn.execute("PRAGMA synchronous=OFF")
+    hilos_sqlite(conn)
+    cache_sqlite(conn)
+    for etapa, _, _, archivo in trabajos:
+        _juntar(conn, etapa, archivo, log)
+        os.remove(archivo)
+    # Las tablas intermedias quedan como estado para --incremental.
+    if staging.exists():
+        os.replace(staging, output.with_name(output.name + ".estado.sqlite"))
+    if args.estadisticas and args.empresas:
+        conn.executescript(SQL_ESTADISTICAS_EMPRESAS)
+    if args.sivep:
+        build_sivep(conn, log, args.sivep)
+    conn.commit()
+    log(f"Total: {total} entradas.")
+    conn.close()
     if args.empresas or args.personas:
         build_vocabulario(output, log)
+    # Compactar solo si quedaron muchas páginas libres (sin tablas
+    # intermedias en la base casi no quedan).
+    conn = sqlite3.connect(output)
+    libres, paginas = conn.execute("PRAGMA freelist_count").fetchone()[0], conn.execute("PRAGMA page_count").fetchone()[0]
+    if not args.sin_vacuum and paginas and libres / paginas > 0.05:
+        log(f"Compactando ({100 * libres / paginas:.0f} % de páginas libres)...")
+        conn.execute("VACUUM")
+    conn.close()
 
     size_mb = output.stat().st_size / 1e6
     log(f"\nListo: {output} ({size_mb:.1f} MB)")
