@@ -12,8 +12,8 @@ Mismo resultado que el build con SQLite (build_db.py sin DuckDB, verificado
 tabla por tabla). La corrida diaria (--incremental) no usa DuckDB.
 
 Pasos:
-1. Precálculo de cada corrida (build_db.generar_precalc, en SQLite) y su
-   copia en Parquet, que DuckDB lee comprimido y en paralelo.
+1. Precálculo de cada corrida en Parquet: el binario precalc de Rust
+   escribe CSV y DuckDB los pasa a Parquet (precalc_parquet).
 2. DuckDB elige de qué corrida sale cada boletín (la más nueva), numera
    los avisos y los escribe en la base.
 3. En paralelo: SQLite crea índices y FTS; DuckDB calcula partes,
@@ -27,6 +27,8 @@ DUCKDB_SQLITE_EXT.
 
 import csv
 import os
+import shutil
+import tempfile
 import sqlite3
 import threading
 import time
@@ -86,18 +88,28 @@ def parquet_de(precalc_sqlite, version):
     return {t: Path(f"{base}.{t}.parquet") for t in ("filas", "det", "partes")}
 
 
-def asegurar_parquet(db, precalc_sqlite, version, log):
-    rutas = parquet_de(precalc_sqlite, version)
-    if all(r.exists() and r.stat().st_mtime >= precalc_sqlite.stat().st_mtime for r in rutas.values()):
+def precalc_parquet(db, csv_path, version, bd, hilos, tmp_dir, log):
+    """El precálculo de una corrida en Parquet. Si no está (o es de otra
+    versión del código), el binario precalc de Rust escribe CSV y DuckDB
+    los pasa a Parquet en paralelo. El build completo no usa el precálculo
+    en SQLite (ese es para la corrida diaria)."""
+    rutas = parquet_de(csv_path.parent / bd.PRECALC_ARCHIVO, version)
+    if all(r.exists() and r.stat().st_mtime >= csv_path.stat().st_mtime for r in rutas.values()):
+        log("    precálculo guardado")
         return rutas
-    for viejo in precalc_sqlite.parent.glob("entradas.precalc.*.parquet"):
+    log("    calculando (Rust) y guardando el precálculo en Parquet")
+    for viejo in csv_path.parent.glob("entradas.precalc.*.parquet"):
         viejo.unlink()
-    log("    precálculo a Parquet...")
-    db.execute(f"ATTACH '{precalc_sqlite}' AS pc (TYPE sqlite, READ_ONLY)")
-    db.execute(f"COPY (SELECT * FROM pc.filas) TO '{rutas['filas']}' (FORMAT parquet, COMPRESSION zstd)")
-    db.execute(f"COPY (SELECT * FROM pc.det) TO '{rutas['det']}' (FORMAT parquet, COMPRESSION zstd)")
-    db.execute(f"COPY (SELECT * FROM pc.partes) TO '{rutas['partes']}' (FORMAT parquet, COMPRESSION zstd)")
-    db.execute("DETACH pc")
+    salida = Path(tempfile.mkdtemp(prefix="precalc_rs_", dir=tmp_dir))
+    try:
+        bd.correr_precalc_rs(csv_path, salida, hilos)
+        for tabla, ruta in rutas.items():
+            tmp = ruta.with_name(ruta.name + ".tmp")
+            db.execute(f"COPY (SELECT * FROM {bd.leer_csv_precalc(salida, tabla)}) TO '{tmp}' "
+                       "(FORMAT parquet, COMPRESSION zstd)")
+            os.replace(tmp, ruta)
+    finally:
+        shutil.rmtree(salida, ignore_errors=True)
     return rutas
 
 
@@ -354,12 +366,8 @@ def build_completo(args, output, runs, log, bd):
     log("Precálculos...")
     rutas = []
     for csv_path in runs:
-        precalc = csv_path.parent / bd.PRECALC_ARCHIVO
         log(f"  {csv_path.parent.name}...")
-        if not bd._precalc_vigente(precalc, csv_path):
-            log("    calculando (y guardando el precálculo)")
-            bd.generar_precalc(csv_path, precalc, args.workers, str(output.parent), log)
-        rutas.append(asegurar_parquet(db, precalc, version, log))
+        rutas.append(precalc_parquet(db, csv_path, version, bd, args.workers or bd.NUCLEOS, str(output.parent), log))
 
     # Base y boletines (SQLite).
     output.unlink(missing_ok=True)

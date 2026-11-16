@@ -228,7 +228,8 @@ pub fn descargar(args: &[String]) -> i32 {
 pub fn reparsear(args: &[String]) -> i32 {
     let resto: Vec<&String> = args.iter().filter(|a| !a.starts_with("--workers")).collect();
     let workers = args.iter().find(|a| a.starts_with("--workers")).and_then(|a| a.split_once('=')).and_then(|(_, n)| n.parse().ok())
-        .unwrap_or_else(|| std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4)).max(1);
+        // Por defecto el 80 % de los núcleos, como el build.
+        .unwrap_or_else(|| (std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4) * 4 / 5).max(1)).max(1);
     let data_dir = resto.first().map(PathBuf::from).unwrap_or_else(|| PathBuf::from("data/2026-06-10"));
 
     let index_txt = fs::read_to_string(data_dir.join("index.json")).expect("index.json");
@@ -259,24 +260,35 @@ pub fn reparsear(args: &[String]) -> i32 {
     let tmp_path = data_dir.join("entradas.csv.part");
     let mut f = std::io::BufWriter::new(fs::File::create(&tmp_path).unwrap());
     let (mut total, mut done, mut header) = (0usize, 0usize, true);
-    for lote in jobs.chunks(workers) {
-        let res: Vec<Vec<Row>> = std::thread::scope(|s| {
-            let hs: Vec<_> = lote.iter().map(|(p, id, fecha)| s.spawn(move || {
+    // Cola de trabajo: cada hilo toma el próximo boletín apenas termina el
+    // suyo (antes iban en tandas fijas y cada tanda esperaba al más grande).
+    // Los resultados se escriben en el orden de los archivos.
+    let siguiente = std::sync::atomic::AtomicUsize::new(0);
+    let (tx, rx) = std::sync::mpsc::channel::<(usize, Vec<Row>)>();
+    std::thread::scope(|s| {
+        for _ in 0..workers.min(jobs.len().max(1)) {
+            let (tx, jobs, siguiente) = (tx.clone(), &jobs, &siguiente);
+            s.spawn(move || loop {
+                let i = siguiente.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let Some((p, id, fecha)) = jobs.get(i) else { break };
                 let text = decode_text(&fs::read(p).unwrap());
-                let r = parse_pdf(&text, *id, fecha);
-                r
-            })).collect();
-            hs.into_iter().map(|h| h.join().unwrap()).collect()
-        });
-        for entries in res {
-            if !entries.is_empty() { write_rows(&mut f, &entries, header).unwrap(); header = false; }
-            total += entries.len();
-            done += 1;
-            if done % 50 == 0 || done == jobs.len() {
-                log(&format!("  {}/{} boletines procesados ({} entradas hasta ahora)", done, jobs.len(), total));
+                if tx.send((i, parse_pdf(&text, *id, fecha))).is_err() { break; }
+            });
+        }
+        drop(tx);
+        let mut pendientes = std::collections::BTreeMap::new();
+        for (i, entries) in rx {
+            pendientes.insert(i, entries);
+            while let Some(entries) = pendientes.remove(&done) {
+                if !entries.is_empty() { write_rows(&mut f, &entries, header).unwrap(); header = false; }
+                total += entries.len();
+                done += 1;
+                if done % 50 == 0 || done == jobs.len() {
+                    log(&format!("  {}/{} boletines procesados ({} entradas hasta ahora)", done, jobs.len(), total));
+                }
             }
         }
-    }
+    });
     f.flush().unwrap();
     drop(f);
     log(&format!("\nTotal: {} entradas", total));

@@ -340,12 +340,33 @@ def _crear_precalc(p):
     """)
 
 
+# Columnas de los CSV que escribe el binario precalc, con su tipo.
+_ENTEROS_PRECALC = COLS_ENTERAS | {"fila", "tipo", "rol", "otras_actora", "otras_demandada", "desde", "hasta"}
+CSV_PRECALC = {t: [(c, "BIGINT" if c in _ENTEROS_PRECALC else "VARCHAR") for c in cols] for t, cols in (
+    ("filas", ["fila"] + COLS_CARGA),
+    ("det", ["fila", "tipo", "rol", "nucleo", "nombre"]),
+    ("partes", ["fila", "otras_actora", "otras_demandada"]),
+    ("tramos", ["boletin_id", "desde", "hasta"]),
+)}
+
+
+def leer_csv_precalc(carpeta, tabla):
+    """read_csv de DuckDB para un CSV del binario precalc."""
+    tipos = ", ".join(f"'{c}': '{t}'" for c, t in CSV_PRECALC[tabla])
+    return (f"read_csv('{Path(carpeta) / (tabla + '.csv')}', header = true, nullstr = '\\N', "
+            f"allow_quoted_nulls = false, columns = {{{tipos}}})")
+
+
+def correr_precalc_rs(csv_path, salida, hilos=None):
+    subprocess.run([str(PRECALC_RS), str(csv_path), str(salida), "--hilos", str(hilos or NUCLEOS)], check=True)
+
+
 def _generar_precalc_rust(csv_path, precalc_path, tmp_dir=None, log=None, hilos=None):
     """El binario de Rust escribe filas/det/partes/tramos en CSV; de ahí se
     arma el precálculo en SQLite y, si está DuckDB, también en Parquet."""
     salida = Path(tempfile.mkdtemp(prefix="precalc_rs_", dir=tmp_dir))
     try:
-        subprocess.run([str(PRECALC_RS), str(csv_path), str(salida), "--hilos", str(hilos or NUCLEOS)], check=True)
+        correr_precalc_rs(csv_path, salida, hilos)
         tmp_path = precalc_path.with_name(precalc_path.name + ".tmp")
         tmp_path.unlink(missing_ok=True)
         p = sqlite3.connect(tmp_path)
@@ -364,16 +385,9 @@ def _generar_precalc_rust(csv_path, precalc_path, tmp_dir=None, log=None, hilos=
             p.close()
             db = build_duck.conectar_simple(NUCLEOS)
             db.execute(f"ATTACH '{tmp_path}' AS s (TYPE sqlite)")
-            for tabla, cols in (("filas", ["fila"] + COLS_CARGA),
-                                ("det", ["fila", "tipo", "rol", "nucleo", "nombre"]),
-                                ("partes", ["fila", "otras_actora", "otras_demandada"]),
-                                ("tramos", ["boletin_id", "desde", "hasta"])):
-                tipos = ", ".join(f"'{c}': '{'BIGINT' if c in COLS_ENTERAS | {'fila', 'tipo', 'rol', 'otras_actora', 'otras_demandada', 'desde', 'hasta'} else 'VARCHAR'}'"
-                                  for c in cols)
-                origen = (f"read_csv('{salida / (tabla + '.csv')}', header = true, nullstr = '\\N', "
-                          f"allow_quoted_nulls = false, columns = {{{tipos}}})")
-                destino = tabla
-                db.execute(f"INSERT INTO s.{destino} SELECT * FROM {origen} ORDER BY {cols[0] if tabla != 'tramos' else 'desde'}")
+            for tabla, cols in CSV_PRECALC.items():
+                orden = "desde" if tabla == "tramos" else cols[0][0]
+                db.execute(f"INSERT INTO s.{tabla} SELECT * FROM {leer_csv_precalc(salida, tabla)} ORDER BY {orden}")
             db.execute("DETACH s")
             db.close()
             p = sqlite3.connect(tmp_path)
