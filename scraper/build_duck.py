@@ -109,7 +109,10 @@ def precalc_parquet(db, csv_path, version, bd, hilos, tmp_dir, log):
         bd.correr_precalc_rs(csv_path, salida, hilos)
         for tabla, ruta in rutas.items():
             tmp = ruta.with_name(ruta.name + ".tmp")
-            db.execute(f"COPY (SELECT * FROM {bd.leer_csv_precalc(salida, tabla)}) TO '{tmp}' "
+            # Ordenado por fila: el build lee los avisos en este orden y
+            # SQLite los numera así (escribir_avisos).
+            orden = "desde" if tabla == "tramos" else "fila"
+            db.execute(f"COPY (SELECT * FROM {bd.leer_csv_precalc(salida, tabla)} ORDER BY {orden}) TO '{tmp}' "
                        "(FORMAT parquet, COMPRESSION zstd)")
             os.replace(tmp, ruta)
     finally:
@@ -430,14 +433,24 @@ def build_completo(args, output, runs, log, bd):
     # Tres trabajos a la vez, cada uno escribe su propio archivo (SQLite
     # admite un solo escritor por archivo). Cada hilo usa su propia conexión
     # a DuckDB (cursor) y su propio alias para el archivo que escribe.
+    db.execute("CREATE OR REPLACE TABLE elegidos AS SELECT DISTINCT rango, boletin_id FROM e")
+
     def escribir_avisos(c, alias, columnas):
-        """Avisos de e con columnas del Parquet, de a una corrida (para no
-        ordenar los 35M avisos con sus textos juntos)."""
+        """Los avisos elegidos, corrida por corrida y en el orden del
+        Parquet (el de las filas), sin id: SQLite los numera 1, 2, 3... en
+        ese orden, que es el mismo de e.id (row_number por corrida y fila).
+        Así no hay que cruzar con e ni ordenar: se lee en streaming."""
+        c.execute("SET SESSION preserve_insertion_order = true")  # solo en este cursor
         for k, r in enumerate(rutas):
-            c.execute(f"""INSERT INTO {alias}.entradas (id, {', '.join(columnas)})
-                          SELECT e.id, {', '.join('f.' + x for x in columnas)}
-                          FROM read_parquet('{r['filas']}') f JOIN e ON e.rango = {k} AND e.fila = f.fila
-                          ORDER BY e.id""")
+            # Lista literal: un IN (SELECT ...) se vuelve un cruce, y los
+            # cruces no conservan el orden (pasó: avisos de un boletín
+            # mezclados con los de otro).
+            ids = [b for (b,) in c.execute(f"SELECT boletin_id FROM elegidos WHERE rango = {k} ORDER BY 1").fetchall()]
+            if not ids:
+                continue
+            c.execute(f"""INSERT INTO {alias}.entradas ({', '.join(columnas)})
+                          SELECT {', '.join(columnas)} FROM read_parquet('{r['filas']}')
+                          WHERE boletin_id IN ({', '.join(map(str, ids))})""")
 
     def lado_fts():
         """El índice de búsqueda se arma desde un archivo chico con solo las

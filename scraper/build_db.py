@@ -288,7 +288,7 @@ COLS_ENTERAS = {"boletin_id", "num_acdos", "pagina", "ponencia", "anio"}
 # <corrida>/entradas.precalc.sqlite, ya en el formato de la base, con la
 # versión del código. Los builds siguientes copian de ahí por rangos de
 # filas (en C, sin Python por aviso) mientras la versión coincida.
-PRECALC_COLS = COLS_CARGA + ["det(fila,tipo,rol,nucleo,nombre)", "partes(fila,otras_actora,otras_demandada)", "tipado", "fila"]
+PRECALC_COLS = COLS_CARGA + ["det(fila,tipo,rol,nucleo,nombre)", "partes(fila,otras_actora,otras_demandada)", "tipado", "fila", "parquet ordenado"]
 PRECALC_ARCHIVO = "entradas.precalc.sqlite"
 
 
