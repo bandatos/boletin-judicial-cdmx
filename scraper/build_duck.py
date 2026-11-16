@@ -32,7 +32,8 @@ import tempfile
 import sqlite3
 import threading
 import time
-from multiprocessing import Process
+import subprocess
+import sys
 from pathlib import Path
 
 import duckdb
@@ -470,9 +471,12 @@ def build_completo(args, output, runs, log, bd):
     # FTS en su propio proceso y archivo (lee la base terminada).
     hilo_sqlite.join()
     fts_archivo = str(output.with_name(output.name + ".fts.sqlite"))
-    proc_fts = Process(target=bd.armar_fts, args=(str(output), fts_archivo))
+    # Como programa aparte y no con fork: copiar este proceso con DuckDB
+    # corriendo en varios hilos puede dejar la copia trabada en un candado
+    # que algún hilo tenía tomado (pasó con la base completa).
     t_fts = time.monotonic()
-    proc_fts.start()
+    proc_fts = subprocess.Popen([sys.executable, "-c", "import sys, build_db; build_db.armar_fts(sys.argv[1], sys.argv[2])",
+                                 str(output), fts_archivo], cwd=Path(bd.__file__).resolve().parent)
 
     # Escribir los agregados en un archivo aparte mientras el FTS lee la
     # base, y juntarlos al final.
@@ -535,9 +539,8 @@ def build_completo(args, output, runs, log, bd):
     agg.close()
     log(f"  escritos: {time.monotonic() - t0:.0f} s")
 
-    proc_fts.join()
-    if proc_fts.exitcode:
-        raise RuntimeError(f"la etapa FTS terminó con código {proc_fts.exitcode}")
+    if proc_fts.wait():
+        raise RuntimeError(f"la etapa FTS terminó con código {proc_fts.returncode}")
     log(f"  fts: {time.monotonic() - t_fts:.0f} s")
 
     conn = sqlite3.connect(output)
