@@ -69,10 +69,13 @@ def _conectar(base_dir, nucleos, log):
     tmp.mkdir(exist_ok=True)
     db.execute(f"SET threads = {nucleos}")
     db.execute(f"SET temp_directory = '{tmp}'")
-    # La mitad de la memoria libre: el resto queda para SQLite y la máquina.
+    # 30 % de la RAM (DUCKDB_MEMORIA_GB para cambiarlo): lo que no entra va
+    # a disco (temp_directory). Con la mitad de la memoria libre el límite
+    # quedaba en ~6 GB cuando la máquina usaba swap, y DuckDB se quedaba sin.
     try:
-        libre = os.sysconf("SC_AVPHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")
-        db.execute(f"SET memory_limit = '{max(2, int(libre / 2 / 1e9))}GB'")
+        ram = os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")
+        gb = float(os.environ.get("DUCKDB_MEMORIA_GB", 0)) or max(2, int(ram * 0.3 / 1e9))
+        db.execute(f"SET memory_limit = '{gb}GB'")
     except (ValueError, OSError):
         pass
     db.execute("SET preserve_insertion_order = false")
@@ -114,6 +117,10 @@ def precalc_parquet(db, csv_path, version, bd, hilos, tmp_dir, log):
 
 
 # ── 3. Agregados en DuckDB ───────────────────────────────────────────────
+
+# Columnas de los avisos que usan los agregados (la tabla e de DuckDB).
+COLS_AGREGADOS = ["boletin_id", "juzgado", "sala", "expediente", "tipo_juicio_norm", "tipo_actuacion",
+                  "tipo_acuerdo", "anio", "ponencia", "fecha_acuerdo"]
 
 SQL_PARTES = """
     CREATE OR REPLACE TABLE det AS
@@ -396,10 +403,13 @@ def build_completo(args, output, runs, log, bd):
     cols = ", ".join(bd.COLS_CARGA)
     db.execute(f"CREATE OR REPLACE VIEW filas AS {union('filas')}")
     # Cada boletín sale de la corrida más nueva que lo tiene (y, con
-    # --desde-fecha / --hasta-fecha, solo los del rango).
+    # --desde-fecha / --hasta-fecha, solo los del rango). La tabla e lleva
+    # solo las columnas que usan los agregados: los textos largos (partes,
+    # descripción) se leen del Parquet recién al escribir la base.
     db.execute(f"""
         CREATE OR REPLACE TABLE e AS
-            SELECT row_number() OVER (ORDER BY f.rango, f.fila) AS id, f.rango, f.fila, {', '.join('f.' + c for c in bd.COLS_CARGA)}
+            SELECT row_number() OVER (ORDER BY f.rango, f.fila) AS id, f.rango, f.fila,
+                   {', '.join('f.' + c for c in COLS_AGREGADOS)}
             FROM filas f
             JOIN (SELECT boletin_id, MIN(rango) AS rango FROM filas
                   {'WHERE boletin_id IN (SELECT id FROM bol)' if filtro_fecha else ''}
@@ -409,7 +419,12 @@ def build_completo(args, output, runs, log, bd):
     total = db.execute("SELECT COUNT(*) FROM e").fetchone()[0]
     salteadas = db.execute("SELECT COUNT(*) FROM filas").fetchone()[0] - total
     log(f"  {total:,} avisos ({salteadas:,} de boletines que ya estaban en una corrida más nueva o fuera de rango)")
-    db.execute(f"INSERT INTO s.entradas (id, {cols}) SELECT id, {cols} FROM e ORDER BY id")
+    # De a una corrida, para no ordenar los 35M avisos con sus textos juntos.
+    for k, r in enumerate(rutas):
+        db.execute(f"""INSERT INTO s.entradas (id, {cols})
+                       SELECT e.id, {', '.join('f.' + c for c in bd.COLS_CARGA)}
+                       FROM read_parquet('{r['filas']}') f JOIN e ON e.rango = {k} AND e.fila = f.fila
+                       ORDER BY e.id""")
     db.execute("DETACH s")
     log(f"  escritos en la base: {time.monotonic() - t0:.0f} s")
 
