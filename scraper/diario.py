@@ -99,16 +99,12 @@ def correr(c, cmd, env=None, cwd=AQUI):
         raise RuntimeError(f"{cmd[1]} terminó con código {p.returncode}")
 
 
-# Scraper en Rust (scraper/boletin_rs, binario poc): mismo resultado que
-# poc.py. Si no está compilado, Python.
+# Scraper en Rust (scraper/boletin_rs, binario poc).
 POC_RS = AQUI / "boletin_rs" / "target" / "release" / "poc"
 
 
 def descargar(c, desde, hasta, run_dir):
-    if POC_RS.exists():
-        correr(c, [str(POC_RS), "descargar", desde, hasta, "500", str(run_dir)])
-    else:
-        correr(c, [sys.executable, "poc.py", desde, hasta, "500", str(run_dir)])
+    correr(c, [str(POC_RS), "descargar", desde, hasta, "500", str(run_dir)])
     # Los PDF ya no hacen falta: el texto queda en .txt (y después en .txt.gz).
     for pdf in (run_dir / "pdfs").glob("*.pdf"):
         pdf.unlink()

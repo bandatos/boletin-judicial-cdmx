@@ -93,7 +93,7 @@ Las tres variantes v5 dan el mismo contenido que el build completo: entradas, bo
 ## Qué hace cada optimización
 
 - **pcre:** `import pcre as re` si está instalado (`pip install pypcre`), si no `re`. Solo acelera, el resultado es igual.
-- **Precálculo:** la carga guarda por corrida todo lo derivado de cada aviso (tipo de acuerdo, descripción, empresas, personas). Hasta la v5 en `entradas.precalc.csv`, desde la v6 en `entradas.precalc.sqlite` ya con el formato de la base, y la carga copia rangos de filas por boletín. La versión (hash del código del parser) lo invalida si cambia `acuerdos.py`, `empresas.py`, `personas.py`, `normalize_tipo.py` o `derivar`.
+- **Precálculo:** la carga guarda por corrida todo lo derivado de cada aviso (tipo de acuerdo, descripción, empresas, personas). Hasta la v5 en `entradas.precalc.csv`, desde la v6 en `entradas.precalc.sqlite` ya con el formato de la base, y la carga copia rangos de filas por boletín. La versión (hash del código del parser) lo invalida si cambia el parser. Desde noviembre de 2026 el precálculo lo calcula `scraper/boletin_rs` (Rust) y la versión es el hash de su código.
 - **Etapas en paralelo:** FTS, resumen, estadísticas y partes se arman cada una en su archivo SQLite leyendo la base en solo lectura, y después se copian a la base. Empresas y personas arrancan cuando termina partes. La tabla de staging va en un archivo aparte que se borra al final, así no hace falta VACUUM.
 - **Incremental:** `--incremental` suma solo los boletines que faltan sobre una base existente. Hasta la v5 necesitaba un archivo de estado aparte (5.5 GB) con todas las detecciones. Desde la v6 están en la base (`partes_nombres` y `partes_avisos`, como enteros) y `scraper/agregados.py` rehace solo lo que tocan los avisos nuevos: empresas y personas que aparecen en ellos, los meses de esos boletines (leyendo solo esos boletines por rango de ids), los expedientes con avisos nuevos para el tiempo hasta sentencia (`duracion_expedientes`), y suma a `tipo_organo` y a los resúmenes.
 
@@ -117,3 +117,16 @@ Las dos etapas caras con poco uso:
 
 - **Personas** (24 min en v3, la mayor parte dentro de la carga desde v4): solo alimenta `/personas` (5.2 % de las vistas, `noindex`) y el vocabulario de sugerencias. Con el precálculo deja de costar en cada build.
 - **Estadísticas** (6 a 7 min): `/juzgados`, `/tipos`, `/salas` y el enlace "¿Cómo trabaja?" suman cerca del 2.5 %, más algo de `/juzgado`. En paralelo queda oculta detrás de FTS.
+
+## Rust y DuckDB (noviembre de 2026)
+
+El cálculo por aviso y el scraper pasaron a Rust (`scraper/boletin_rs`) y el build completo a DuckDB (`scraper/build_duck.py`). Salida idéntica a la de Python y SQLite en todas las muestras verificadas (campos de partes, precálculo, reparseo y las 25 tablas de la base del subconjunto). Medido con la máquina cargada (load 17-18 por otras sesiones):
+
+| Etapa | Antes | Después |
+|---|---|---|
+| Cálculo por aviso (1 hilo) | Python ~1,300 µs | Rust ~46 µs (2.3 s cada 50 mil avisos) |
+| Parseo de 18 boletines, 271 mil avisos (1 hilo) | Python ~84 s | Rust ~16.5 s |
+| Agregaciones sobre 35M avisos, por consulta | SQLite 300-440 s | DuckDB 5-13 s |
+| Build de 1,000 avisos de punta a punta | | 1.3-1.4 s |
+
+Rust 1.75 contra 1.100 y dependencias de 2024 contra las de noviembre de 2026: sin diferencia medible (menos del 3 %, dentro del ruido de tres rondas con esa carga; para medir diferencias así de chicas conviene `perf stat -e instructions,cycles`). Quedan 1.100 y las dependencias nuevas por mantenimiento.

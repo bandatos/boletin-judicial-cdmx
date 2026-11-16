@@ -27,21 +27,9 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from normalize_tipo import normalize
-import empresas as emp
-from acuerdos import (descripcion, descripcion_de_sobrante, quitar_marca_publicacion, separar_expediente,
-                      separar_parte, tipo_acuerdo)
-import personas as pers
 import agregados
 
-# normalize() es una cascada de regex y era ~80% del tiempo de carga, pero
-# hay pocos cientos de tipo_juicio distintos en millones de filas.
-normalize_tipo = functools.lru_cache(maxsize=None)(normalize)
-
 csv.field_size_limit(10**9)
-
-RE_ANIO = re.compile(r"/(\d{4})\b")
-
 
 
 # Memoria: en el server (7 GB, compartidos con el sitio) la corrida diaria
@@ -57,8 +45,8 @@ def cache_sqlite(conn, fraccion=1.0):
 # Núcleos que puede usar el build: 80 % por defecto, para que la máquina
 # siga respondiendo (BUILD_CPU, fracción de 0 a 1).
 NUCLEOS = max(1, int((os.cpu_count() or 1) * float(os.environ.get("BUILD_CPU", "0.8"))))
-# Hilos de SQLite por proceso. correr_etapas lo baja cuando hay varias
-# etapas a la vez, para no pasarse de NUCLEOS entre todas.
+# Hilos de SQLite por proceso (build_duck.py reparte NUCLEOS entre SQLite
+# y DuckDB).
 HILOS = min(8, NUCLEOS)
 
 
@@ -289,48 +277,7 @@ FIELDS = [
     "tipo_actuacion", "ponencia",
 ]
 COLS_CARGA = FIELDS + ["tipo_juicio_norm", "anio", "fecha_acuerdo", "tipo_acuerdo", "descripcion", "cuaderno"]
-I_EXPEDIENTE = FIELDS.index("expediente")
 COLS_ENTERAS = {"boletin_id", "num_acdos", "pagina", "ponencia", "anio"}
-
-MESES_LARGOS = {"ENERO": 1, "FEBRERO": 2, "MARZO": 3, "ABRIL": 4, "MAYO": 5, "JUNIO": 6, "JULIO": 7,
-                "AGOSTO": 8, "SEPTIEMBRE": 9, "SETIEMBRE": 9, "OCTUBRE": 10, "NOVIEMBRE": 11, "DICIEMBRE": 12}
-RE_FECHA_ACUERDO = re.compile(r"(\d{1,2})\s+DE\s+([A-ZÁÉÍÓÚ]+)\s+DEL?\s+(\d{4})")
-
-
-def fecha_acuerdo_iso(texto):
-    """'21 DE SEPTIEMBRE DEL 2026' -> '2026-09-21'."""
-    m = RE_FECHA_ACUERDO.search((texto or "").upper())
-    if not m or m.group(2) not in MESES_LARGOS:
-        return None
-    return f"{m.group(3)}-{MESES_LARGOS[m.group(2)]:02d}-{int(m.group(1)):02d}"
-BLOQUE = 16 * 1024 * 1024  # bytes de CSV por tarea (con 64 MB una corrida chica daba 4 tareas y sobraban núcleos)
-
-# Estado de cada proceso de la carga paralela (lo fija _init_worker).
-_W = {}
-
-
-def _init_worker(csv_path, col, tmp_dir):
-    _W.update(path=csv_path, col=col, tmp_dir=tmp_dir)
-
-
-def _tipo_acuerdo_fila(row, i_tacdo, i_raw, i_actuacion, i_dem):
-    """tipo_acuerdo de la fila: el del CSV si lo trae, o calculado desde el
-    texto del aviso. Solo para acuerdos (las sentencias tienen su tipo)."""
-    if i_tacdo is not None:
-        return row[i_tacdo] or None
-    if i_raw is None or (i_actuacion is not None and row[i_actuacion] not in ("", "acuerdo")):
-        return None
-    return tipo_acuerdo(row[i_raw], row[i_dem] or None)
-
-
-def _descripcion_fila(row, i_desc, i_raw, i_actuacion, i_dem):
-    """descripcion de la fila: la del CSV si la trae, o calculada desde el
-    texto del aviso. Solo para acuerdos."""
-    if i_desc is not None:
-        return row[i_desc] or None
-    if i_raw is None or (i_actuacion is not None and row[i_actuacion] not in ("", "acuerdo")):
-        return None
-    return descripcion(row[i_raw], row[i_dem] or None)
 
 
 # ── Cálculo por aviso, guardado por corrida (entradas.precalc.sqlite) ────
@@ -345,151 +292,22 @@ PRECALC_COLS = COLS_CARGA + ["det(fila,tipo,rol,nucleo,nombre)", "partes(fila,ot
 PRECALC_ARCHIVO = "entradas.precalc.sqlite"
 
 
-# Port a Rust del cálculo por aviso (scraper/boletin_rs, binario precalc):
-# mismo resultado que derivar() y unas 20 veces más rápido. Si está
-# compilado se usa; SIN_RUST=1 fuerza Python.
+# El cálculo por aviso (nombres, número, tipo de acuerdo, descripción,
+# empresas, personas) lo hace el binario precalc del scraper en Rust
+# (scraper/boletin_rs). Compilarlo: ver scraper/boletin_rs/README.md.
 DIR_RS = Path(__file__).resolve().parent / "boletin_rs"
 PRECALC_RS = Path(os.environ.get("PRECALC_RS", DIR_RS / "target" / "release" / "precalc"))
 
 
-def usar_rust():
-    return PRECALC_RS.exists() and not os.environ.get("SIN_RUST")
-
-
 def precalc_version():
-    """Sello del código que produce el precálculo: si cambia, el precálculo
-    se rehace. Con Rust, el código Rust; si no, los módulos de Python y la
-    función derivar."""
+    """Sello del código que produce el precálculo (el código Rust): si
+    cambia, el precálculo se rehace."""
     import hashlib
-    import inspect
     h = hashlib.sha256()
-    if usar_rust():
-        for f in sorted((DIR_RS / "src").rglob("*.rs")) + [DIR_RS / "Cargo.lock"]:
-            h.update(f.read_bytes())
-        h.update(",".join(PRECALC_COLS).encode())
-        return "rs" + h.hexdigest()[:14]
-    base = Path(__file__).resolve().parent
-    for nombre in ("acuerdos.py", "empresas.py", "personas.py", "normalize_tipo.py"):
-        h.update((base / nombre).read_bytes())
-    h.update(inspect.getsource(limpiar_fila).encode())
-    h.update(inspect.getsource(derivar).encode())
+    for f in sorted((DIR_RS / "src").rglob("*.rs")) + [DIR_RS / "Cargo.lock"]:
+        h.update(f.read_bytes())
     h.update(",".join(PRECALC_COLS).encode())
-    return h.hexdigest()[:16]
-
-
-def limpiar_fila(row, col):
-    """Limpia actora y demandada en el lugar. Nombres que se tragaron el
-    tipo de juicio o la descripción ("Guzmán García Lorena. Aud. 272-B
-    ..."): se corta el nombre y lo que sobra (se devuelve) sirve de
-    descripción si no hay otra (acuerdos.separar_parte)."""
-    i_act, i_dem = col["actora"], col["demandada"]
-    sobrante = None
-    row[i_act] = quitar_marca_publicacion(row[i_act])
-    row[i_dem] = quitar_marca_publicacion(row[i_dem])
-    if row[i_dem]:
-        row[i_dem], sobrante = separar_parte(row[i_dem])
-    elif row[i_act]:
-        row[i_act], sobrante = separar_parte(row[i_act])
-    return sobrante
-
-
-def detectar_python(campo):
-    """(personas, (empresas, otras)) de un campo actora/demandada."""
-    return pers.personas(campo), emp.partes(campo)
-
-
-_SIN_LIMPIAR = object()
-
-
-def derivar(row, col, detectar=detectar_python, sobrante=_SIN_LIMPIAR):
-    """Todo lo que la carga calcula de un aviso del CSV del scraper.
-    Devuelve (valores en el orden de COLS_CARGA, empresas [(rol, núcleo,
-    nombre)], partes (otras_actora, otras_demandada) o None, personas
-    [(1|2, núcleo, nombre)], fecha ISO del boletín). `detectar`: Python o
-    el port a Rust, que da lo mismo. Si la fila ya pasó por
-    limpiar_fila, se pasa su `sobrante`."""
-    i_act, i_dem, i_exp, i_tipo = col["actora"], col["demandada"], col["expediente"], col["tipo_juicio"]
-    i_facdo = col.get("fecha_acuerdo")
-    i_tacdo, i_raw, i_act_t = col.get("tipo_acuerdo"), col.get("raw_text"), col.get("tipo_actuacion")
-    i_desc, i_cuad, i_fecha_raw = col.get("descripcion"), col.get("cuaderno"), col.get("fecha")
-    if sobrante is _SIN_LIMPIAR:
-        sobrante = limpiar_fila(row, col)
-    m_anio = RE_ANIO.search(row[i_exp])
-    pers_a, (emp_a, otras_a) = detectar(row[i_act])
-    pers_d, (emp_d, otras_d) = detectar(row[i_dem])
-    empresas = [(rol, nucleo, nombre) for rol, lista in (("actora", emp_a), ("demandada", emp_d))
-                for nucleo, nombre in lista]
-    partes = (int(otras_a), int(otras_d)) if (emp_a or emp_d) else None
-    personas = [(k, n, nombre) for k, lista in ((1, pers_a), (2, pers_d))
-                for n, nombre in set(lista)]
-    valores = [(row[i] or None) if i is not None else None for i in (col.get(k) for k in FIELDS)]
-    # CSV anteriores a la columna cuaderno: el número viene con el resto
-    # pegado y se separa acá.
-    if i_cuad is not None:
-        cuaderno = row[i_cuad] or None
-    else:
-        valores[I_EXPEDIENTE], cuaderno = separar_expediente(valores[I_EXPEDIENTE])
-    valores = tuple(valores) + (
-        normalize_tipo(row[i_tipo] or None), int(m_anio.group(1)) if m_anio else None,
-        fecha_acuerdo_iso(row[i_facdo]) if i_facdo is not None else None,
-        _tipo_acuerdo_fila(row, i_tacdo, i_raw, i_act_t, i_dem),
-        _descripcion_fila(row, i_desc, i_raw, i_act_t, i_dem) or descripcion_de_sobrante(sobrante),
-        cuaderno,
-    )
-    fecha = fecha_iso(row[i_fecha_raw]) if i_fecha_raw is not None else None
-    return valores, empresas, partes, personas, fecha
-
-
-def _leer_lineas(path, start, end):
-    lineas = []
-    with open(path, "rb") as f:
-        f.seek(start - 1)
-        f.readline()  # termina la línea que empezó antes de `start`
-        while f.tell() < end:
-            linea = f.readline()
-            if not linea:
-                break
-            lineas.append(linea.decode("utf-8"))
-    return lineas
-
-
-def _parse_bloque(bounds):
-    """Calcula las filas que EMPIEZAN dentro de [start, end) del CSV (cada
-    fila ocupa una línea, así que se puede cortar en cualquier "\n") y las
-    escribe en un SQLite propio: pasarlas serializadas al proceso principal
-    costaba casi tanto como leerlas."""
-    start, end = bounds
-    col = _W["col"]
-    filas, det, partes = [], [], []
-    rows = list(csv.reader(_leer_lineas(_W["path"], start, end)))
-    detectar = detectar_python
-    sobrantes = [_SIN_LIMPIAR] * len(rows)
-    for row, sobrante in zip(rows, sobrantes):
-        valores, empresas, partes_aviso, personas, _ = derivar(row, col, detectar, sobrante)
-        filas.append(valores)
-        fila = len(filas)
-        # Todas las detecciones, también las que aparecen una sola vez.
-        for rol, nucleo, nombre in set(empresas):
-            det.append((fila, TIPO_EMPRESA, ROLES[rol], nucleo, nombre))
-        for k, n, nombre in set(personas):
-            det.append((fila, TIPO_PERSONA, k, n, nombre))
-        # Si el aviso tiene alguna empresa: si del lado de la actora o la
-        # demandada quedan partes que no son empresa. Solo el indicador.
-        if partes_aviso:
-            partes.append((fila, *partes_aviso))
-    shard = os.path.join(_W["tmp_dir"], f"bloque_{start}.sqlite")
-    c = sqlite3.connect(shard)
-    c.execute("PRAGMA journal_mode=OFF")
-    c.execute("PRAGMA synchronous=OFF")
-    c.execute(f"CREATE TABLE filas ({', '.join(COLS_CARGA)})")
-    c.executemany(f"INSERT INTO filas VALUES ({', '.join(['?'] * len(COLS_CARGA))})", filas)
-    c.execute("CREATE TABLE det (fila, tipo, rol, nucleo, nombre)")
-    c.executemany("INSERT INTO det VALUES (?, ?, ?, ?, ?)", det)
-    c.execute("CREATE TABLE partes (fila, otras_actora, otras_demandada)")
-    c.executemany("INSERT INTO partes VALUES (?, ?, ?)", partes)
-    c.commit()
-    c.close()
-    return shard, len(filas)
+    return "rs" + h.hexdigest()[:14]
 
 
 def _precalc_vigente(precalc_path, csv_path):
@@ -522,12 +340,12 @@ def _crear_precalc(p):
     """)
 
 
-def _generar_precalc_rust(csv_path, precalc_path, tmp_dir=None, log=None):
+def _generar_precalc_rust(csv_path, precalc_path, tmp_dir=None, log=None, hilos=None):
     """El binario de Rust escribe filas/det/partes/tramos en CSV; de ahí se
     arma el precálculo en SQLite y, si está DuckDB, también en Parquet."""
     salida = Path(tempfile.mkdtemp(prefix="precalc_rs_", dir=tmp_dir))
     try:
-        subprocess.run([str(PRECALC_RS), str(csv_path), str(salida), "--hilos", str(NUCLEOS)], check=True)
+        subprocess.run([str(PRECALC_RS), str(csv_path), str(salida), "--hilos", str(hilos or NUCLEOS)], check=True)
         tmp_path = precalc_path.with_name(precalc_path.name + ".tmp")
         tmp_path.unlink(missing_ok=True)
         p = sqlite3.connect(tmp_path)
@@ -580,67 +398,13 @@ def _generar_precalc_rust(csv_path, precalc_path, tmp_dir=None, log=None):
 
 
 def generar_precalc(csv_path, precalc_path, workers=None, tmp_dir=None, log=None):
-    """Calcula todos los avisos de la corrida y los junta en precalc_path:
-    filas (rowid = número de fila), det (detecciones de empresas y
-    personas), partes, y tramos (rango de filas de cada boletín). Con el
-    binario de Rust si está compilado; si no, en procesos de Python por
-    bloques del CSV."""
-    if usar_rust():
-        if log:
-            log("    cálculo por aviso: Rust")
-        return _generar_precalc_rust(csv_path, precalc_path, tmp_dir, log)
-    with open(csv_path, newline="") as f:
-        col = {name: i for i, name in enumerate(next(csv.reader(f)))}
-    with open(csv_path, "rb") as f:
-        inicio_datos = len(f.readline())
-    total_bytes = csv_path.stat().st_size
-    bloques = [(s, min(s + BLOQUE, total_bytes)) for s in range(inicio_datos, total_bytes, BLOQUE)]
-    workers = workers or max(1, NUCLEOS - 1)  # más el proceso principal
-    tmp_path = precalc_path.with_name(precalc_path.name + ".tmp")
-    tmp_path.unlink(missing_ok=True)
-    p = sqlite3.connect(tmp_path)
-    p.execute("PRAGMA journal_mode=OFF")
-    p.execute("PRAGMA synchronous=OFF")
-    cache_sqlite(p)
-    hilos_sqlite(p)
-    cols = ", ".join(COLS_CARGA)
-    _crear_precalc(p)
-    total = 0
-    with tempfile.TemporaryDirectory(prefix="build_db_", dir=tmp_dir) as tmp, \
-            Pool(workers, initializer=_init_worker, initargs=(str(csv_path), col, tmp)) as pool:
-        # Como mucho 2 bloques pendientes por proceso, para no llenar el
-        # disco temporal si los procesos van más rápido que la copia.
-        it = iter(bloques)
-        pendientes = deque(pool.apply_async(_parse_bloque, (b,)) for b in itertools.islice(it, 2 * workers))
-        while pendientes:
-            shard, n = pendientes.popleft().get()
-            siguiente = next(it, None)
-            if siguiente:
-                pendientes.append(pool.apply_async(_parse_bloque, (siguiente,)))
-            p.execute("ATTACH DATABASE ? AS s", (shard,))
-            p.execute(f"INSERT INTO filas (rowid, {cols}) SELECT rowid + ?, {cols} FROM s.filas ORDER BY rowid",
-                      (total,))
-            p.execute("INSERT INTO det SELECT fila + ?, tipo, rol, nucleo, nombre FROM s.det ORDER BY fila", (total,))
-            p.execute("INSERT INTO partes SELECT fila + ?, otras_actora, otras_demandada FROM s.partes", (total,))
-            p.commit()
-            p.execute("DETACH DATABASE s")
-            os.remove(shard)
-            total += n
-    # Tramos de filas consecutivas del mismo boletín (cada boletín suele ser
-    # uno solo: el scraper escribe boletín por boletín).
-    p.executescript("""
-        INSERT INTO tramos
-            SELECT boletin_id, MIN(fila) AS desde, MAX(fila) AS hasta
-            FROM (SELECT rowid AS fila, boletin_id,
-                         rowid - ROW_NUMBER() OVER (PARTITION BY boletin_id ORDER BY rowid) AS g
-                  FROM filas)
-            GROUP BY boletin_id, g ORDER BY desde;
-    """)
-    p.execute("INSERT INTO meta VALUES ('version', ?)", (precalc_version(),))
-    p.commit()
-    p.close()
-    os.replace(tmp_path, precalc_path)
-    return total
+    """Calcula todos los avisos de la corrida con el binario de Rust y los
+    junta en precalc_path: filas (fila = número de fila), det (detecciones
+    de empresas y personas), partes, y tramos (rango de filas de cada
+    boletín)."""
+    if not PRECALC_RS.exists():
+        sys.exit(f"Falta {PRECALC_RS}: compilar scraper/boletin_rs (ver su README.md).")
+    return _generar_precalc_rust(csv_path, precalc_path, tmp_dir, log, workers)
 
 
 def load_entradas(conn, csv_path, loaded, log, en_rango=None, workers=None, tmp_dir=None,
@@ -691,7 +455,7 @@ def load_entradas(conn, csv_path, loaded, log, en_rango=None, workers=None, tmp_
             rangos[-1][1] = hasta
         else:
             rangos.append([desde, hasta])
-    tipos = [t for t, si in ((TIPO_EMPRESA, con_empresas), (TIPO_PERSONA, con_personas)) if si]
+    tipos = [t for t, si in ((agregados.TIPO_EMPRESA, con_empresas), (agregados.TIPO_PERSONA, con_personas)) if si]
     cols = ", ".join(COLS_CARGA)
     base = conn.execute("SELECT COALESCE(MAX(id), 0) FROM entradas").fetchone()[0]
     total = 0
@@ -717,44 +481,10 @@ def load_entradas(conn, csv_path, loaded, log, en_rango=None, workers=None, tmp_
     return total
 
 
-MIN_AVISOS_EMPRESA = 2
-MIN_AVISOS_PERSONA = 2
-
-# ── Partes detectadas (empresas y personas) ──────────────────────────────
-# Todas las detecciones quedan en la base, como enteros: partes_nombres
-# (cada variante de nombre, también las que aparecen una sola vez) y
-# partes_avisos (qué variante aparece en qué aviso y de qué lado). De ahí
-# salen empresas, entradas_empresas y personas, con sus mínimos de avisos y
-# el nombre visible, y el build incremental las rearma sin otro archivo.
-TIPO_EMPRESA, TIPO_PERSONA = 1, 2
-ROLES = {"actora": 1, "demandada": 2}
-
 # Durante la carga, en el archivo .staging (se borra al terminar).
 SQL_PARTES_CARGA = """CREATE TABLE IF NOT EXISTS {esq}.partes_carga (
     entrada_id INTEGER, tipo INTEGER, rol INTEGER, nucleo TEXT, nombre TEXT)"""
 
-SQL_PARTES = """
-    CREATE TABLE partes_nombres (
-        id     INTEGER PRIMARY KEY,
-        tipo   INTEGER NOT NULL,  -- 1 empresa, 2 persona
-        nucleo TEXT NOT NULL,
-        nombre TEXT NOT NULL,
-        UNIQUE (tipo, nucleo, nombre)
-    );
-    INSERT INTO partes_nombres (tipo, nucleo, nombre)
-        SELECT DISTINCT tipo, nucleo, nombre FROM st.partes_carga ORDER BY 1, 2, 3;
-    CREATE TABLE partes_avisos (
-        nombre_id  INTEGER NOT NULL,
-        entrada_id INTEGER NOT NULL,
-        rol        INTEGER NOT NULL,  -- 1 actora, 2 demandada
-        PRIMARY KEY (nombre_id, entrada_id, rol)
-    ) WITHOUT ROWID;
-    INSERT INTO partes_avisos
-        SELECT DISTINCT n.id, c.entrada_id, c.rol
-        FROM st.partes_carga c
-        JOIN partes_nombres n ON n.tipo = c.tipo AND n.nucleo = c.nucleo AND n.nombre = c.nombre
-        ORDER BY 1, 2, 3;
-"""
 
 # Incremental: lo nuevo, directo en la base.
 SQL_PARTES_SUMAR = """
@@ -863,13 +593,10 @@ def find_runs(data_dir, since=None, exclude=()):
 
 
 # ── Etapas en paralelo ────────────────────────────────────────────────────
-def _etapa_paralela(trabajo):
-    """Corre una etapa en su propio archivo SQLite. La base (`b`) y las
-    tablas intermedias (`st`) se adjuntan de solo lectura: las consultas sin
-    esquema las encuentran ahí, y lo que se crea queda en el archivo de la
-    etapa."""
-    etapa, base, staging, archivo, fuente = trabajo
-    t0 = time.monotonic()
+def armar_fts(base, archivo):
+    """Índice de búsqueda por texto en su propio archivo, leyendo la base de
+    solo lectura (build_duck.py lo corre en otro proceso mientras DuckDB
+    escribe los agregados). Después se copia con _juntar."""
     Path(archivo).unlink(missing_ok=True)
     conn = sqlite3.connect(archivo)
     conn.execute("PRAGMA journal_mode=OFF")
@@ -877,79 +604,18 @@ def _etapa_paralela(trabajo):
     hilos_sqlite(conn)
     cache_sqlite(conn, 0.5)
     conn.execute("ATTACH DATABASE ? AS b", (f"file:{base}?mode=ro",))
-    if staging and Path(staging).exists():
-        conn.execute("ATTACH DATABASE ? AS st", (f"file:{staging}?mode=ro",))
-    # Empresas y personas leen las partes de la etapa "partes" (build
-    # completo) o de la base (incremental).
-    esquema_partes = "b"
-    if fuente:
-        conn.execute("ATTACH DATABASE ? AS p", (f"file:{fuente}?mode=ro",))
-        esquema_partes = "p"
-    if etapa == "fts":
-        # Sin contenido propio: en la base se define con content='entradas'
-        # y se le copian estas tablas internas (_data, _idx, _docsize).
-        conn.executescript("""
-            CREATE VIRTUAL TABLE entradas_fts USING fts5(
-                actora, demandada, tipo_juicio, content='', detail=none, columnsize=0
-            );
-            INSERT INTO entradas_fts(rowid, actora, demandada, tipo_juicio)
-                SELECT id, actora, demandada, tipo_juicio FROM b.entradas;
-            INSERT INTO entradas_fts(entradas_fts) VALUES('optimize');
-        """)
-    elif etapa == "partes":
-        conn.execute("PRAGMA temp_store=FILE")
-        conn.executescript(SQL_PARTES)
-    elif etapa == "empresas":
-        conn.execute("PRAGMA temp_store=FILE")
-        agregados.empresas_completo(conn, esquema_partes)
-    elif etapa == "resumen":
-        conn.execute("PRAGMA temp_store=FILE")
-        agregados.resumen_completo(conn)
-    elif etapa == "estadisticas":
-        agregados.estadisticas_completo(conn)
-    elif etapa == "personas":
-        conn.execute("PRAGMA temp_store=FILE")
-        agregados.personas_completo(conn, esquema_partes)
+    # Sin contenido propio: en la base se define con content='entradas' y se
+    # le copian estas tablas internas (_data, _idx).
+    conn.executescript("""
+        CREATE VIRTUAL TABLE entradas_fts USING fts5(
+            actora, demandada, tipo_juicio, content='', detail=none, columnsize=0
+        );
+        INSERT INTO entradas_fts(rowid, actora, demandada, tipo_juicio)
+            SELECT id, actora, demandada, tipo_juicio FROM b.entradas;
+        INSERT INTO entradas_fts(entradas_fts) VALUES('optimize');
+    """)
     conn.commit()
     conn.close()
-    return etapa, time.monotonic() - t0
-
-
-def correr_etapas(etapas, base, staging, log, partes_en_base=False):
-    """Corre las etapas en paralelo (hasta ETAPAS_A_LA_VEZ). Empresas y
-    personas necesitan las partes: en el build completo arrancan cuando
-    termina la etapa "partes" y la leen de su archivo; en el incremental
-    las leen de la base. Devuelve [(etapa, archivo)] en orden."""
-    archivo = lambda e: str(Path(base).with_name(f"{Path(base).name}.{e}.sqlite"))
-    dependen = {"empresas", "personas"}
-    hechas = []
-    pendientes = [e for e in etapas if e not in dependen or partes_en_base]
-    esperan = [e for e in etapas if e in dependen and not partes_en_base]
-    fuente = lambda e: archivo("partes") if e in dependen and not partes_en_base else None
-    global HILOS
-    procesos = min(len(etapas), ETAPAS_A_LA_VEZ or len(etapas), NUCLEOS)
-    hilos_antes, HILOS = HILOS, max(1, min(8, NUCLEOS // procesos))
-    with Pool(procesos) as pool:
-        corriendo = {}
-        def lanzar(e):
-            corriendo[e] = pool.apply_async(_etapa_paralela, ((e, base, staging, archivo(e), fuente(e)),))
-        # Primero las que habilitan a otras.
-        for e in sorted(pendientes, key=lambda e: e != "partes"):
-            lanzar(e)
-        while corriendo:
-            listas = [e for e, r in corriendo.items() if r.ready()]
-            if not listas:
-                time.sleep(0.5)
-                continue
-            for e in listas:
-                _, segundos = corriendo.pop(e).get()
-                log(f"  {e}: {segundos:.0f} s")
-                hechas.append(e)
-                if e == "partes":
-                    for d in esperan:
-                        lanzar(d)
-    HILOS = hilos_antes
-    return [(e, archivo(e)) for e in etapas]
 
 
 # Tablas internas de FTS5: se copian con su tabla virtual, no por separado.
@@ -1095,9 +761,6 @@ def main():
     parser.add_argument("--indices-server", action="store_true",
                         help="Índices extra para la base del server: por número de "
                              "expediente y por (año, tipo de juicio)")
-    parser.add_argument("--sin-vacuum", action="store_true",
-                        help="No compactar al final (más rápido; para la base del "
-                             "server, donde el tamaño del archivo no importa)")
     parser.add_argument("--empresas", action="store_true",
                         help="Tablas de empresas que son parte (sección /empresas del server)")
     parser.add_argument("--personas", action="store_true",
@@ -1106,13 +769,9 @@ def main():
                         help="Procesos para la carga (por defecto, todos los núcleos menos uno)")
     parser.add_argument("--estadisticas", action="store_true",
                         help="Tablas de desempeño por órgano y de tipos de juicio (/salas, /juzgados, /tipos)")
-    parser.add_argument("--solo-estadisticas", action="store_true",
-                        help="Rearmar solo las estadísticas de una base ya armada (--output)")
     parser.add_argument("--sivep",
                         help="sivep.sqlite con la tabla enlaces (scraper/sivep_enlace.py): "
                              "agrega los enlaces a versiones públicas de sentencias")
-    parser.add_argument("--sin-duckdb", action="store_true",
-                        help="Build completo solo con SQLite aunque duckdb esté instalado")
     parser.add_argument("--incremental", action="store_true",
                         help="Sumar a una base ya armada (--output) solo los boletines que no tiene")
     parser.add_argument("--solo-sivep", action="store_true",
@@ -1139,20 +798,6 @@ def main():
     t_inicio = time.monotonic()
     log = lambda msg: print(f"[{time.monotonic() - t_inicio:6.0f} s] {msg}", file=sys.stderr)
 
-    if args.solo_estadisticas:
-        conn = sqlite3.connect(output)
-        cache_sqlite(conn)
-        hilos_sqlite(conn)
-        conn.executescript("""
-            DROP TABLE IF EXISTS organo_mes; DROP TABLE IF EXISTS ponencia_mes; DROP TABLE IF EXISTS tipo_mes;
-            DROP TABLE IF EXISTS tipo_organo; DROP TABLE IF EXISTS duracion_expedientes;
-            DROP TABLE IF EXISTS organo_duracion; DROP TABLE IF EXISTS tipo_duracion;
-        """)
-        agregados.estadisticas_completo(conn)
-        conn.commit()
-        conn.close()
-        log(f"Listo: {output}")
-        return
     if args.solo_sivep:
         if not args.sivep:
             parser.error("--solo-sivep requiere --sivep")
@@ -1167,7 +812,7 @@ def main():
         return
     if not args.dir:
         parser.error("--dir es obligatorio (salvo con --solo-vocabulario / "
-                     "--solo-estadisticas / --solo-sivep)")
+                     "--solo-sivep)")
     data_dir = Path(args.dir)
 
     runs = find_runs(data_dir, args.since, args.exclude)
@@ -1182,127 +827,12 @@ def main():
         log(f"\nListo: {output} ({size_mb:.1f} MB)")
         return
     log(f"Generando {output}...")
-    # Con DuckDB instalado, la carga y los agregados van por DuckDB
-    # (build_duck.py): mismo resultado, mucho más rápido.
-    if not args.sin_duckdb:
-        try:
-            import build_duck
-        except ImportError:
-            log("  (sin duckdb: build con SQLite)")
-        else:
-            build_duck.build_completo(args, output, runs, log, sys.modules[__name__])
-            log(f"\nListo: {output} ({output.stat().st_size / 1e6:.1f} MB)")
-            return
-
-    output.unlink(missing_ok=True)
-    conn = sqlite3.connect(output)
-    # Archivo nuevo y descartable (si el build se corta se vuelve a correr):
-    # sin journal ni fsync, con caché grande.
-    conn.execute("PRAGMA journal_mode=OFF")
-    conn.execute("PRAGMA synchronous=OFF")
-    hilos_sqlite(conn)
-    cache_sqlite(conn)
-    conn.execute("PRAGMA temp_store=MEMORY")
-    conn.execute("PRAGMA locking_mode=EXCLUSIVE")
-
-    create_schema(conn)
-    # Tablas intermedias (empresas y personas por aviso) en un archivo aparte:
-    # en la base final dejaban páginas vacías al borrarlas, y compactarla
-    # costaba ~7 min. Además, así las etapas en paralelo las leen sin tocar
-    # la base.
-    staging = output.with_name(output.name + ".staging.sqlite")
-    staging.unlink(missing_ok=True)
-    conn.execute("ATTACH DATABASE ? AS st", (str(staging),))
-    if args.empresas or args.personas:
-        conn.execute(SQL_PARTES_CARGA.format(esq="st"))
-    if args.empresas:
-        conn.executescript("""
-            -- Por aviso con alguna empresa: si del lado de la actora o de la
-            -- demandada hay partes que no son empresa. Solo el indicador,
-            -- para mostrar "persona física" sin el nombre.
-            CREATE TABLE entradas_partes (
-                entrada_id      INTEGER PRIMARY KEY,
-                otras_actora    INTEGER NOT NULL,
-                otras_demandada INTEGER NOT NULL
-            );
-        """)
-
-    # Del run más nuevo al más viejo: si un boletín está en varios, gana el
-    # más reciente (parseado con la versión más nueva del parser).
-    runs = list(reversed(runs))
-    for csv_path in runs:
-        index_path = csv_path.parent / "index.json"
-        if index_path.exists():
-            load_index(conn, index_path)
-
-    en_rango = None
-    if args.desde_fecha or args.hasta_fecha:
-        conn.execute("DELETE FROM boletines WHERE fecha_iso IS NULL OR fecha_iso < ? OR fecha_iso > ?",
-                     (args.desde_fecha or "0000-00-00", args.hasta_fecha or "9999-99-99"))
-        en_rango = {r[0] for r in conn.execute("SELECT id FROM boletines")}
-
-    total = 0
-    loaded = set()
-    for csv_path in runs:
-        run_dir = csv_path.parent
-        log(f"  {run_dir.name}...")
-
-        n = load_entradas(conn, csv_path, loaded, log, en_rango, workers=args.workers, tmp_dir=str(output.parent),
-                          con_empresas=args.empresas, con_personas=args.personas)
-        total += n
-        log(f"    {n} entradas")
-
-    conn.commit()
-    conn.execute("DETACH DATABASE st")
-
-    log("Índices...")
-    create_indexes(conn, args.indices_server, args.web)
-    populate_boletin_ranges(conn, log)
-    populate_meta(conn)
-    conn.commit()
-    conn.close()
-
-    # Etapas independientes en paralelo, cada una en su propio archivo: leen
-    # la base (que no se modifica mientras tanto) y escriben aparte. Después
-    # se copian a la base.
-    etapas = ["fts", "resumen"]
-    if args.estadisticas:
-        etapas.append("estadisticas")
-    if args.empresas or args.personas:
-        etapas.append("partes")
-    if args.empresas:
-        etapas.append("empresas")
-    if args.personas:
-        etapas.append("personas")
-    log(f"Etapas en paralelo: {', '.join(etapas)}...")
-    trabajos = correr_etapas(etapas, str(output), str(staging), log)
-
-    conn = sqlite3.connect(output)
-    conn.execute("PRAGMA synchronous=OFF")
-    hilos_sqlite(conn)
-    cache_sqlite(conn)
-    for etapa, archivo in trabajos:
-        _juntar(conn, etapa, archivo, log)
-        os.remove(archivo)
-    staging.unlink(missing_ok=True)
-    if args.sivep:
-        build_sivep(conn, log, args.sivep)
-    conn.commit()
-    log(f"Total: {total} entradas.")
-    conn.close()
-    if args.empresas or args.personas:
-        build_vocabulario(output, log)
-    # Compactar solo si quedaron muchas páginas libres (sin tablas
-    # intermedias en la base casi no quedan).
-    conn = sqlite3.connect(output)
-    libres, paginas = conn.execute("PRAGMA freelist_count").fetchone()[0], conn.execute("PRAGMA page_count").fetchone()[0]
-    if not args.sin_vacuum and paginas and libres / paginas > 0.05:
-        log(f"Compactando ({100 * libres / paginas:.0f} % de páginas libres)...")
-        conn.execute("VACUUM")
-    conn.close()
-
-    size_mb = output.stat().st_size / 1e6
-    log(f"\nListo: {output} ({size_mb:.1f} MB)")
+    try:
+        import build_duck
+    except ImportError:
+        sys.exit("El build completo usa DuckDB: correr con scraper/.venv/bin/python (ver scraper/boletin_rs/README.md).")
+    build_duck.build_completo(args, output, runs, log, sys.modules[__name__])
+    log(f"\nListo: {output} ({output.stat().st_size / 1e6:.1f} MB)")
 
 
 if __name__ == "__main__":

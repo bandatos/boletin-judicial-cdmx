@@ -1,6 +1,6 @@
 # Detección de empresas: cómo funciona y problemas conocidos
 
-Código: `scraper/empresas.py`. Lo usan `build_db.py --empresas` / `--solo-empresas` (tablas `empresas`, `entradas_empresas`, `entradas_partes` para `/empresas` del server) y `cruces/cruce_qqw.py`.
+Código: `scraper/boletin_rs/src/partes.rs` (port a Rust de `empresas.py`, que se borró en noviembre de 2026). Lo usa el precálculo de `build_db.py --empresas` (tablas `empresas`, `entradas_empresas`, `entradas_partes` para `/empresas` del server).
 
 ## Regla de producto
 
@@ -31,7 +31,7 @@ La primera versión tenía personas coladas ("Olivo Martínez Jaime antes HSBC M
 
 ## Benchmark
 
-`python3 scraper/bench_empresas.py` corre los casos etiquetados (errores ya corregidos y nuevos, con nombres de personas inventados). Con `--db <base>` compara además contra la versión del último commit (`--ref`) sobre 1 de cada 500 avisos: cuántas empresas se detectan, cuántos campos cambian, cuáles pierden alguna empresa y cuántos nombres conservan restos sospechosos (conectores, listas, tomo, notario, paréntesis sin cerrar). Antes de rearmar las tablas, todo cambio en `empresas.py` tiene que pasar los casos y revisarse con esa comparación.
+Los casos etiquetados (errores ya corregidos y nuevos, con nombres de personas inventados) están en `scraper/boletin_rs/tests/casos.rs` y corren con `cargo test`. Antes de rearmar las tablas, todo cambio en la detección tiene que pasarlos. La comparación contra la base del último commit sobre una muestra de avisos (`bench_empresas.py --db`) no se pasó a Rust: para revisar un cambio, armar la base con el código nuevo y comparar las tablas `empresas` y `entradas_empresas` contra la anterior.
 
 Resultado del ajuste del 2026-10-14 contra el commit anterior: 24,072 a 25,336 empresas detectadas en la muestra, conectores de rol en el nombre 87 a 0, "como" / "y/o" 49 a 2, "anteriormente" 10 a 0, paréntesis sin cerrar 18 a 2. El único campo que pierde una empresa es uno que llevaba el nombre de un notario pegado.
 

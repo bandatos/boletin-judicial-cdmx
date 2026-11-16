@@ -18,21 +18,22 @@ Demo desplegada con 157 boletines de 2026 (del 7 de enero al 22 de septiembre). 
 
 Requisitos: Python 3.10+, `pdftotext` (`poppler-utils`), y las dependencias de Python.
 
+El scraper está en Rust (`scraper/boletin_rs`, ver su README para compilarlo).
+
 ```bash
 # Dependencias del sistema (Debian/Ubuntu)
-sudo apt install poppler-utils
+sudo apt install poppler-utils curl
 
-# Dependencias de Python
-pip install requests beautifulsoup4
+# Compilar
+cd scraper/boletin_rs && cargo build --release && cd ..
 
 # Correr el scraper
-cd scraper
-python poc.py [fecha_inicio] [fecha_fin] [max_boletines]
+boletin_rs/target/release/poc descargar [fecha_inicio] [fecha_fin] [max_boletines] [carpeta]
 
 # Ejemplos
-python poc.py 2026-06-10 2026-06-10        # un boletín
-python poc.py 2026-06-01 2026-06-10 5      # hasta 5 boletines del rango
-python poc.py 2026-01-01 2026-06-10 9999   # todo el rango
+boletin_rs/target/release/poc descargar 2026-06-10 2026-06-10        # un boletín
+boletin_rs/target/release/poc descargar 2026-06-01 2026-06-10 5      # hasta 5 boletines del rango
+boletin_rs/target/release/poc descargar 2026-01-01 2026-06-10 9999   # todo el rango
 ```
 
 La salida se guarda en `data/YYYY-MM-DD/`:
@@ -50,7 +51,7 @@ data/2026-06-10/
 Si cambias la lógica de parseo, re-parsea sin volver a descargar:
 
 ```bash
-python reparse.py data/2026-06-10
+boletin_rs/target/release/poc reparsear data/2026-06-10
 ```
 
 ## Construir la base de datos y desplegar

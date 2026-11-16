@@ -36,8 +36,6 @@ from pathlib import Path
 import duckdb
 
 import agregados
-import empresas as emp
-import personas as pers
 
 
 # Extensión sqlite de DuckDB: DUCKDB_SQLITE_EXT, la copia en scraper/.venv
@@ -211,7 +209,7 @@ SQL_RESUMEN = """
 
 
 def _empresas(db):
-    """Igual que agregados.empresas_completo: núcleos con al menos
+    """Empresas: núcleos con al menos
     MIN_AVISOS_EMPRESA pares aviso-lado, nombre visible = variante más
     frecuente (y la primera alfabéticamente si empatan), ids por cantidad
     de pares y núcleo, slugs en ese orden."""
@@ -226,7 +224,7 @@ def _empresas(db):
         ORDER BY total DESC, nucleo
     """).fetchall()
     usados = set()
-    filas = [(i + 1, nucleo, nombre, agregados._slug_libre(None, "", emp.slugify(nucleo), usados), int(c), int(a), int(d))
+    filas = [(i + 1, nucleo, nombre, agregados._slug_libre(None, "", agregados.slug_empresa(nucleo), usados), int(c), int(a), int(d))
              for i, (nucleo, nombre, c, a, d) in enumerate(filas)]
     # A DuckDB por un CSV temporal (executemany va fila por fila).
     csv_path = Path(db.execute("SELECT current_setting('temp_directory')").fetchone()[0]) / "empresas.csv"
@@ -277,7 +275,9 @@ def _empresas(db):
 
 
 def _personas(db):
-    """Igual que agregados.personas_completo."""
+    """Personas: núcleos con al menos MIN_AVISOS_PERSONA avisos (distintos),
+    nombre visible = variante más frecuente, ids y slugs en orden de núcleo.
+    La corrida diaria las actualiza con agregados.personas_incremental."""
     filas = db.execute(f"""
         WITH v AS (
             SELECT n.nucleo, n.nombre, COUNT(DISTINCT pa.entrada_id) AS c,
@@ -293,7 +293,7 @@ def _personas(db):
         ORDER BY nucleo
     """).fetchall()
     usados = set()
-    filas = [(i + 1, nucleo, nombre, agregados._slug_libre(None, "", pers.slugify(nucleo), usados),
+    filas = [(i + 1, nucleo, nombre, agregados._slug_libre(None, "", agregados.slug_persona(nucleo), usados),
               int(c), int(a), int(d), desde, hasta)
              for i, (nucleo, nombre, c, a, d, desde, hasta) in enumerate(filas)]
     return filas
@@ -447,7 +447,7 @@ def build_completo(args, output, runs, log, bd):
     # FTS en su propio proceso y archivo (lee la base terminada).
     hilo_sqlite.join()
     fts_archivo = str(output.with_name(output.name + ".fts.sqlite"))
-    proc_fts = Process(target=bd._etapa_paralela, args=(("fts", str(output), None, fts_archivo, None),))
+    proc_fts = Process(target=bd.armar_fts, args=(str(output), fts_archivo))
     t_fts = time.monotonic()
     proc_fts.start()
 

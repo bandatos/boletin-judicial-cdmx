@@ -5,9 +5,9 @@
 ## Qué hace
 
 1. Lee la fecha del último boletín con avisos en `/data/boletin.sqlite`.
-2. Baja con `poc.py` el índice y los boletines desde el día siguiente hasta hoy, en `/data/scraper-data/<hoy>/`. Borra los PDF y deja el texto.
+2. Baja con el scraper en Rust (`scraper/boletin_rs`, binario `poc`) el índice y los boletines desde el día siguiente hasta hoy, en `/data/scraper-data/<hoy>/`. Borra los PDF y deja el texto.
 3. Si no hay boletines nuevos, termina y avisa ("sin boletines nuevos en el portal").
-4. Copia la base a `/data/trabajo/` y corre `build_db.py --incremental` sobre la copia, con poca memoria (`BUILD_CACHE_MB=300`, etapas de a una, 4 procesos).
+4. Copia la base a `/data/trabajo/` y corre `build_db.py --incremental` sobre la copia (el cálculo por aviso lo hace el binario `precalc` de Rust), con poca memoria (`BUILD_CACHE_MB=300`, etapas de a una, 4 procesos).
 5. Chequea que ninguna cantidad baje (avisos, boletines, empresas, personas, vocabulario, sentencias con versión pública) y que haya avisos nuevos.
 6. Publica con un rename: `boletin.sqlite.anterior` queda como respaldo (hardlink) y el sitio recarga la base solo en ~30 s.
 7. Comprime los textos del día a `.txt.gz`.

@@ -1,28 +1,42 @@
 """
-agregados.py — Tablas derivadas de la base del boletín: empresas, personas,
-estadísticas y resúmenes. Cada una en dos versiones:
-
-- completa: en el build completo, en una etapa en paralelo (archivo propio,
-  con la base adjunta como `b` y las partes detectadas en `fuente`);
-- incremental: sobre la base publicada, solo lo que tocan los avisos nuevos
-  (ids > max_id_antes, detecciones en st.partes_carga).
-
-Las dos dan el mismo resultado (verificado comparando tablas). Los ids de
-empresas y personas nuevas sí difieren: el build completo los numera por
-cantidad de avisos o por núcleo, el incremental los agrega al final.
+agregados.py — Lo que la corrida diaria (build_db.py --incremental) rehace
+sobre la base publicada: empresas, personas, estadísticas y resúmenes, solo
+lo que tocan los avisos nuevos (ids > max_id_antes, detecciones en
+st.partes_carga). El build completo los arma con DuckDB (build_duck.py),
+con el mismo resultado (verificado tabla por tabla) y las definiciones de
+tabla de acá. Los ids de empresas y personas nuevas sí difieren: el build
+completo los numera por cantidad de avisos o por núcleo, el incremental los
+agrega al final.
 
 Supuesto: toda entrada tiene su boletín con fecha (load_index carga todos
 los del índice; verificado en la base de 2026-11).
 """
 
-import empresas as emp
-import personas as pers
+import re
+import unicodedata
 
 TIPO_EMPRESA, TIPO_PERSONA = 1, 2
 MIN_AVISOS_EMPRESA = 2
 MIN_AVISOS_PERSONA = 2
 
 SENTENCIAS = "('sentencia_definitiva', 'sentencia')"
+
+
+def slugify(texto, vacio, largo=80):
+    """Slug de la URL de una empresa o persona: el núcleo sin acentos, en
+    minúsculas, con guiones."""
+    s = unicodedata.normalize("NFD", str(texto or ""))
+    s = "".join(c for c in s if unicodedata.category(c) != "Mn").lower()
+    s = re.sub(r"[^a-z0-9]+", "-", s).strip("-")
+    return s[:largo].strip("-") or vacio
+
+
+def slug_empresa(nucleo):
+    return slugify(nucleo, "empresa")
+
+
+def slug_persona(nucleo):
+    return slugify(nucleo, "persona") if nucleo else "persona"
 
 
 def _slug_libre(conn, tabla, base, usados=None):
@@ -151,35 +165,6 @@ SQL_EMPRESAS_AGREGADOS = """
 """
 
 
-def empresas_completo(conn, fuente):
-    """Empresas con al menos MIN_AVISOS_EMPRESA pares aviso-lado, desde las
-    partes de `fuente`. Los restos de parseo (una persona o un encabezado
-    pegados a una razón social) casi siempre aparecen una sola vez, y estas
-    páginas se indexan y no pueden mostrar personas."""
-    conn.executescript(SQL_EMPRESAS_TABLAS)
-    filas = [f for f in _por_nucleo(_variantes(conn, fuente, TIPO_EMPRESA)) if f[2] >= MIN_AVISOS_EMPRESA]
-    filas.sort(key=lambda f: (-f[2], f[0]))
-    usados = set()
-    conn.executemany(
-        "INSERT INTO empresas (nucleo, nombre, slug, avisos, como_actora, como_demandada) VALUES (?, ?, ?, ?, ?, ?)",
-        [(nucleo, nombre, _slug_libre(conn, "empresas", emp.slugify(nucleo), usados), n, act, dem)
-         for nucleo, nombre, n, act, dem in filas])
-    conn.execute(f"""
-        INSERT INTO entradas_empresas
-            SELECT e.id, pa.entrada_id, CASE pa.rol WHEN 1 THEN 'actora' ELSE 'demandada' END
-            FROM {fuente}.partes_nombres n
-            JOIN {fuente}.partes_avisos pa ON pa.nombre_id = n.id
-            JOIN empresas e ON e.nucleo = n.nucleo
-            WHERE n.tipo = {TIPO_EMPRESA}
-            GROUP BY 1, 2, 3
-            ORDER BY 2
-    """)
-    _empresas_hechos(conn)
-    conn.executescript(SQL_EMPRESAS_AGREGADOS)
-    conn.executescript(SQL_EMPRESAS_INDICES)
-    return len(filas)
-
-
 def empresas_incremental(conn, log):
     """Rehace solo las empresas que aparecen en los avisos nuevos (y las que
     con ellos llegan al mínimo)."""
@@ -198,7 +183,7 @@ def empresas_incremental(conn, log):
         else:
             conn.execute("INSERT INTO empresas (nucleo, nombre, slug, avisos, como_actora, como_demandada) "
                          "VALUES (?, ?, ?, ?, ?, ?)",
-                         (nucleo, nombre, _slug_libre(conn, "empresas", emp.slugify(nucleo)), n, act, dem))
+                         (nucleo, nombre, _slug_libre(conn, "empresas", slug_empresa(nucleo)), n, act, dem))
             nuevas += 1
     conn.executescript(f"""
         DROP TABLE IF EXISTS temp.ids;
@@ -270,49 +255,6 @@ def _personas_por_nucleo(filas):
         yield fila
 
 
-def personas_completo(conn, fuente):
-    """Tablas personas / personas_fts para /personas del server (noindex).
-    Solo los núcleos con al menos MIN_AVISOS_PERSONA avisos. Los avisos de
-    cada persona los lee el server de partes_avisos."""
-    conn.executescript("""
-        CREATE TABLE personas (
-            id             INTEGER PRIMARY KEY,
-            nucleo         TEXT UNIQUE NOT NULL,
-            nombre         TEXT NOT NULL,
-            slug           TEXT UNIQUE NOT NULL,
-            avisos         INTEGER NOT NULL,
-            como_actora    INTEGER NOT NULL,
-            como_demandada INTEGER NOT NULL,
-            primer_boletin TEXT,
-            ultimo_boletin TEXT
-        );
-    """)
-    usados = set()
-    lote, total = [], 0
-    for nucleo, nombre, n, act, dem, desde, hasta in _personas_por_nucleo(_personas_variantes(conn, fuente)):
-        if n < MIN_AVISOS_PERSONA:
-            continue
-        lote.append((nucleo, nombre, _slug_libre(conn, "personas", pers.slugify(nucleo), usados),
-                     n, act, dem, desde, hasta))
-        if len(lote) >= 50_000:
-            conn.executemany("INSERT INTO personas (nucleo, nombre, slug, avisos, como_actora, como_demandada, "
-                             "primer_boletin, ultimo_boletin) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", lote)
-            total += len(lote)
-            lote = []
-    conn.executemany("INSERT INTO personas (nucleo, nombre, slug, avisos, como_actora, como_demandada, "
-                     "primer_boletin, ultimo_boletin) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", lote)
-    total += len(lote)
-    conn.executescript("""
-        CREATE INDEX idx_personas_avisos ON personas (avisos DESC);
-        CREATE VIRTUAL TABLE personas_fts USING fts5(
-            nombre, content='personas', content_rowid='id', detail=none
-        );
-        INSERT INTO personas_fts(rowid, nombre) SELECT id, nombre FROM personas;
-        DROP TABLE temp.rangos;
-    """)
-    return total
-
-
 def personas_incremental(conn, log):
     conn.executescript(f"""
         DROP TABLE IF EXISTS temp.afectadas;
@@ -337,7 +279,7 @@ def personas_incremental(conn, log):
             cur = conn.execute(
                 "INSERT INTO personas (nucleo, nombre, slug, avisos, como_actora, como_demandada, "
                 "primer_boletin, ultimo_boletin) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (nucleo, nombre, _slug_libre(conn, "personas", pers.slugify(nucleo)), n, act, dem, desde, hasta))
+                (nucleo, nombre, _slug_libre(conn, "personas", slug_persona(nucleo)), n, act, dem, desde, hasta))
             conn.execute("INSERT INTO personas_fts(rowid, nombre) VALUES (?, ?)", (cur.lastrowid, nombre))
             nuevas += 1
     conn.executescript("DROP TABLE temp.afectadas; DROP TABLE temp.rangos;")
@@ -471,20 +413,6 @@ SQL_ESTADISTICAS_INDICES = """
 """
 
 
-def estadisticas_completo(conn):
-    conn.execute("PRAGMA temp_store=FILE")
-    conn.executescript(SQL_ESTADISTICAS_TABLAS)
-    _hechos(conn)
-    conn.executescript(SQL_POR_MES)
-    conn.executescript("""
-        INSERT INTO tipo_organo
-            SELECT tipo, organo, COUNT(*) FROM temp.h
-            WHERE tipo IS NOT NULL AND organo IS NOT NULL GROUP BY 1, 2;
-    """ + SQL_DURACION_DE.format(fechas=SQL_EXP_FECHAS) + SQL_DURACIONES + SQL_ESTADISTICAS_INDICES + """
-        DROP TABLE temp.h;
-    """)
-
-
 def _sumar(conn, tabla, claves, valores, consulta):
     """Suma a `tabla` los conteos de `consulta` (claves + valores); crea las
     filas que falten. Las claves pueden ser NULL (se comparan con IS)."""
@@ -551,15 +479,6 @@ def estadisticas_incremental(conn, log, max_id_antes):
 # ── Resumen para el arranque del server ───────────────────────────────────
 # Conteos sobre toda la tabla que el server calculaba al abrir la base (~5 s
 # y un índice de 1.2 GB): por año del expediente y tipo, y por juzgado.
-
-def resumen_completo(conn):
-    conn.executescript("""
-        CREATE TABLE resumen_anio_tipo AS
-            SELECT anio, tipo_juicio_norm AS tipo, COUNT(*) AS n
-            FROM entradas GROUP BY anio, tipo_juicio_norm;
-        CREATE TABLE resumen_juzgado AS
-            SELECT juzgado, COUNT(*) AS n FROM entradas WHERE juzgado IS NOT NULL GROUP BY juzgado;
-    """)
 
 
 def resumen_incremental(conn, max_id_antes):

@@ -4,6 +4,8 @@ Documentación de las estrategias de extracción y los resultados de las pruebas
 
 ---
 
+> **Desde noviembre de 2026 el parser está en Rust** (`scraper/boletin_rs`): `poc.py` es `src/poc/` (parser en `src/poc/parser.rs`), `reparse.py` es `poc reparsear`, `normalize_tipo.py` es `src/tipos.rs`, `acuerdos.py` es `src/acuerdos.rs`, `empresas.py` y `personas.py` son `src/partes.rs`. Los nombres de funciones y expresiones de abajo son los de Python, que el port conserva. Los casos de `test_tipo_acuerdo.py` están en `scraper/boletin_rs/tests/casos.rs`.
+
 ## Fuente
 
 El boletín es un PDF generado en Adobe InDesign, publicado diariamente (días hábiles). Tiene dos columnas de texto por página. El acceso al índice es vía un formulario web con CSRF token; los PDFs están en un CDN externo sin autenticación.
@@ -193,7 +195,7 @@ El 21.4% sin demandada corresponde a casos unilaterales (ver arriba), no son fal
 Tras cambiar la lógica de parseo no hace falta volver a bajar los PDFs. `reparse.py` lee los `.txt` ya generados en `scraper/data/<fecha>/pdfs/`, aplica `parse_pdf` y reescribe `entradas.csv`:
 
 ```bash
-python scraper/reparse.py scraper/data/2026-06-10
+scraper/boletin_rs/target/release/poc reparsear scraper/data/2026-06-10
 ```
 
 ---
@@ -363,8 +365,7 @@ tipo de juicio, y se perdían.
   2026). `[hipotesis]` más órganos publican la descripción, no hay más
   prevenciones. Se prueba contando por órgano y año.
 
-Casos reales en `scraper/test_tipo_acuerdo.py` (`python3
-scraper/test_tipo_acuerdo.py`). Si el CSV no trae la columna (corridas
+Casos reales en `scraper/boletin_rs/tests/casos.rs` (`cargo test`). Si el CSV no trae la columna (corridas
 anteriores), `build_db.py` la calcula desde `raw_text`, así que un build
 nuevo la tiene aunque no haya re-parseo. `organo_mes` suma `prevenciones`,
 `negaciones` y `admisiones`.
@@ -393,16 +394,16 @@ un segundo grupo opcional que lo consume cuando está presente;
 
 El boletín pega al número lo que sigue en el aviso: `1002/2017 Tomo II`, `153/2024 Inc`, `744/2023 Principal Tomo Dos`, `101/2026 Amparo 667/2026 Quejosa...` y, en las UGJ, la descripción después de una coma (`39974/2026, Emplazar`). Hasta octubre todo eso quedaba en `expediente`, y como la ficha agrupa por ese texto exacto, un mismo expediente quedaba repartido en varias fichas: en la base de septiembre a noviembre de 2026, el 38 % de los avisos traía texto pegado y 127 mil de 545 mil fichas eran pedazos de otras.
 
-`acuerdos.separar_expediente` deja en `expediente` solo el número (N/AAAA, o la toca N/AAAA/NNN, con guiones pasados a barras) y guarda el resto en `cuaderno` (el tomo o cuaderno del mismo expediente, que la ficha muestra en cada aviso). Después de la coma de las UGJ no hay cuaderno: es la descripción, y la toma `descripcion`. `build_db.py` lo aplica también a los CSV anteriores. Casos en `test_tipo_acuerdo.py`.
+`acuerdos.separar_expediente` deja en `expediente` solo el número (N/AAAA, o la toca N/AAAA/NNN, con guiones pasados a barras) y guarda el resto en `cuaderno` (el tomo o cuaderno del mismo expediente, que la ficha muestra en cada aviso). Después de la coma de las UGJ no hay cuaderno: es la descripción, y la toma `descripcion`. `build_db.py` lo aplica también a los CSV anteriores. Casos en `scraper/boletin_rs/tests/casos.rs`.
 
 ### Nombres de partes con el resto del aviso pegado (nov. 2026)
 
 Hay avisos donde el nombre de una parte se tragó el tipo de juicio o la descripción. Pasa cuando el boletín escribe la descripción antes del tipo ("Guzmán García Lorena. Aud. 272-B no Publ. ... Especial Familiar. 1 Audiencia.") o cuando no hay "vs." y el tipo se reconoce recién al final ("Pérez Vargas Saúl y Hernández Villegas Brenda. Especial Familiar Señalamiento ... Div."). También el tipo solo, pegado a la demandada ("Pérez Espino Mildred. Ejecutivo Mercantil"). En la corrida de noviembre de 2026 eran unos 35 mil de 935 mil nombres.
 
-`acuerdos.separar_parte` corta el nombre en el primer punto seguido de un tipo de juicio reconocido o de una palabra que abre una descripción ("Aud.", "Acdo.", "Prevención", "Señalamiento", "Se Tiene"...). Lo que sobra sirve de descripción si no hay otra. Es conservador con los nombres de empresas, que también tienen puntos ("S.A. de C.V. Institución de Banca Múltiple"). `acuerdos.quitar_marca_publicacion` quita "NO PUBLICADO" / "MAL PUBLICADO" del principio de la actora (2,772 avisos en la misma base). Las dos se aplican en `poc._row` y en `build_db.py` (CSV anteriores). Casos en `test_tipo_acuerdo.py`.
+`acuerdos.separar_parte` corta el nombre en el primer punto seguido de un tipo de juicio reconocido o de una palabra que abre una descripción ("Aud.", "Acdo.", "Prevención", "Señalamiento", "Se Tiene"...). Lo que sobra sirve de descripción si no hay otra. Es conservador con los nombres de empresas, que también tienen puntos ("S.A. de C.V. Institución de Banca Múltiple"). `acuerdos.quitar_marca_publicacion` quita "NO PUBLICADO" / "MAL PUBLICADO" del principio de la actora (2,772 avisos en la misma base). Las dos se aplican en `poc._row` y en `build_db.py` (CSV anteriores). Casos en `scraper/boletin_rs/tests/casos.rs`.
 
 ### Encabezados de sección pegados al primer nombre (nov. 2026)
 
 El parser a veces pega el encabezado de la sección del boletín delante del primer nombre: fechas ("del 05 de Junio del 2025", "DEL 2022", "Viernes 12 de julio del 2019"), "Audiencia", "PUBLICADOS", "Pon 3, 1 Sent.", "Providencias Precautorias.", "SENTENCIAS DEF. MAL PUBLICADAS", "no Publ. del 21 Ene 2025". Eran ~43 mil nombres de actora o demandada en la base de noviembre de 2026, y en las empresas con un solo aviso eran casi un tercio de la basura (la empresa real con el encabezado delante quedaba como otra empresa).
 
-`acuerdos.quitar_marca_publicacion` los quita de a uno (pueden venir varios seguidos), en actora y demandada, tanto en `poc.py` como en la carga de `build_db.py` para los CSV viejos. Si no queda nada, deja el original. Casos en `test_tipo_acuerdo.py`, incluidos apellidos que empiezan igual ("Del Valle", "Del Río").
+`acuerdos.quitar_marca_publicacion` los quita de a uno (pueden venir varios seguidos), en actora y demandada, tanto en `poc.py` como en la carga de `build_db.py` para los CSV viejos. Si no queda nada, deja el original. Casos en `scraper/boletin_rs/tests/casos.rs`, incluidos apellidos que empiezan igual ("Del Valle", "Del Río").
