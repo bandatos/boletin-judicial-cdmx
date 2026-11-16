@@ -2,11 +2,12 @@
 // separar_parte, descripcion_de_sobrante, quitar_marca_publicacion. Lo usan
 // el parser (poc) y el precálculo (derivar). Índices en bytes sobre &str;
 // cada slice se trata como string nuevo, igual que los slices de Python.
-use crate::cache::{memo, Cache};
+use crate::cache::Memo;
+use std::sync::LazyLock;
 use crate::py::{cap_first, clen, cprefix, lstrip, rstrip_c, split_ws, strip, strip_c};
 use crate::re::Re;
 use crate::tipos::{es_stop_word, expand_abbr, match_canonical_prefix};
-use std::cell::RefCell;
+
 use std::sync::OnceLock;
 
 struct A {
@@ -100,13 +101,11 @@ fn tramo<'t>(raw: &'t str, demandada: Option<&str>) -> (&'t str, bool) {
     match a.cola.search(t) { Some(m) => (&t[..m.start], false), None => (t, false) }
 }
 
-thread_local! {
-    static C_SIN_TIPO: RefCell<Cache<Option<String>>> = RefCell::new(Cache::new(300_000));
-    static C_SEPARAR_PARTE: RefCell<Cache<(String, Option<String>)>> = RefCell::new(Cache::new(300_000));
-}
+static C_SIN_TIPO: LazyLock<Memo<Option<String>>> = LazyLock::new(|| Memo::new(300_000));
+static C_SEPARAR_PARTE: LazyLock<Memo<(String, Option<String>)>> = LazyLock::new(|| Memo::new(300_000));
 
 /// _sin_tipo (con caché, como en Python).
-pub fn sin_tipo(tramo: &str) -> Option<String> { memo(&C_SIN_TIPO, tramo, || sin_tipo_(tramo)) }
+pub fn sin_tipo(tramo: &str) -> Option<String> { C_SIN_TIPO.get(tramo, || sin_tipo_(tramo)) }
 
 fn sin_tipo_(tramo: &str) -> Option<String> {
     let p: Vec<&str> = split_ws(tramo).collect();
@@ -183,7 +182,7 @@ pub fn separar_expediente(exp: &str) -> (String, Option<String>) {
 /// separar_parte: (nombre, sobrante). Con caché, como en Python.
 pub fn separar_parte(nombre: &str) -> (String, Option<String>) {
     if nombre.is_empty() || !nombre.contains(". ") { return (nombre.to_string(), None); }
-    memo(&C_SEPARAR_PARTE, nombre, || separar_parte_(nombre))
+    C_SEPARAR_PARTE.get(nombre, || separar_parte_(nombre))
 }
 
 fn separar_parte_(nombre: &str) -> (String, Option<String>) {

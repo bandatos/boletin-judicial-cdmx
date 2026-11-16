@@ -1,11 +1,11 @@
 // Port de scraper/normalize_tipo.py: expand_abbr, match_canonical_prefix,
 // normalize y sus tablas (en el orden de Python).
-use crate::cache::{memo, Cache};
+use crate::cache::Memo;
 use crate::py::{clen, py_alpha, rstrip_c, strip, is_space};
 use crate::re::Re;
-use std::cell::RefCell;
+
 use std::collections::{HashMap, HashSet};
-use std::rc::Rc;
+use std::sync::{Arc, LazyLock};
 use std::sync::OnceLock;
 
 pub const ABBR: &[(&str, &str)] = &[
@@ -257,13 +257,11 @@ pub fn match_canonical_prefix(text: &str) -> Option<&'static str> {
 pub fn min_(c: char) -> bool { c.is_ascii_lowercase() || "áéíóúñ".contains(c) }
 pub fn may_(c: char) -> bool { c.is_ascii_uppercase() || "ÁÉÍÓÚÑ".contains(c) }
 
-thread_local! {
-    static C_EXPAND: RefCell<Cache<Rc<str>>> = RefCell::new(Cache::new(400_000));
-    static C_NORMALIZE: RefCell<Cache<Option<&'static str>>> = RefCell::new(Cache::new(400_000));
-}
+static C_EXPAND: LazyLock<Memo<Arc<str>>> = LazyLock::new(|| Memo::new(400_000));
+static C_NORMALIZE: LazyLock<Memo<Option<&'static str>>> = LazyLock::new(|| Memo::new(400_000));
 
 /// expand_abbr (con caché, como en Python).
-pub fn expand_abbr(text: &str) -> Rc<str> { memo(&C_EXPAND, text, || expand_abbr_(text).into()) }
+pub fn expand_abbr(text: &str) -> Arc<str> { C_EXPAND.get(text, || expand_abbr_(text).into()) }
 
 fn expand_abbr_(text: &str) -> String {
     let d = datos();
@@ -316,7 +314,7 @@ fn todo_minus(s: &str, lo: usize, hi: usize, punto: bool) -> bool {
 /// normalize (con caché, como normalize_tipo de build_db.py).
 pub fn normalize(tipo_juicio: Option<&str>) -> Option<&'static str> {
     let tj = tipo_juicio.filter(|s| !s.is_empty())?;
-    memo(&C_NORMALIZE, tj, || normalize_(tj))
+    C_NORMALIZE.get(tj, || normalize_(tj))
 }
 
 fn normalize_(tj: &str) -> Option<&'static str> {

@@ -1,9 +1,7 @@
-// Cachés por hilo para funciones puras de un texto (lo que en Python lleva
-// functools.lru_cache). Al llegar al máximo se vacían enteras.
-use std::cell::RefCell;
+// Caché de funciones puras de un texto, compartida entre hilos.
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
-use std::thread::LocalKey;
+use std::sync::Mutex;
 
 /// FxHash (el de rustc): mucho más barato que SipHash para claves cortas.
 #[derive(Default, Clone, Copy)]
@@ -25,19 +23,32 @@ impl Hasher for Fx {
 }
 pub type FxMap<K, V> = HashMap<K, V, BuildHasherDefault<Fx>>;
 
-pub struct Cache<V> { m: FxMap<Box<str>, V>, max: usize }
-impl<V> Cache<V> {
-    pub fn new(max: usize) -> Cache<V> { Cache { m: FxMap::default(), max } }
-}
+/// Caché compartida entre hilos para funciones puras de un texto (lo que en
+/// Python lleva functools.lru_cache). Repartida en segmentos con su propio
+/// candado para que los hilos casi nunca se esperen. Antes era una caché por
+/// hilo: con 19 hilos cada uno veía una parte de los datos y recalculaba lo
+/// que ya había calculado otro (el CPU total se triplicaba). Al llegar al
+/// máximo, un segmento se vacía entero.
+pub struct Memo<V> { segmentos: Vec<Mutex<FxMap<Box<str>, V>>>, max_por_segmento: usize }
 
-/// f(k) con caché por hilo en `c`.
-pub fn memo<V: Clone>(c: &'static LocalKey<RefCell<Cache<V>>>, k: &str, f: impl FnOnce() -> V) -> V {
-    if let Some(v) = c.with(|c| c.borrow().m.get(k).cloned()) { return v; }
-    let v = f();
-    c.with(|c| {
-        let mut c = c.borrow_mut();
-        if c.m.len() >= c.max { c.m.clear(); }
-        c.m.insert(k.into(), v.clone());
-    });
-    v
+const SEGMENTOS: usize = 128;
+
+impl<V: Clone> Memo<V> {
+    pub fn new(max: usize) -> Memo<V> {
+        Memo { segmentos: (0..SEGMENTOS).map(|_| Mutex::new(FxMap::default())).collect(),
+               max_por_segmento: max / SEGMENTOS + 1 }
+    }
+
+    /// f(k), calculado una sola vez mientras siga en la caché.
+    pub fn get(&self, k: &str, f: impl FnOnce() -> V) -> V {
+        let mut h = Fx::default();
+        h.write(k.as_bytes());
+        let seg = &self.segmentos[(h.finish() >> 7) as usize % SEGMENTOS];
+        if let Some(v) = seg.lock().unwrap().get(k) { return v.clone(); }
+        let v = f();
+        let mut m = seg.lock().unwrap();
+        if m.len() >= self.max_por_segmento { m.clear(); }
+        m.insert(k.into(), v.clone());
+        v
+    }
 }

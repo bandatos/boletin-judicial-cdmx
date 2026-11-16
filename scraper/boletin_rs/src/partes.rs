@@ -1,13 +1,13 @@
 // Port de scraper/personas.py (personas) y scraper/empresas.py (partes).
 // Índices siempre en bytes sobre &str; cada slice se trata como string nuevo,
 // igual que los slices de Python (lookbehind y \b no ven fuera del slice).
-use crate::cache::{memo, Cache};
+use crate::cache::Memo;
 use crate::py::{clen, is_space, split_ws, strip, strip_c};
 use crate::re::Re;
 use crate::sets;
 use crate::tipos::{may_, min_};
-use std::cell::RefCell;
-use std::rc::Rc;
+
+use std::sync::{Arc, LazyLock};
 use std::collections::HashSet;
 use std::sync::OnceLock;
 use unicode_normalization::char::{decompose_canonical, is_combining_mark};
@@ -471,13 +471,11 @@ fn r() -> &'static R {
     R_.get_or_init(R::new)
 }
 
-thread_local! {
-    static C_DETECTAR: RefCell<Cache<Rc<Deteccion>>> = RefCell::new(Cache::new(500_000));
-}
+static C_DETECTAR: LazyLock<Memo<Arc<Deteccion>>> = LazyLock::new(|| Memo::new(500_000));
 
 /// personas.personas(campo) y empresas.partes(campo) juntas, con caché por
 /// campo (empresas.partes la tiene en Python): comparten los trozos.
-pub fn detectar(campo: &str) -> Rc<Deteccion> { memo(&C_DETECTAR, campo, || Rc::new(r().detectar(campo))) }
+pub fn detectar(campo: &str) -> Arc<Deteccion> { C_DETECTAR.get(campo, || Arc::new(r().detectar(campo))) }
 /// detectar sin pasar por la caché (para medir).
 pub fn detectar_sin_cache(campo: &str) -> Deteccion { r().detectar(campo) }
 pub fn personas(campo: &str) -> Vec<(String, String)> { detectar(campo).personas.clone() }
