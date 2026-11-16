@@ -1,6 +1,6 @@
-// Mismo resultado con los agregados precalculados (build_db.py
-// --agregados-empresas) que con las consultas en vivo. El SQL se lee de
-// build_db.py para no mantener una copia que diverja.
+// Mismo resultado con los agregados precalculados (scraper/agregados.py)
+// que con las consultas en vivo. El SQL se lee del módulo para no mantener
+// una copia que diverja.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
@@ -17,8 +17,15 @@ const dbPath = buildFixtureDb();
   w.exec("INSERT INTO entradas_empresas VALUES (1, 3, 'demandada')");
   w.close();
 }
-const buildDb = fs.readFileSync(path.join(__dirname, '..', '..', 'scraper', 'build_db.py'), 'utf8');
-const sql = buildDb.match(/SQL_AGREGADOS_EMPRESAS = """([\s\S]*?)"""/)[1];
+// El SQL se lee de scraper/agregados.py: tabla temporal eh y agregados.
+const agregados = fs.readFileSync(path.join(__dirname, '..', '..', 'scraper', 'agregados.py'), 'utf8');
+const tablas = agregados.match(/SQL_EMPRESAS_TABLAS = """([\s\S]*?)"""/)[1]
+  .split(';').filter(t => /CREATE TABLE (empresas_\w+|tipo_empresa)/.test(t))
+  .map(t => t.replace('CREATE TABLE', 'CREATE TABLE IF NOT EXISTS')).join(';\n');
+const hechos = agregados.match(/(CREATE TEMP TABLE eh AS[\s\S]*?)\{donde\}/)[1];
+const sql = `DROP TABLE IF EXISTS empresas_tipos; DROP TABLE IF EXISTS empresas_anios;
+  DROP TABLE IF EXISTS empresas_meses; DROP TABLE IF EXISTS empresas_expedientes; DROP TABLE IF EXISTS tipo_empresa;
+  ${tablas};\n${hechos};\n${agregados.match(/SQL_EMPRESAS_AGREGADOS = """([\s\S]*?)"""/)[1]}`;
 
 // Resultado en vivo, antes de crear los agregados.
 process.env.DB_PATH = dbPath;

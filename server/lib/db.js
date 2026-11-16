@@ -60,10 +60,14 @@ function getResumen() {
 
   // Un solo recorrido: (anio, tipo) -> n. De ahí salen el total, los
   // conteos por tipo, la lista de años y el gráfico.
-  const porAnioTipo = d.prepare(`
-    SELECT anio, tipo_juicio_norm AS tipo, COUNT(*) AS n
-    FROM entradas GROUP BY anio, tipo_juicio_norm
-  `).all();
+  // Precalculado por build_db.py (resumen_anio_tipo); bases anteriores lo
+  // cuentan acá.
+  const porAnioTipo = hayTabla('resumen_anio_tipo')
+    ? d.prepare('SELECT anio, tipo, n FROM resumen_anio_tipo').all()
+    : d.prepare(`
+      SELECT anio, tipo_juicio_norm AS tipo, COUNT(*) AS n
+      FROM entradas GROUP BY anio, tipo_juicio_norm
+    `).all();
 
   const porTipo = new Map();
   const anios = new Set();
@@ -74,9 +78,12 @@ function getResumen() {
     if (anio) anios.add(anio);
   }
 
-  // Usa idx_expediente (juzgado, expediente) como índice cubriente.
+  // resumen_juzgado o, en bases anteriores, idx_expediente (juzgado,
+  // expediente) como índice cubriente.
   const porJuzgado = new Map(
-    d.prepare('SELECT juzgado, COUNT(*) AS n FROM entradas WHERE juzgado IS NOT NULL GROUP BY juzgado')
+    d.prepare(hayTabla('resumen_juzgado')
+      ? 'SELECT juzgado, n FROM resumen_juzgado'
+      : 'SELECT juzgado, COUNT(*) AS n FROM entradas WHERE juzgado IS NOT NULL GROUP BY juzgado')
       .all().map(r => [r.juzgado, r.n])
   );
   const slugs = new Map([...porJuzgado.keys()].map(j => [slugify(j), j]));
@@ -826,9 +833,31 @@ function normNombre(str) {
 // verifican en el filtro, que además exige el nombre exacto.
 const MAX_CANDIDATOS_PERSONA = 200000;
 function getExpedientesPersona(persona, pagina) {
+  const buscado = ` ${persona.nucleo} `;
+  // Con partes_avisos (build_db.py): los avisos de la persona por índice,
+  // en milisegundos aunque el nombre sea común. Una persona son todas las
+  // variantes de nombre con su núcleo.
+  if (hayTabla('partes_avisos')) {
+    const res = paginaExpedientes({
+      from: 'entradas e',
+      where: `e.id IN (SELECT pa.entrada_id FROM partes_nombres n
+                       JOIN partes_avisos pa ON pa.nombre_id = n.id
+                       WHERE n.tipo = 2 AND n.nucleo = ?)`,
+      params: [persona.nucleo],
+      pagina, maxCandidatos: Math.max(CANDIDATOS, (persona.avisos || 0) + 1),
+    });
+    for (const g of res.grupos) g.rol = normNombre(g.actora).includes(buscado) ? 'actora' : 'demandada';
+    if (res.todos) {
+      res.conteos = {
+        avisos: res.todos.length,
+        como_actora: res.todos.filter(r => normNombre(r.actora).includes(buscado)).length,
+        como_demandada: res.todos.filter(r => normNombre(r.demandada).includes(buscado)).length,
+      };
+    }
+    return res;
+  }
   const palabras = persona.nucleo.split(' ').filter(w => w.length >= 3 && !['del', 'las', 'los'].includes(w));
   if (!palabras.length) return { grupos: [], pagina: 1, hayMas: false, totalExpedientes: 0, totalAvisos: 0 };
-  const buscado = ` ${persona.nucleo} `;
   // Se traen todas las coincidencias del índice (las de la persona y las de
   // otros nombres con las mismas palabras) para contar expedientes exactos y
   // resumir por año y tipo. Tope: varias veces sus avisos, hasta

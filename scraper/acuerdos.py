@@ -245,7 +245,37 @@ def descripcion_de_sobrante(sobrante):
 RE_MARCA_PUBLICACION = re.compile(r"^(?:NO|MAL)\s+PUBLICAD[OA]S?\b[.:,\s-]*")
 
 
+# Encabezados de sección del boletín que el parser pegó delante del primer
+# nombre de la sección: fechas ("del 05 de Junio del 2025", "DEL 2022"),
+# "Audiencia", "PUBLICADOS", "Pon 3, 1 Sent.", "Providencias Precautorias.",
+# "SENTENCIAS DEF.". ~42 mil avisos en la base de 2026-11. Se quitan de a
+# uno, porque a veces vienen varios ("SENTENCIAS DEF. MAL PUBLICADAS ...").
+_DIAS = r"(?:lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)"
+_MESES = r"(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|sept?iembre|octubre|noviembre|diciembre)"
+_FECHA = rf"(?:\d{{1,2}}\s+de\s+{_MESES}\s+(?:del?\s+)?)?\d{{4}}"
+RE_ENCABEZADOS = [re.compile(p, re.I) for p in (
+    r"^(?:NO|MAL)\s+PUBLICAD[OA]S?\b[.:,\s-]*",
+    r"^publicad[oa]s\b[.:,\s-]+",
+    rf"^(?:{_DIAS},?\s+)?(?:(?:del?|al)\s+)?\d{{1,2}}\s+de\s+{_MESES}\s+(?:del?\s+)?\d{{4}}[.,:\s-]+",
+    r"^del?\s+\d{4}[.,:\s-]+",
+    rf"^sentencia[as]*\s+(?:def(?:initiva)?[as]*\.?|interlocutori\w*)(?:\s+(?:del?\s+)?{_FECHA})?[.,:\s-]+",
+    r"^sentencias?\s+(?=\S)",
+    r"^audiencias?\s+(?=\S)",
+    r"^pon(?:encia)?\.?\s*\d+(?:\s*,\s*\d+\s+sent(?:encias?)?\.?)?[.,:\s-]+",
+    r"^providencias\s+precautorias[.,:\s-]+",
+    # "no Publ. del 02 Jun 2025": republicación con la fecha original.
+    r"^no\s+publ\.?\s+(?:del?\s+)?\d{1,2}\s+[a-z]{3,}\.?\s+\d{4}[.,:\s-]+",
+)]
+
+
 def quitar_marca_publicacion(nombre):
+    """Quita las marcas de republicación y los encabezados de sección
+    pegados delante del nombre. Si no queda nada, devuelve el original."""
     if not nombre:
         return nombre
-    return RE_MARCA_PUBLICACION.sub("", nombre) or nombre
+    limpio, antes = nombre, None
+    while limpio != antes:
+        antes = limpio
+        for r in RE_ENCABEZADOS:
+            limpio = r.sub("", limpio, count=1)
+    return limpio.strip() or nombre

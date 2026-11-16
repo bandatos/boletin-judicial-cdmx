@@ -11,3 +11,6 @@ cruces/*.csv
 
 # Documentación interna, no se publica
 private-docs/
+
+# Entorno de Python del scraper (duckdb, pypcre)
+scraper/.venv/

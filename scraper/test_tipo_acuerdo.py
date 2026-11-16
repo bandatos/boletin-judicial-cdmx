@@ -72,10 +72,26 @@ PARTES = [
 if __name__ == "__main__":
     fallas = 0
     for nombre, esperado in [("NO PUBLICADO González Ayala Néstor Raúl", "González Ayala Néstor Raúl"),
-                             ("MAL PUBLICADO. Pérez Juan", "Pérez Juan"), ("Notaría 5", "Notaría 5")]:
+                             ("MAL PUBLICADO. Pérez Juan", "Pérez Juan"), ("Notaría 5", "Notaría 5"),
+                             ("del 05 de Junio del 2025 Núñez Sandoval Erendira", "Núñez Sandoval Erendira"),
+                             ("DEL 2022 Studio 28", "Studio 28"),
+                             ("Viernes 12 de julio del 2019 Inmobiliaria Horacio S.A", "Inmobiliaria Horacio S.A"),
+                             ("SENTENCIAS DEF. MAL PUBLICADAS Cruz Reyes Josefina Isabel", "Cruz Reyes Josefina Isabel"),
+                             ("Sentencia Definitivas del 06 de Mayo del 2024 Herrera Jerez Ana Laura", "Herrera Jerez Ana Laura"),
+                             ("SENTENCIAA DEFINITIVAA DEL 17 DE AGOSTO DEL 2022 Adj Products Group México", "Adj Products Group México"),
+                             ("SENTENCIA Granados Morales José Francisco", "Granados Morales José Francisco"),
+                             ("Audiencia Americas Resources S.A. de C.V.", "Americas Resources S.A. de C.V."),
+                             ("PUBLICADOS Toyota Financial Services México S.A. de C.V.", "Toyota Financial Services México S.A. de C.V."),
+                             ("Pon 3, 1 Sent. Monroy Serrano Gerardo", "Monroy Serrano Gerardo"),
+                             ("Pon 1 Novarec S.A. de C.V.", "Novarec S.A. de C.V."),
+                             ("Providencias Precautorias. Banco del Bajío Sociedad Anónima", "Banco del Bajío Sociedad Anónima"),
+                             ("Del Valle Pérez Juan", "Del Valle Pérez Juan"), ("Del Río Ana", "Del Río Ana"),
+                             ("Sentencia", "Sentencia"),
+                             ("Pon 3 no Publ. del 21 Ene 2025 Banco Santander México, S.A.", "Banco Santander México, S.A."),
+                             ("SENTENCIA INTERLOCUTORIS DEL 1 DE JULIO DEL 2019 Maresi Electronics, S.A.", "Maresi Electronics, S.A.")]:
         if quitar_marca_publicacion(nombre) != esperado:
             fallas += 1
-            print(f"FALLA marca: {nombre!r}")
+            print(f"FALLA marca: {nombre!r} -> {quitar_marca_publicacion(nombre)!r}")
     for nombre, esperado in PARTES:
         obtenido = separar_parte(nombre)[0]
         if obtenido != esperado:

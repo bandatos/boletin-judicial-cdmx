@@ -4,6 +4,8 @@
 !CHANGELOG.md
 # Scraper, para la corrida diaria (scraper/diario.py). Solo el código.
 !scraper/*.py
+!scraper/boletin_rs/
+scraper/boletin_rs/target
 server/node_modules
 server/test
 server/static/**/*.min.*

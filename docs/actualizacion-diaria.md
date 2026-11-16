@@ -7,7 +7,7 @@
 1. Lee la fecha del último boletín con avisos en `/data/boletin.sqlite`.
 2. Baja con `poc.py` el índice y los boletines desde el día siguiente hasta hoy, en `/data/scraper-data/<hoy>/`. Borra los PDF y deja el texto.
 3. Si no hay boletines nuevos, termina y avisa ("sin boletines nuevos en el portal").
-4. Copia la base y su estado a `/data/trabajo/` y corre `build_db.py --incremental` sobre la copia, con poca memoria (`BUILD_CACHE_MB=300`, etapas de a una, 4 procesos).
+4. Copia la base a `/data/trabajo/` y corre `build_db.py --incremental` sobre la copia, con poca memoria (`BUILD_CACHE_MB=300`, etapas de a una, 4 procesos).
 5. Chequea que ninguna cantidad baje (avisos, boletines, empresas, personas, vocabulario, sentencias con versión pública) y que haya avisos nuevos.
 6. Publica con un rename: `boletin.sqlite.anterior` queda como respaldo (hardlink) y el sitio recarga la base solo en ~30 s.
 7. Comprime los textos del día a `.txt.gz`.
@@ -29,13 +29,10 @@ Opcionales: `BUILD_CACHE_MB` (300), `BUILD_ETAPAS_A_LA_VEZ` (1), `BUILD_WORKERS`
 
 ## Primera vez
 
-El incremental necesita la base armada con el código actual y su estado:
+El incremental necesita la base armada con el código actual (v6 en adelante: guarda todas las detecciones de empresas y personas en `partes_nombres` y `partes_avisos`):
 
-- `/data/boletin.sqlite` (build completo de v5 en adelante)
-- `/data/boletin.sqlite.estado.sqlite` (lo deja el build completo al lado de la base, ~5.5 GB)
+- `/data/boletin.sqlite`
 - `/data/sivep.sqlite` (copia de `scraper/data/sivep/sivep.sqlite`, para los enlaces a versiones públicas)
-
-Si se rearma la base completa en local, hay que subir la base y el estado juntos: un estado de otra base da resultados mal.
 
 ## Probar a mano
 
@@ -49,7 +46,7 @@ python3 /app/scraper/diario.py --sin-correo --sin-publicar
 
 ## Espacio
 
-Durante la corrida conviven la base publicada, la copia de trabajo, los dos estados y la anterior: ~60 GB.
+Durante la corrida conviven la base publicada, la copia de trabajo y la anterior: ~50 GB.
 
 ## Pendiente
 

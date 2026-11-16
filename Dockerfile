@@ -6,6 +6,13 @@
 #   /data/scraper-data/    <run>/pdfs/boletin_<id>.txt(.gz), para el texto original
 # Otras rutas con DB_PATH y SCRAPER_DATA_DIR.
 
+# Scraper y parser en Rust (scraper/boletin_rs): binarios poc (bajar y
+# parsear boletines) y precalc (cálculo por aviso), para la corrida diaria.
+FROM rust:1.100-slim-bookworm AS rust
+WORKDIR /src
+COPY scraper/boletin_rs/ ./
+RUN cargo build --release --bins
+
 FROM node:24-bookworm-slim AS deps
 WORKDIR /app
 # Herramientas por si better-sqlite3 no tiene binario precompilado.
@@ -32,6 +39,7 @@ COPY server/ ./
 # Novedades del sitio (/novedades), en la raíz del repo.
 COPY CHANGELOG.md ./
 COPY scraper/*.py ./scraper/
+COPY --from=rust /src/target/release/poc /src/target/release/precalc /src/target/release/boletin ./scraper/boletin_rs/target/release/
 # static-server.js escribe los .min.css/.min.js al lado de los originales.
 RUN chown -R node:node /app/static
 USER node

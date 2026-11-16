@@ -7,7 +7,7 @@ Pensado para correr como tarea programada de Coolify dentro del contenedor
 del sitio (ver docs/actualizacion-diaria.md), pero anda en cualquier lado con
 las variables de entorno:
 
-  DATA_DIR          carpeta con boletin.sqlite y su .estado.sqlite (/data)
+  DATA_DIR          carpeta con boletin.sqlite (/data)
   SCRAPER_DATA_DIR  carpeta de corridas del scraper (/data/scraper-data)
   SIVEP_DB          sivep.sqlite para enlazar versiones públicas (opcional)
   MSMTP_HOST, MSMTP_PORT, MSMTP_USER, MSMTP_PASSWORD, MSMTP_FROM
@@ -39,7 +39,6 @@ DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 SCRAPER_DATA_DIR = Path(os.environ.get("SCRAPER_DATA_DIR", DATA_DIR / "scraper-data"))
 SIVEP_DB = os.environ.get("SIVEP_DB", str(DATA_DIR / "sivep.sqlite"))
 BASE = DATA_DIR / "boletin.sqlite"
-ESTADO = DATA_DIR / "boletin.sqlite.estado.sqlite"
 TRABAJO = DATA_DIR / "trabajo"
 
 # Lo que se compara entre la base publicada y la nueva: ninguna puede bajar.
@@ -100,8 +99,16 @@ def correr(c, cmd, env=None, cwd=AQUI):
         raise RuntimeError(f"{cmd[1]} terminó con código {p.returncode}")
 
 
+# Scraper en Rust (scraper/boletin_rs, binario poc): mismo resultado que
+# poc.py. Si no está compilado, Python.
+POC_RS = AQUI / "boletin_rs" / "target" / "release" / "poc"
+
+
 def descargar(c, desde, hasta, run_dir):
-    correr(c, [sys.executable, "poc.py", desde, hasta, "500", str(run_dir)])
+    if POC_RS.exists():
+        correr(c, [str(POC_RS), "descargar", desde, hasta, "500", str(run_dir)])
+    else:
+        correr(c, [sys.executable, "poc.py", desde, hasta, "500", str(run_dir)])
     # Los PDF ya no hacen falta: el texto queda en .txt (y después en .txt.gz).
     for pdf in (run_dir / "pdfs").glob("*.pdf"):
         pdf.unlink()
@@ -147,11 +154,10 @@ def chequear(antes, despues):
     return problemas
 
 
-def publicar(c, trabajo, trabajo_estado):
+def publicar(c, trabajo):
     anterior = BASE.with_name(BASE.name + ".anterior")
     anterior.unlink(missing_ok=True)
     os.link(BASE, anterior)
-    os.replace(trabajo_estado, ESTADO)
     os.replace(trabajo, BASE)
     c.log(f"publicada, la anterior queda en {anterior.name}")
 
@@ -236,14 +242,11 @@ def main():
 
     c = Corrida()
     trabajo = TRABAJO / BASE.name
-    trabajo_estado = TRABAJO / ESTADO.name
     estado, error = "error", None
     try:
         # Restos de una corrida cortada (p. ej. un deploy a mitad de camino).
         for f in TRABAJO.glob("boletin.sqlite*"):
             f.unlink()
-        if not ESTADO.exists():
-            raise RuntimeError(f"Falta {ESTADO.name}: el incremental necesita la base armada con su estado.")
         antes = c.paso("Cantidades de la base publicada", cuentas, BASE)
         c.datos["antes"] = antes
         # Desde el día siguiente al último boletín cargado: si no hay nada
@@ -255,8 +258,7 @@ def main():
         if not (run_dir / "entradas.csv").exists():
             estado = "sin boletines nuevos en el portal"
             return
-        c.paso("Copia de trabajo de la base y su estado", lambda: (shutil.copyfile(BASE, trabajo),
-                                                                   shutil.copyfile(ESTADO, trabajo_estado)))
+        c.paso("Copia de trabajo de la base", shutil.copyfile, BASE, trabajo)
         c.paso("Build incremental", sumar, c, trabajo)
         despues = c.paso("Cantidades de la base nueva", cuentas, trabajo)
         c.datos["despues"] = despues
@@ -273,7 +275,7 @@ def main():
         if args.sin_publicar:
             estado = f"armada sin publicar en {trabajo}"
             return
-        c.paso("Publicación", publicar, c, trabajo, trabajo_estado)
+        c.paso("Publicación", publicar, c, trabajo)
         c.paso("Compresión de textos", comprimir_textos, run_dir)
         estado = "publicada"
     except Exception:
