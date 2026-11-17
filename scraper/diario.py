@@ -104,7 +104,15 @@ POC_RS = AQUI / "boletin_rs" / "target" / "release" / "poc"
 
 
 def descargar(c, desde, hasta, run_dir):
-    correr(c, [str(POC_RS), "descargar", desde, hasta, "500", str(run_dir)])
+    # El portal y los PDF están detrás de Cloudflare, que bloquea la IP del
+    # server. PORTAL_PROXY (p. ej. http://boletin-vpn:8888, un gluetun con
+    # salida por Proton VPN en México) se le pasa solo al scraper: curl lo
+    # toma de https_proxy / http_proxy. El resto del contenedor sale directo.
+    proxy = os.environ.get("PORTAL_PROXY")
+    env = {"https_proxy": proxy, "http_proxy": proxy, "HTTPS_PROXY": proxy, "HTTP_PROXY": proxy} if proxy else None
+    if proxy:
+        c.log(f"  saliendo por {proxy}")
+    correr(c, [str(POC_RS), "descargar", desde, hasta, "500", str(run_dir)], env=env)
     # Los PDF ya no hacen falta: el texto queda en .txt (y después en .txt.gz).
     for pdf in (run_dir / "pdfs").glob("*.pdf"):
         pdf.unlink()
