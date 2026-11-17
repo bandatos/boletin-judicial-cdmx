@@ -20,6 +20,7 @@ boletin.sqlite.anterior.
 Uso: python3 diario.py [--sin-publicar] [--sin-correo] [--desde AAAA-MM-DD]
 """
 import argparse
+import email.utils
 import fcntl
 import gzip
 import os
@@ -183,6 +184,9 @@ def enviar(asunto, cuerpo):
     msg["Subject"] = asunto
     msg["From"] = os.environ.get("MSMTP_FROM") or os.environ.get("MSMTP_USER")
     msg["To"] = ", ".join(para)
+    # Sin Date ni Message-ID algunos clientes lo ordenan mal y los filtros lo puntúan como spam.
+    msg["Date"] = email.utils.formatdate(localtime=True)
+    msg["Message-ID"] = email.utils.make_msgid(domain=msg["From"].split("@")[-1])
     msg.set_content(cuerpo)
     with smtplib.SMTP(host, int(os.environ.get("MSMTP_PORT", "587")), timeout=60) as s:
         s.starttls()
