@@ -41,6 +41,9 @@ COPY server/ ./
 COPY CHANGELOG.md ./
 COPY scraper/*.py ./scraper/
 COPY --from=rust /src/target/release/poc /src/target/release/precalc /src/target/release/boletin ./scraper/boletin_rs/target/release/
+# build_db.precalc_version() sella el precálculo con el hash del código Rust.
+COPY scraper/boletin_rs/Cargo.lock ./scraper/boletin_rs/
+COPY scraper/boletin_rs/src/ ./scraper/boletin_rs/src/
 # static-server.js escribe los .min.css/.min.js al lado de los originales.
 RUN chown -R node:node /app/static
 USER node
