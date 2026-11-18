@@ -150,6 +150,18 @@ const pugLocals = {
 };
 
 
+// URL canónica: el dominio público (el sitio también responde en el dominio
+// interno de Coolify) y la ruta, con la página si no es la primera. El resto
+// de los parámetros (orden, año, mes...) son vistas de la misma página.
+const SITE_URL = (process.env.SITE_URL || 'https://boletinjudicial.bandatos.org').replace(/\/+$/, '');
+
+function canonical(req) {
+  if (!req || !req.url) return null;
+  const url = new URL(req.url, 'http://local');
+  const pagina = Number(url.searchParams.get('p'));
+  return SITE_URL + url.pathname + (Number.isInteger(pagina) && pagina > 1 ? `?p=${pagina}` : '');
+}
+
 function renderTemplate(name, locals) {
   const fn = compile(name);
   let datosHasta = null;
@@ -158,7 +170,8 @@ function renderTemplate(name, locals) {
     datosHasta = db.getUltimaFecha();
     hayEstadisticas = db.hayEstadisticas();
   } catch { /* sin base (404 de arranque): sin fecha ni menú de estadísticas */ }
-  return fn({ ...pugLocals, css: cssInline(), datosHasta, hayEstadisticas, ...locals });
+  const canonicalUrl = name === '404' ? null : canonical(locals && locals.req);
+  return fn({ ...pugLocals, css: cssInline(), datosHasta, hayEstadisticas, canonicalUrl, ...locals });
 }
 
 // Con una sola palabra que aparece en más avisos que esto, se sugiere acotar.
@@ -602,7 +615,7 @@ function health() {
 }
 
 module.exports = {
-  resaltar, robots, health, home, portada, personas, persona, juzgado, expediente, fecha, empresas, empresa, sources, novedades, opinion, renderTemplate, pugLocals,
+  resaltar, canonical, robots, health, home, portada, personas, persona, juzgado, expediente, fecha, empresas, empresa, sources, novedades, opinion, renderTemplate, pugLocals,
   salas: organos('sala'), juzgados: organos('juzgado'), sala: organo('sala'), juzgadoDesempeno: organo('juzgado'),
   tipos, tipo, misExpedientes, apiExpedientes, alertaEjemplo, sentenciaPublica, apiAviso, avisosExpediente,
 };

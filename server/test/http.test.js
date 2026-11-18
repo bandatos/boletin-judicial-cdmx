@@ -591,6 +591,17 @@ test('robots.txt deja fuera las páginas que nombran personas', async () => {
   assert.doesNotMatch(t, /Disallow: \/empresas/);
 });
 
+test('canonical: dominio público, ruta y solo la página', async () => {
+  const canon = body => (body.match(/<link rel="canonical" href="([^"]+)"/) || [])[1];
+  assert.equal(canon((await get('/')).body), 'https://boletinjudicial.bandatos.org/');
+  assert.equal(canon((await get('/empresas?orden=nombre&p=2')).body), 'https://boletinjudicial.bandatos.org/empresas?p=2');
+  assert.equal(canon((await get('/empresas?p=1')).body), 'https://boletinjudicial.bandatos.org/empresas');
+  assert.equal(canon((await get('/novedades?m=1')).body), 'https://boletinjudicial.bandatos.org/novedades');
+  assert.equal(canon((await get('/no-existe-esta-ruta')).body), undefined);
+  const { canonical } = require('../lib/views');
+  assert.equal(canonical({ url: '/buscar?q=juan&p=abc' }), 'https://boletinjudicial.bandatos.org/buscar');
+});
+
 test('sin GA en desarrollo y tests', async () => {
   assert.doesNotMatch((await get('/')).body, /googletagmanager/);
 });

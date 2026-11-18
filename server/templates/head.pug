@@ -12,6 +12,8 @@ mixin head(title, description, noindex)
         meta(name="description" content=description)
       if noindex
         meta(name="robots" content="noindex")
+      if canonicalUrl
+        link(rel="canonical" href=canonicalUrl)
       link(rel="icon" type="image/webp" href=asset('img/favicon-32.webp'))
       link(rel="apple-touch-icon" href=asset('img/favicon-180.webp'))
       //- Antes de pintar: marca si hay JS, si ya se respondió la pregunta de
