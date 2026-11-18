@@ -525,31 +525,68 @@ def estadisticas_incremental(conn, log, max_id_antes):
     _sumar(conn, "tipo_organo", ["tipo", "organo"], ["avisos"],
            f"""SELECT tipo, organo, COUNT(*) AS avisos FROM temp.h
                WHERE id > {int(max_id_antes)} AND tipo IS NOT NULL AND organo IS NOT NULL GROUP BY 1, 2""")
-    # Expedientes con avisos nuevos: se recalculan con todos sus avisos.
+    # Duraciones. Los avisos nuevos son posteriores a los que ya estaban, así
+    # que en un expediente con duración ya calculada el primer aviso y la
+    # sentencia no cambian: solo el tipo (es el máximo). Uno sin duración
+    # solo la gana si lo nuevo trae sentencia: esos (unos cientos por día)
+    # se recalculan con todo su historial. Leer el historial de todos los
+    # expedientes con avisos nuevos eran ~300 mil lecturas salteadas.
     conn.executescript(f"""
         DROP TABLE IF EXISTS temp.exps;
         CREATE TEMP TABLE exps AS
-            SELECT DISTINCT organo, expediente FROM temp.h
-            WHERE id > {int(max_id_antes)} AND anio >= 2017 AND expediente IS NOT NULL AND organo IS NOT NULL;
+            SELECT organo, expediente, MAX(tipo) AS tipo, MAX(COALESCE(act IN {SENTENCIAS}, 0)) AS con_sentencia
+            FROM temp.h
+            WHERE id > {int(max_id_antes)} AND anio >= 2017 AND expediente IS NOT NULL
+                  AND organo IS NOT NULL AND fecha IS NOT NULL
+            GROUP BY organo, expediente;
         DROP TABLE temp.h;
-        DELETE FROM duracion_expedientes
-            WHERE (organo, expediente) IN (SELECT organo, expediente FROM temp.exps);
-    """)
-    conn.execute("""
-        CREATE TEMP TABLE h AS
-            SELECT e.id, e.sala, COALESCE(e.sala, e.juzgado) AS organo, b.fecha_iso AS fecha,
-                   e.expediente, e.tipo_juicio_norm AS tipo, e.tipo_actuacion AS act, e.anio
-            FROM temp.exps x
-            JOIN entradas e ON e.expediente = x.expediente AND COALESCE(e.sala, e.juzgado) = x.organo
-            JOIN boletines b ON b.id = e.boletin_id
+        CREATE INDEX temp.idx_exps ON exps (organo, expediente);
     """)
     exps = conn.execute("SELECT COUNT(*) FROM temp.exps").fetchone()[0]
+    # Si se cargó un boletín anterior al último que había (uno que faltaba),
+    # lo nuevo no es posterior: todos se recalculan con su historial.
+    atrasado = conn.execute(f"""
+        SELECT (SELECT MIN(fecha_iso) FROM boletines WHERE n_entradas > 0 AND entrada_hasta > {int(max_id_antes)})
+             < (SELECT MAX(fecha_iso) FROM boletines WHERE n_entradas > 0 AND entrada_hasta <= {int(max_id_antes)})
+    """).fetchone()[0]
+    if atrasado:
+        conn.execute("""DELETE FROM duracion_expedientes
+                        WHERE (organo, expediente) IN (SELECT organo, expediente FROM temp.exps)""")
+    else:
+        # duracion_expedientes tiene clave (organo, expediente): búsqueda directa.
+        conn.executescript("""
+            UPDATE duracion_expedientes SET tipo = x.tipo
+                FROM temp.exps x
+                WHERE duracion_expedientes.organo = x.organo AND duracion_expedientes.expediente = x.expediente
+                      AND x.tipo > COALESCE(duracion_expedientes.tipo, '');
+            DELETE FROM temp.exps WHERE NOT con_sentencia OR EXISTS (
+                SELECT 1 FROM duracion_expedientes d WHERE d.organo = exps.organo AND d.expediente = exps.expediente);
+        """)
+    # Historial de los que quedan: por (juzgado, expediente) con
+    # idx_expediente y, para las salas (sin índice propio), por número.
+    # CROSS JOIN: sin él, el planificador recorre entradas entera.
+    columnas = """e.id, e.sala, COALESCE(e.sala, e.juzgado) AS organo, b.fecha_iso AS fecha,
+                  e.expediente, e.tipo_juicio_norm AS tipo, e.tipo_actuacion AS act, e.anio"""
+    conn.execute(f"""
+        CREATE TEMP TABLE h AS
+            SELECT {columnas}
+            FROM temp.exps x
+            CROSS JOIN entradas e ON e.juzgado = x.organo AND e.expediente = x.expediente AND e.sala IS NULL
+            JOIN boletines b ON b.id = e.boletin_id
+            UNION ALL
+            SELECT {columnas}
+            FROM temp.exps x
+            CROSS JOIN entradas e ON e.expediente = x.expediente AND e.sala = x.organo
+            JOIN boletines b ON b.id = e.boletin_id
+    """)
+    nuevas = conn.execute("SELECT COUNT(*) FROM temp.exps").fetchone()[0]
     conn.executescript(SQL_DURACION_DE.format(fechas=SQL_EXP_FECHAS) + SQL_DURACIONES + """
         DROP TABLE temp.h;
         DROP TABLE temp.exps;
         DROP TABLE temp.meses;
     """)
-    log(f"  estadísticas: {meses} meses rehechos, {exps} expedientes revisados")
+    log(f"  estadísticas: {meses} meses rehechos, duración: {exps} expedientes revisados, "
+        f"{nuevas} recalculados con su historial")
 
 
 # ── Resumen para el arranque del server ───────────────────────────────────
