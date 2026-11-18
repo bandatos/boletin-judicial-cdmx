@@ -121,7 +121,7 @@ def _por_nucleo(filas):
         yield fila
 
 
-def _empresas_hechos(conn, donde=""):
+def _empresas_hechos(conn, donde="", fuente="entradas_empresas"):
     """Tabla temporal con lo que necesitan los agregados de cada empresa.
     Sin `donde` recorre entradas_empresas en orden de entrada_id (así se
     insertó), de modo que las lecturas de entradas van en orden."""
@@ -132,7 +132,7 @@ def _empresas_hechos(conn, donde=""):
                    en.tipo_juicio_norm AS tipo, COALESCE(en.sala, en.juzgado) AS organo,
                    COALESCE(en.sala, en.juzgado, '') || '|' || COALESCE(en.expediente, en.id) AS clave,
                    en.expediente
-            FROM entradas_empresas ee
+            FROM {fuente} ee
             CROSS JOIN entradas en ON en.id = ee.entrada_id
             JOIN boletines b ON b.id = en.boletin_id
             {donde}
@@ -165,56 +165,126 @@ SQL_EMPRESAS_AGREGADOS = """
 """
 
 
+# Empresas que ya estaban: se les suma lo de los avisos nuevos (temp.eh).
+# Rehacerlas enteras obligaba a releer todos los avisos de cada una (los
+# bancos tienen cientos de miles, salteados en toda la base): 26 min en el
+# server. Un expediente cuenta como nuevo si la empresa no lo tenía en
+# empresas_expedientes (sin número de expediente, cada aviso es uno).
+SQL_EMPRESAS_SUMAR = """
+    DROP TABLE IF EXISTS temp.exp_viejos;
+    CREATE TEMP TABLE exp_viejos AS
+        SELECT rowid AS rid, empresa_id, organo, expediente, rol FROM empresas_expedientes
+        WHERE empresa_id IN (SELECT DISTINCT empresa_id FROM temp.eh);
+    CREATE INDEX temp.idx_exp_viejos ON exp_viejos (empresa_id, expediente, organo, rol);
+    UPDATE empresas SET
+        avisos = avisos + a.n, como_actora = como_actora + a.act, como_demandada = como_demandada + a.dem,
+        expedientes = COALESCE(expedientes, 0) + a.exps,
+        primer_boletin = CASE WHEN primer_boletin IS NULL OR a.primero < primer_boletin THEN a.primero ELSE primer_boletin END,
+        ultimo_boletin = CASE WHEN ultimo_boletin IS NULL OR a.ultimo > ultimo_boletin THEN a.ultimo ELSE ultimo_boletin END
+    FROM (SELECT empresa_id, COUNT(*) AS n, SUM(rol = 'actora') AS act, SUM(rol = 'demandada') AS dem,
+                 COUNT(DISTINCT clave) FILTER (WHERE NOT EXISTS (
+                     SELECT 1 FROM temp.exp_viejos v WHERE v.empresa_id = h.empresa_id
+                     AND v.expediente = h.expediente AND v.organo IS h.organo)) AS exps,
+                 MIN(fecha) AS primero, MAX(fecha) AS ultimo
+          FROM temp.eh h GROUP BY empresa_id) AS a
+    WHERE a.empresa_id = empresas.id;
+    DROP TABLE IF EXISTS temp.exp_nuevos;
+    CREATE TEMP TABLE exp_nuevos AS
+        SELECT empresa_id, organo, expediente, rol, COUNT(*) AS avisos, MAX(fecha) AS ultima_fecha,
+               CAST(substr(MAX(fecha || printf('%012d', entrada_id)), 11) AS INTEGER) AS ultimo_id
+        FROM temp.eh GROUP BY empresa_id, organo, expediente, rol;
+    UPDATE empresas_expedientes SET
+        avisos = empresas_expedientes.avisos + n.avisos,
+        -- SQLite evalúa todo el SET con los valores previos de la fila.
+        ultima_fecha = CASE WHEN n.ultima_fecha || printf('%012d', n.ultimo_id)
+            > empresas_expedientes.ultima_fecha || printf('%012d', empresas_expedientes.ultimo_id)
+            THEN n.ultima_fecha ELSE empresas_expedientes.ultima_fecha END,
+        ultimo_id = CASE WHEN n.ultima_fecha || printf('%012d', n.ultimo_id)
+            > empresas_expedientes.ultima_fecha || printf('%012d', empresas_expedientes.ultimo_id)
+            THEN n.ultimo_id ELSE empresas_expedientes.ultimo_id END
+    FROM temp.exp_nuevos n JOIN temp.exp_viejos v
+        ON v.empresa_id = n.empresa_id AND v.expediente IS n.expediente AND v.organo IS n.organo AND v.rol = n.rol
+    WHERE empresas_expedientes.rowid = v.rid;
+    INSERT INTO empresas_expedientes
+        SELECT n.* FROM temp.exp_nuevos n
+        WHERE NOT EXISTS (SELECT 1 FROM temp.exp_viejos v WHERE v.empresa_id = n.empresa_id
+                          AND v.expediente IS n.expediente AND v.organo IS n.organo AND v.rol = n.rol);
+    DROP TABLE temp.exp_nuevos;
+    DROP TABLE temp.exp_viejos;
+"""
+
+
 def empresas_incremental(conn, log):
-    """Rehace solo las empresas que aparecen en los avisos nuevos (y las que
-    con ellos llegan al mínimo)."""
+    """Las empresas que aparecen en los avisos nuevos: a las que ya estaban
+    se les suma lo nuevo, las que con ellos llegan al mínimo se arman con
+    todos sus avisos."""
     conn.executescript(f"""
         DROP TABLE IF EXISTS temp.afectadas;
         CREATE TEMP TABLE afectadas AS SELECT DISTINCT nucleo FROM st.partes_carga WHERE tipo = {TIPO_EMPRESA};
+        DROP TABLE IF EXISTS temp.nuevas;
+        CREATE TEMP TABLE nuevas (id INTEGER PRIMARY KEY);
     """)
     filtro = "AND n.nucleo IN (SELECT nucleo FROM temp.afectadas)"
-    nuevas = 0
-    for nucleo, nombre, n, act, dem in _por_nucleo(_variantes(conn, "main", TIPO_EMPRESA, filtro)):
+    renombradas = 0
+    for nucleo, nombre, n, act, dem in list(_por_nucleo(_variantes(conn, "main", TIPO_EMPRESA, filtro))):
         if n < MIN_AVISOS_EMPRESA:
             continue
-        if conn.execute("SELECT 1 FROM empresas WHERE nucleo = ?", (nucleo,)).fetchone():
-            conn.execute("UPDATE empresas SET nombre = ?, avisos = ?, como_actora = ?, como_demandada = ? "
-                         "WHERE nucleo = ?", (nombre, n, act, dem, nucleo))
+        previa = conn.execute("SELECT id, nombre FROM empresas WHERE nucleo = ?", (nucleo,)).fetchone()
+        if previa:
+            if previa[1] != nombre:
+                conn.execute("UPDATE empresas SET nombre = ? WHERE id = ?", (nombre, previa[0]))
+                renombradas += 1
         else:
-            conn.execute("INSERT INTO empresas (nucleo, nombre, slug, avisos, como_actora, como_demandada) "
-                         "VALUES (?, ?, ?, ?, ?, ?)",
-                         (nucleo, nombre, _slug_libre(conn, "empresas", slug_empresa(nucleo)), n, act, dem))
-            nuevas += 1
+            cur = conn.execute("INSERT INTO empresas (nucleo, nombre, slug, avisos, como_actora, como_demandada) "
+                               "VALUES (?, ?, ?, ?, ?, ?)",
+                               (nucleo, nombre, _slug_libre(conn, "empresas", slug_empresa(nucleo)), n, act, dem))
+            conn.execute("INSERT INTO temp.nuevas VALUES (?)", (cur.lastrowid,))
+    # Las nuevas, con todos sus avisos.
     conn.executescript(f"""
-        DROP TABLE IF EXISTS temp.ids;
-        CREATE TEMP TABLE ids AS
-            SELECT id FROM empresas WHERE nucleo IN (SELECT nucleo FROM temp.afectadas);
-        DELETE FROM entradas_empresas WHERE empresa_id IN (SELECT id FROM temp.ids);
         INSERT INTO entradas_empresas
             SELECT e.id, pa.entrada_id, CASE pa.rol WHEN 1 THEN 'actora' ELSE 'demandada' END
             FROM partes_nombres n
             JOIN partes_avisos pa ON pa.nombre_id = n.id
             JOIN empresas e ON e.nucleo = n.nucleo
-            WHERE n.tipo = {TIPO_EMPRESA} AND n.nucleo IN (SELECT nucleo FROM temp.afectadas)
+            WHERE n.tipo = {TIPO_EMPRESA} AND e.id IN (SELECT id FROM temp.nuevas)
             GROUP BY 1, 2, 3;
-        DELETE FROM empresas_tipos WHERE empresa_id IN (SELECT id FROM temp.ids);
-        DELETE FROM empresas_anios WHERE empresa_id IN (SELECT id FROM temp.ids);
-        DELETE FROM empresas_meses WHERE empresa_id IN (SELECT id FROM temp.ids);
-        DELETE FROM empresas_expedientes WHERE empresa_id IN (SELECT id FROM temp.ids);
-        DELETE FROM tipo_empresa WHERE empresa_id IN (SELECT id FROM temp.ids);
     """)
-    _empresas_hechos(conn, "WHERE ee.empresa_id IN (SELECT id FROM temp.ids)")
+    _empresas_hechos(conn, "WHERE ee.empresa_id IN (SELECT id FROM temp.nuevas)")
     conn.executescript(SQL_EMPRESAS_AGREGADOS)
-    n_afectadas = conn.execute("SELECT COUNT(*) FROM temp.ids").fetchone()[0]
+    # Las que ya estaban: solo los avisos nuevos.
+    conn.executescript(f"""
+        DROP TABLE IF EXISTS temp.ee_nuevo;
+        CREATE TEMP TABLE ee_nuevo AS
+            SELECT DISTINCT e.id AS empresa_id, c.entrada_id,
+                   CASE c.rol WHEN 1 THEN 'actora' ELSE 'demandada' END AS rol
+            FROM st.partes_carga c JOIN empresas e ON e.nucleo = c.nucleo
+            WHERE c.tipo = {TIPO_EMPRESA} AND e.id NOT IN (SELECT id FROM temp.nuevas)
+            ORDER BY c.entrada_id;
+        INSERT INTO entradas_empresas SELECT empresa_id, entrada_id, rol FROM temp.ee_nuevo;
+    """)
+    _empresas_hechos(conn, fuente="temp.ee_nuevo")
+    conn.executescript(SQL_EMPRESAS_SUMAR)
+    for tabla, clave, consulta in (
+            ("empresas_tipos", ["empresa_id", "tipo"],
+             "SELECT empresa_id, COALESCE(tipo, 'Sin tipo reconocido') AS tipo, COUNT(*) AS n FROM temp.eh GROUP BY 1, 2"),
+            ("empresas_anios", ["empresa_id", "anio"],
+             "SELECT empresa_id, substr(fecha, 1, 4) AS anio, COUNT(*) AS n FROM temp.eh GROUP BY 1, 2"),
+            ("empresas_meses", ["empresa_id", "mes"],
+             "SELECT empresa_id, substr(fecha, 1, 7) AS mes, COUNT(*) AS n FROM temp.eh GROUP BY 1, 2"),
+            ("tipo_empresa", ["tipo", "empresa_id", "rol"],
+             "SELECT tipo, empresa_id, rol, COUNT(*) AS avisos FROM temp.eh WHERE tipo IS NOT NULL GROUP BY 1, 2, 3")):
+        _sumar(conn, tabla, clave, ["avisos" if tabla == "tipo_empresa" else "n"], consulta)
+    sumadas = conn.execute("SELECT COUNT(DISTINCT empresa_id) FROM temp.eh").fetchone()[0]
+    nuevas = conn.execute("SELECT COUNT(*) FROM temp.nuevas").fetchone()[0]
     conn.executescript("""
         INSERT INTO empresas_fts(empresas_fts) VALUES('rebuild');
-        DROP TABLE temp.ids;
+        DROP TABLE temp.eh;
+        DROP TABLE temp.ee_nuevo;
+        DROP TABLE temp.nuevas;
         DROP TABLE temp.afectadas;
     """)
-    log(f"  empresas: {n_afectadas} rehechas, {nuevas} nuevas")
+    log(f"  empresas: {sumadas} sumadas, {nuevas} nuevas, {renombradas} con otro nombre visible")
 
-
-# ── Personas ──────────────────────────────────────────────────────────────
 
 def _personas_variantes(conn, fuente, filtro=""):
     """Por variante de nombre de persona: avisos distintos, como actora,
@@ -415,16 +485,22 @@ SQL_ESTADISTICAS_INDICES = """
 
 def _sumar(conn, tabla, claves, valores, consulta):
     """Suma a `tabla` los conteos de `consulta` (claves + valores); crea las
-    filas que falten. Las claves pueden ser NULL (se comparan con IS)."""
-    conn.execute("DROP TABLE IF EXISTS temp.suma")
+    filas que falten. Las claves pueden ser NULL (se comparan con IS).
+    Una sola pasada por `tabla` buscando en lo nuevo (indexado): con el
+    índice de la tabla, si no cubre todas las claves (tipo_empresa), cada
+    fila nueva recorría miles."""
+    conn.executescript("DROP TABLE IF EXISTS temp.suma; DROP TABLE IF EXISTS temp.pares;")
     conn.execute(f"CREATE TEMP TABLE suma AS {consulta}")
-    igual = " AND ".join(f"{tabla}.{c} IS temp.suma.{c}" for c in claves)
-    conn.execute(f"""UPDATE {tabla} SET {", ".join(f"{v} = {tabla}.{v} + temp.suma.{v}" for v in valores)}
-                     FROM temp.suma WHERE {igual}""")
+    conn.execute(f"CREATE INDEX temp.idx_suma ON suma ({', '.join(claves)})")
+    igual = " AND ".join(f"t.{c} IS s.{c}" for c in claves)
+    conn.execute(f"""CREATE TEMP TABLE pares AS SELECT t.rowid AS rid, s.rowid AS sid
+                     FROM {tabla} t CROSS JOIN temp.suma s WHERE {igual}""")
+    conn.execute(f"""UPDATE {tabla} SET {", ".join(f"{v} = {tabla}.{v} + s.{v}" for v in valores)}
+                     FROM temp.pares p JOIN temp.suma s ON s.rowid = p.sid WHERE {tabla}.rowid = p.rid""")
     conn.execute(f"""INSERT INTO {tabla} ({", ".join(claves + valores)})
                      SELECT {", ".join(claves + valores)} FROM temp.suma
-                     WHERE NOT EXISTS (SELECT 1 FROM {tabla} WHERE {igual})""")
-    conn.execute("DROP TABLE temp.suma")
+                     WHERE rowid NOT IN (SELECT sid FROM temp.pares)""")
+    conn.executescript("DROP TABLE temp.suma; DROP TABLE temp.pares;")
 
 
 def estadisticas_incremental(conn, log, max_id_antes):

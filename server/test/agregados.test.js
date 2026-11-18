@@ -22,7 +22,7 @@ const agregados = fs.readFileSync(path.join(__dirname, '..', '..', 'scraper', 'a
 const tablas = agregados.match(/SQL_EMPRESAS_TABLAS = """([\s\S]*?)"""/)[1]
   .split(';').filter(t => /CREATE TABLE (empresas_\w+|tipo_empresa)/.test(t))
   .map(t => t.replace('CREATE TABLE', 'CREATE TABLE IF NOT EXISTS')).join(';\n');
-const hechos = agregados.match(/(CREATE TEMP TABLE eh AS[\s\S]*?)\{donde\}/)[1];
+const hechos = agregados.match(/(CREATE TEMP TABLE eh AS[\s\S]*?)\{donde\}/)[1].replace('{fuente}', 'entradas_empresas');
 const sql = `DROP TABLE IF EXISTS empresas_tipos; DROP TABLE IF EXISTS empresas_anios;
   DROP TABLE IF EXISTS empresas_meses; DROP TABLE IF EXISTS empresas_expedientes; DROP TABLE IF EXISTS tipo_empresa;
   ${tablas};\n${hechos};\n${agregados.match(/SQL_EMPRESAS_AGREGADOS = """([\s\S]*?)"""/)[1]}`;
