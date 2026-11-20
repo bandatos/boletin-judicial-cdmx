@@ -188,11 +188,13 @@ test('num() formatea con separador de miles (es-MX)', () => {
   assert.equal(pugLocals.num(500), '500');
 });
 
-test('la ficha ofrece ver los avisos tal como salieron, con link al texto plano', async () => {
+test('la ficha ofrece ver los avisos tal como salieron, sin enlaces al texto plano', async () => {
   const { body } = await get('/expediente/2');
   assert.match(body, /class="avisos-textos"/);
   assert.match(body, /<li data-aviso="\d+">/);
-  assert.match(body, /href="\/api\/aviso\/\d+"/);
+  assert.doesNotMatch(body, /href="\/api\/aviso\//);
+  // El texto plano ya no se sirve: no lee el boletín.
+  assert.equal((await get('/api/aviso/2')).status, 404);
 });
 
 test('GET /api/aviso/:id devuelve el texto del aviso leído de disco', async () => {

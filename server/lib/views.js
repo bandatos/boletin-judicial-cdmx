@@ -513,6 +513,16 @@ function avisosExpediente(req, params) {
 // ficha lo pide al desplegar cada aviso (?json=1). Sin JS, el link lleva a
 // la versión en texto plano.
 function apiAviso(req, params) {
+  // Solo para la ficha (?json=1). La versión en texto plano ya no se enlaza
+  // y la pedían en masa programas que siguen enlaces: se responde sin leer
+  // el boletín.
+  if (!req.query.json) {
+    return {
+      status: 404,
+      headers: { 'Content-Type': 'text/plain; charset=utf-8', 'X-Robots-Tag': 'noindex' },
+      html: 'El texto de este aviso se ve en la ficha del expediente.',
+    };
+  }
   const id = parseInt(params.id, 10);
   const a = Number.isInteger(id) ? db.getAviso(id) : null;
   const texto = a

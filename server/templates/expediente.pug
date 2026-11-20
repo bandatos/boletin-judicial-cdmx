@@ -140,8 +140,10 @@ include mixins.pug
             li(data-aviso=a.id)
               strong= a.fecha_iso ? fechaCorta(a.fecha_iso) : (a.fecha || '—')
               = ' '
-              span.aviso-texto-cuerpo
-                a(href=`/api/aviso/${a.id}` title="Texto del aviso tal como salió en el boletín") Ver texto
+              //- Sin enlace: los programas que siguen enlaces pedían el texto
+              //- de cada aviso (un boletín de varios MB por pedido). Se carga
+              //- solo al desplegar, con JS.
+              span.aviso-texto-cuerpo Se muestra al abrir esta sección. También está en el PDF del boletín de esa fecha.
         if expediente.avisos.length > 60
           p.nota Se muestran los 60 más recientes. Los anteriores se pueden ver en el boletín de cada fecha.
 
