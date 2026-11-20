@@ -22,6 +22,7 @@ const usarCache = process.env.NODE_ENV === 'production';
 function desdeCache(clave) {
   if (generacionCache !== db.getGeneracion()) {
     cacheHtml.clear();
+    bytesCache = 0;
     generacionCache = db.getGeneracion();
   }
   const r = cacheHtml.get(clave);
@@ -29,9 +30,23 @@ function desdeCache(clave) {
   return r;
 }
 
+// Además del tope de páginas, un tope de tamaño: unas pocas fichas enormes
+// no pueden llenar la memoria.
+const CACHE_HTML_BYTES = (Number(process.env.CACHE_HTML_MB) || 200) * 1024 * 1024;
+let bytesCache = 0;
+const tamano = r => (r.html ? r.html.length * 2 : 0);
+
 function aCache(clave, r) {
+  if (tamano(r) > CACHE_HTML_BYTES / 10) return;
+  const previo = cacheHtml.get(clave);
+  if (previo) { bytesCache -= tamano(previo); cacheHtml.delete(clave); }
   cacheHtml.set(clave, r);
-  if (cacheHtml.size > CACHE_HTML_MAX) cacheHtml.delete(cacheHtml.keys().next().value);
+  bytesCache += tamano(r);
+  while (cacheHtml.size > CACHE_HTML_MAX || bytesCache > CACHE_HTML_BYTES) {
+    const [k, v] = cacheHtml.entries().next().value;
+    cacheHtml.delete(k);
+    bytesCache -= tamano(v);
+  }
 }
 
 // HTML: el navegador lo guarda pero revalida cada vez con el ETag (304 sin

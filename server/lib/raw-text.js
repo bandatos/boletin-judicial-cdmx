@@ -76,7 +76,19 @@ function marcaDe(aviso) {
   return null;
 }
 
-function findExcerpt(fullText, { actora, expediente, marca }) {
+// Copia plana de un pedazo del texto. Un slice de V8 apunta al texto
+// completo del boletín (varios MB): guardado en la caché del router, cada
+// aviso retenía su boletín entero y el server se quedaba sin memoria (300
+// avisos, 1,6 GB). Con la copia, el boletín se libera.
+function copiar(s) {
+  return s == null ? s : Buffer.from(s, 'utf8').toString('utf8');
+}
+
+function findExcerpt(fullText, opciones) {
+  return copiar(buscarExcerpt(fullText, opciones));
+}
+
+function buscarExcerpt(fullText, { actora, expediente, marca }) {
   if (!fullText || !actora) return null;
   const joined = fullText.replace(/\s+/g, ' ');
   const numero = ((expediente || '').match(/\d+[/-]\d{4}(?:[/-]\d{1,3})?/) || [])[0];
